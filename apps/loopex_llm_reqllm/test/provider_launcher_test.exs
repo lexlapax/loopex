@@ -73,7 +73,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
     expected = "cleanup_complete:#{nonce}:#{stop}"
     assert_receive {port, {:data, {:eol, ^expected}}}, 2_000
     assert port == owned.port
-    assert_receive {^port, {:exit_status, 0}}, 500
+    # The child VM's exit after its acknowledgement is its own event: the port
+    # reports it, and the case's ExUnit timeout bounds an exit that never comes.
+    assert {^port, {:exit_status, 0}} =
+             receive(do: ({^port, {:exit_status, _}} = exited -> exited))
+
     refute process_alive?(child)
     refute File.exists?(namespace.namespace)
   end

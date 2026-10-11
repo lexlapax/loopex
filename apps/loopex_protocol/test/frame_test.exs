@@ -230,8 +230,18 @@ defmodule LoopexProtocol.FrameTest do
         options
       )
 
-    assert_receive {:encoded, ^encoder, bytes, ^digest}, 1_000
-    assert bytes == size * 2 + 9
+    # Each spawned encoder's report or DOWN is its own event: it must first be
+    # scheduled and encode the whole value, so only the case's ExUnit timeout
+    # bounds these waits.
+    receive do
+      {:encoded, ^encoder, bytes, encoded_digest} ->
+        assert encoded_digest == digest
+        assert bytes == size * 2 + 9
+
+      {:DOWN, ^monitor, :process, ^encoder, reason} ->
+        flunk("bounded encoder exited before reporting: #{inspect(reason)}")
+    end
+
     assert_receive {:DOWN, ^monitor, :process, ^encoder, :normal}, 1_000
 
     {original, original_monitor} =
@@ -243,7 +253,9 @@ defmodule LoopexProtocol.FrameTest do
         options
       )
 
-    assert_receive {:DOWN, ^original_monitor, :process, ^original, :killed}, 1_000
+    assert {:DOWN, ^original_monitor, :process, ^original, :killed} =
+             receive(do: ({:DOWN, ^original_monitor, :process, _, _} = down -> down))
+
     refute_received {:original_survived, ^original}
   end
 

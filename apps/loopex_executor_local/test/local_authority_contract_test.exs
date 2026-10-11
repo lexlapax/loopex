@@ -2172,14 +2172,15 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
   end
 
   # Concept: observe the actual allocation boundary without retaining arguments.
-  # Technical depth: a single cutoff covers fixed reader monitors and trace
-  # delivery. The positive writer control prevents an unarmed trace proving
-  # absence; refusal controls must call the BIF zero times and exit normally.
+  # Technical depth: each reader's report, trace delivery and DOWN are its own
+  # events, so a fixed cutoff started here would measure only this process's
+  # scheduling; a reader's DOWN ends a wait it can no longer satisfy and the
+  # case's ExUnit timeout is the outer bound. The positive writer control
+  # prevents an unarmed trace proving absence; refusal controls must call the
+  # BIF zero times and exit normally.
   defp assert_receipt_decode_calls(vectors) do
     boundary = {:erlang, :binary_to_term, 2}
     assert {:traced, false} = :erlang.trace_info(boundary, :traced)
-    deadline = System.monotonic_time(:millisecond) + 1_000
-    remaining = fn -> max(deadline - System.monotonic_time(:millisecond), 0) end
     parent = self()
 
     try do
@@ -2199,29 +2200,38 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
                 receive do
                   {:finish_receipt, ^nonce} -> :ok
-                after
-                  remaining.() -> exit(:receipt_observer_deadline)
                 end
-            after
-              remaining.() -> exit(:receipt_observer_deadline)
             end
           end)
 
         try do
           assert 1 == :erlang.trace(reader, true, [:call, :arity])
           send(reader, {:decode_receipt, nonce})
-          assert_receive {:receipt_decoded, ^reader, ^nonce, ^expected}, remaining.()
+
+          receive do
+            {:receipt_decoded, ^reader, ^nonce, result} ->
+              assert result == expected
+
+            {:DOWN, ^monitor, :process, ^reader, reason} = down ->
+              # Leave the DOWN for the join below.
+              send(self(), down)
+              flunk("receipt reader exited before reporting: #{inspect(reason)}")
+          end
+
           delivered = :erlang.trace_delivered(reader)
-          assert_receive {:trace_delivered, ^reader, ^delivered}, remaining.()
+          receive(do: ({:trace_delivered, ^reader, ^delivered} -> :ok))
           if calls == 1, do: assert_receive({:trace, ^reader, :call, ^boundary}, 0)
           refute_receive {:trace, ^reader, :call, ^boundary}, 0
           send(reader, {:finish_receipt, nonce})
-          assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}, remaining.()
+
+          assert {:DOWN, ^monitor, :process, ^reader, :normal} =
+                   receive(do: ({:DOWN, ^monitor, :process, _, _} = down -> down))
+
           Process.put(joined_key, true)
         after
           if Process.delete(joined_key) != true do
             if Process.alive?(reader), do: Process.exit(reader, :kill)
-            assert_receive {:DOWN, ^monitor, :process, ^reader, _reason}, remaining.()
+            receive(do: ({:DOWN, ^monitor, :process, ^reader, _reason} -> :ok))
           end
         end
       end

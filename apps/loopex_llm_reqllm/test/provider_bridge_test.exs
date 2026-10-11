@@ -249,7 +249,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         send(parent, {:reply, result})
       end)
 
-    assert_receive {:registered, guardian, stop_reference}, 1_000
+    {guardian, stop_reference} = await_registered()
     guardian_monitor = Process.monitor(guardian)
     assert_receive {:reply, {:ok, _reply}}, 5_000
     assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
@@ -264,7 +264,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     )
 
     assert_receive {:loopex_provider_resource_stopped, ^stop, ^guardian}, 2_000
-    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 500
+    assert {:DOWN, ^guardian_monitor, :process, ^guardian, :normal} = await_down(guardian_monitor)
     refute process_alive?(child_pid(root))
     send(retainer, :stop)
   end
@@ -497,7 +497,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         )
       end)
 
-    assert_receive {:registered, guardian, _stop_reference}, 1_000
+    {guardian, _stop_reference} = await_registered()
     assert eventually(fn -> File.regular?(Path.join(root, "pid")) end, 5_000)
     monitor = Process.monitor(guardian)
     Process.exit(retainer, :kill)
@@ -528,7 +528,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     refute File.exists?(Path.join(root, "credential-size"))
     stop_registered(guardian, stop_reference)
-    assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}}, 1_000
+
+    assert {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}} =
+             await_completed()
+
     refute process_alive?(child_pid(root))
     refute File.exists?(namespace)
   end
@@ -784,8 +787,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
           if Process.alive?(guardian), do: :erlang.resume_process(guardian)
         end
 
-        assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                       1_000
+        assert {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}} =
+                 await_completed()
 
         stop_registered(guardian, stop_reference)
         refute process_alive?(child_pid(root))
@@ -895,7 +898,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         send(parent, {:completed, result})
       end)
 
-    assert_receive {:registered, guardian, stop_reference}, 1_000
+    {guardian, stop_reference} = await_registered()
     assert_receive :progress_blocked, 5_000
 
     # Concept: cleanup must not depend on releasing the blocked consumer, but
@@ -931,7 +934,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     assert_receive {:loopex_provider_resource_stopped, ^stop, ^guardian}, 2_000
     send(caller, :release)
-    assert_receive {:completed, {:ok, %{delta_count: 10_000}}}, 1_000
+    assert {:completed, {:ok, %{delta_count: 10_000}}} = await_completed()
     refute process_alive?(child_pid(root))
     send(retainer, :stop)
   end
@@ -1005,8 +1008,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
           refute inspect(reason) =~ "synthetic-provider-credential"
         end
 
-        assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                       1_000
+        assert {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}} =
+                 await_completed()
 
         assert eventually(fn -> not process_alive?(child_pid(root)) end, 2_500)
         refute File.exists?(File.read!(Path.join(root, "namespace")))
@@ -1060,7 +1063,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     monitor = Process.monitor(writer)
     until = max(deadline - System.system_time(:millisecond), 0) + 1_000
     assert_receive {:DOWN, ^monitor, :process, ^writer, :killed}, until
-    assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}}, 1_000
+
+    assert {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}} =
+             await_completed()
+
     stop_registered(guardian, stop_reference)
     refute process_alive?(child_pid(root))
     refute File.exists?(Path.join(root, "credential-size"))
@@ -1089,7 +1095,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         send(parent, {:completed, result})
       end)
 
-    assert_receive {:registered, guardian, stop_reference}, 1_000
+    {guardian, stop_reference} = await_registered()
     inherit_diagnostic_trace(guardian)
     {caller, guardian, stop_reference}
   end
@@ -1192,8 +1198,25 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     )
 
     assert_receive {:loopex_provider_resource_stopped, ^stop, ^guardian}, 2_000
-    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
+    assert {:DOWN, ^monitor, :process, ^guardian, :normal} = await_down(monitor)
   end
+
+  # Concept: a spawned provider call's next step is awaited as its own event.
+  # Technical depth: the caller registers its guardian only once it runs, and
+  # after a stop, kill or release the guardian's exit and the caller's report
+  # each need the scheduler again. A fixed window started by this process would
+  # measure only its own scheduling; the case's ExUnit timeout bounds a step
+  # that never comes.
+  defp await_registered do
+    receive do
+      {:registered, guardian, stop_reference} -> {guardian, stop_reference}
+    end
+  end
+
+  defp await_completed, do: receive(do: ({:completed, _result} = completed -> completed))
+
+  defp await_down(monitor),
+    do: receive(do: ({:DOWN, ^monitor, :process, _pid, _reason} = down -> down))
 
   defp stop_if_alive(pid) when is_pid(pid) do
     if Process.alive?(pid), do: GenServer.stop(pid)

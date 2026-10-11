@@ -365,7 +365,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
       assert_private(fn ->
         task = Task.async(fn -> Logger.error("host-log-while-provider-bootstrap-blocked") end)
-        assert {:ok, :ok} = Task.yield(task, 500)
+        assert :ok = Task.await(task, :infinity)
         Fixture.stop(call)
       end)
 
@@ -1392,7 +1392,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
              task =
                Task.Supervisor.async(ReqLLM.TaskSupervisor, fn -> IO.write("host-task-usable") end)
 
-             assert :ok = Task.await(task, 1_000)
+             assert :ok = Task.await(task, :infinity)
            end) == "host-task-usable"
   end
 

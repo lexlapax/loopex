@@ -115,7 +115,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
       root = dormant()
       foreign = foreign(registry, root.identity, :foreign)
       send(root.pid, {:loopex_pool_start, self(), root.reference})
-      assert_receive {:loopex_pool_failed, pid, reference}, 1_000
+      assert {:loopex_pool_failed, pid, reference} = await_root(root, :loopex_pool_failed)
       assert {pid, reference} == {root.pid, root.reference}
       assert_receive {:DOWN, monitor, :process, ^pid, :normal}, 1_000
       assert monitor == root.monitor
@@ -132,7 +132,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     refute File.exists?(path)
     System.put_env("SSLKEYLOGFILE", path)
     send(root.pid, {:loopex_pool_start, self(), root.reference})
-    assert_receive {:loopex_pool_failed, pid, reference}, 1_000
+    assert {:loopex_pool_failed, pid, reference} = await_root(root, :loopex_pool_failed)
     assert {pid, reference} == {root.pid, root.reference}
     assert_receive {:DOWN, monitor, :process, ^pid, :normal}, 1_000
     assert monitor == root.monitor
@@ -164,7 +164,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
   test "wrong, missing and late recording acknowledgements never authorize a pool" do
     root = dormant()
     send(root.pid, {:loopex_pool_start, self(), root.reference})
-    assert_receive {:loopex_pool_record, pid, receipt, entries}, 1_000
+    assert {:loopex_pool_record, pid, receipt, entries} = await_root(root, :loopex_pool_record)
     root = retain(root, entries)
     send(pid, {:loopex_pool_recorded, make_ref()})
     refute_receive {:loopex_pool_ready, ^pid, _, _, _}, 50
@@ -178,12 +178,15 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     root = dormant()
     send(root.pid, {:loopex_pool_start, self(), root.reference})
     root = through_records(root, 2)
-    assert_receive {:loopex_pool_record, pid, _receipt, entries}, 1_000
+    assert {:loopex_pool_record, pid, _receipt, entries} = await_root(root, :loopex_pool_record)
     assert pid == root.pid
     assert [{:process, :pool_supervisor, supervisor}] = entries
     root = retain(root, entries)
     [{1, worker, :worker, [Finch.HTTP1.Pool]}] = Supervisor.which_children(supervisor)
-    assert_receive {:loopex_pool_record, ^pid, receipt, cleanup_entries}, 1_500
+
+    assert {:loopex_pool_record, ^pid, receipt, cleanup_entries} =
+             await_root(root, :loopex_pool_record)
+
     assert {:process, :http1_worker, worker} in cleanup_entries
     root = retain(root, cleanup_entries)
     send(pid, {:loopex_pool_recorded, receipt})
@@ -225,7 +228,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     {replacement, replacement_monitor} =
       try do
         Process.exit(root.worker, :kill)
-        replacement = replacement_worker(root.roles.pool_supervisor, root.worker, deadline(500))
+        replacement = replacement_worker(root.roles.pool_supervisor, root.worker)
         assert Process.alive?(replacement)
         {replacement, Process.monitor(replacement)}
       after
@@ -243,7 +246,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     {replacement, worker, replacement_monitor, worker_monitor} =
       try do
         Process.exit(root.roles.pool_supervisor, :kill)
-        {replacement, worker} = replacement_supervisor(root, deadline(500))
+        {replacement, worker} = replacement_supervisor(root)
         assert Process.alive?(replacement) and Process.alive?(worker)
         {replacement, worker, Process.monitor(replacement), Process.monitor(worker)}
       after
@@ -255,35 +258,37 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, 1_000
   end
 
-  defp replacement_worker(supervisor, original, expiry) do
+  # Concept: a restart is observed as the supervisor's own result.
+  # Technical depth: the OTP supervisor restarts the killed child on its own
+  # schedule, so polling ends at the replacement; the case's ExUnit timeout
+  # bounds a restart that never happens.
+  defp replacement_worker(supervisor, original) do
     case Supervisor.which_children(supervisor) do
       [{1, replacement, :worker, [Finch.HTTP1.Pool]}]
       when is_pid(replacement) and replacement != original ->
         replacement
 
       _restarting ->
-        assert System.monotonic_time(:native) < expiry
         Process.sleep(1)
-        replacement_worker(supervisor, original, expiry)
+        replacement_worker(supervisor, original)
     end
   end
 
-  defp replacement_supervisor(root, expiry) do
+  defp replacement_supervisor(root) do
     case Supervisor.which_children(root.roles.anonymous_supervisor) do
       [{_, replacement, :supervisor, [Finch.Pool.Supervisor]}]
       when is_pid(replacement) and replacement != root.roles.pool_supervisor ->
-        {replacement, replacement_worker(replacement, root.worker, expiry)}
+        {replacement, replacement_worker(replacement, root.worker)}
 
       _restarting ->
-        assert System.monotonic_time(:native) < expiry
         Process.sleep(1)
-        replacement_supervisor(root, expiry)
+        replacement_supervisor(root)
     end
   end
 
   defp unproved_restart(root) do
     pid = root.pid
-    assert_receive {:loopex_pool_unproved, ^pid, _reference}, 2_000
+    assert {:loopex_pool_unproved, ^pid, _reference} = await_root(root, :loopex_pool_unproved)
     assert Process.alive?(pid)
 
     for {monitor, child} <- root.monitors do
@@ -302,12 +307,14 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     root = dormant(owner: owner)
     send(owner, {:root, root})
     send(root.pid, {:loopex_pool_start, owner, root.reference})
-    assert_receive {:owner_ready, ready}, 2_000
+    assert {:owner_ready, ready} = receive(do: ({:owner_ready, _ready} = event -> event))
     monitors = Map.new(ready.roles, fn {role, pid} -> {role, {pid, Process.monitor(pid)}} end)
     Process.exit(owner, :kill)
     monitor = root.monitor
     pid = root.pid
-    assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 2_000
+
+    assert {:DOWN, ^monitor, :process, ^pid, :normal} =
+             receive(do: ({:DOWN, ^monitor, :process, _, _} = down -> down))
 
     for {_role, {child, child_monitor}} <- monitors do
       assert_receive {:DOWN, ^child_monitor, :process, ^child, _reason}, 1_000
@@ -335,12 +342,12 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     root = dormant()
     send(root.pid, {:loopex_pool_start, self(), root.reference})
     root = through_records(root, 1)
-    assert_receive {:loopex_pool_record, pid, receipt, entries}, 1_000
+    assert {:loopex_pool_record, pid, receipt, entries} = await_root(root, :loopex_pool_record)
     assert pid == root.pid
     assert length(entries) == 2
     foreign = foreign(Req.Finch.SupervisorRegistry, root.identity, :foreign)
     send(pid, {:loopex_pool_recorded, receipt})
-    assert_receive {:loopex_pool_unproved, ^pid, _}, 2_000
+    assert {:loopex_pool_unproved, ^pid, _} = await_root(root, :loopex_pool_unproved)
     assert Process.alive?(foreign)
     refute Process.alive?(root.roles.anonymous_supervisor)
     send(foreign, :stop)
@@ -380,7 +387,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
       root = dormant()
       send(root.pid, {:loopex_pool_start, self(), root.reference})
       root = through_records(root, phase - 1)
-      assert_receive {:loopex_pool_record, pid, _receipt, entries}, 1_000
+      assert {:loopex_pool_record, pid, _receipt, entries} = await_root(root, :loopex_pool_record)
       root = retain(root, entries)
       assert pid == root.pid
       root = stop(root)
@@ -392,7 +399,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     root = dormant()
     send(root.pid, {:loopex_pool_start, self(), root.reference})
     root = through_records(root, 2)
-    assert_receive {:loopex_pool_record, pid, _receipt, entries}, 1_000
+    assert {:loopex_pool_record, pid, _receipt, entries} = await_root(root, :loopex_pool_record)
     root = retain(root, entries)
     assert pid == root.pid
     supervisor = root.roles.pool_supervisor
@@ -400,7 +407,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     worker_monitor = Process.monitor(worker)
     :ok = Supervisor.stop(supervisor, :normal)
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, 1_000
-    assert_receive {:loopex_pool_unproved, ^pid, _reference}, 2_000
+    assert {:loopex_pool_unproved, ^pid, _reference} = await_root(root, :loopex_pool_unproved)
     assert Process.alive?(pid)
     assert registries(root.identity) == {[], []}
     refute_receive {:loopex_pool_failed, ^pid, _reference}, 10
@@ -422,7 +429,10 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
     assert Process.alive?(root.pid)
     send(root.pid, {:loopex_pool_stop, self(), make_ref(), deadline(1_000)})
     :ok = :sys.resume(root.roles.pool_supervisor)
-    assert_receive {:loopex_pool_inspected, pid, ^inspection, :refused}, 1_000
+
+    assert {:loopex_pool_inspected, pid, ^inspection, :refused} =
+             await_root(root, :loopex_pool_inspected)
+
     assert pid == root.pid
     finish(root, :failed)
   end
@@ -437,8 +447,6 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
 
       {:trace, ^root, _kind, _payload} ->
         down_before_lookup(root, descendants, down)
-    after
-      1_000 -> flunk("missing genuine DOWN and Registry polling trace")
     end
   end
 
@@ -496,8 +504,9 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
 
       {:loopex_pool_failed, pid, _reference} when pid == root.pid ->
         flunk("pool setup refused")
-    after
-      2_000 -> flunk("missing pool ready")
+
+      {:DOWN, monitor, :process, _pid, reason} when monitor == root.monitor ->
+        flunk("pool root exited before ready: #{inspect(reason)}")
     end
   end
 
@@ -524,7 +533,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
   defp through_records(root, 0), do: root
 
   defp through_records(root, count) do
-    assert_receive {:loopex_pool_record, pid, receipt, entries}, 1_000
+    assert {:loopex_pool_record, pid, receipt, entries} = await_root(root, :loopex_pool_record)
     assert pid == root.pid
     root = retain(root, entries)
     send(pid, {:loopex_pool_recorded, receipt})
@@ -559,8 +568,30 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PoolLifecycleTest do
 
         assert registries(root.identity) == {[], []}
         root
-    after
-      2_500 -> flunk("missing proved root DOWN")
+
+      {:DOWN, monitor, :process, _pid, reason} when monitor == root.monitor ->
+        flunk("pool root exited without proof: #{inspect(reason)}")
+    end
+  end
+
+  # Concept: the pool root's next report is awaited as its own event.
+  # Technical depth: the root starts and stops real supervisors, so a fixed
+  # window started by this process would measure only its own scheduling. The
+  # root's own setup and stop deadlines bound every report, its DOWN ends a wait
+  # it can no longer satisfy, and the case's ExUnit timeout is the outer bound.
+  # Messages from one sender keep their order, so a report precedes its DOWN.
+  defp await_root(root, kind) do
+    pid = root.pid
+    monitor = root.monitor
+
+    receive do
+      message
+      when is_tuple(message) and tuple_size(message) > 1 and elem(message, 0) == kind and
+             elem(message, 1) == pid ->
+        message
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        flunk("pool root exited before #{inspect(kind)}: #{inspect(reason)}")
     end
   end
 

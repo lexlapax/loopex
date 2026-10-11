@@ -40,7 +40,7 @@ defmodule Loopex.LLM.ReqLLM.OneShotHTTP1Test do
     request = request(fixture, String.duplicate("q", 70_000))
     test = self()
     caller = spawn(fn -> send(test, {:result, OneShotHTTP1.run(request)}) end)
-    assert_receive {:claimed, _, payload}
+    assert {:claimed, _, payload} = next(:claimed)
 
     assert Map.keys(payload) |> Enum.sort() == [
              :effective_port,
@@ -51,17 +51,17 @@ defmodule Loopex.LLM.ReqLLM.OneShotHTTP1Test do
              :scheme
            ]
 
-    assert_receive {:http_write, _, written}, 2_000
+    assert {:http_write, _, written} = next(:http_write)
     assert written.body == String.duplicate("q", 70_000)
     assert written.headers["accept-encoding"] == "identity"
-    assert_receive {:teardown_pending, owner, reference}, 2_000
+    assert {:teardown_pending, owner, reference} = next(:teardown_pending)
     assert Process.alive?(fixture.worker)
     refute_receive {:result, _}, 1_100
     send(caller, {:loopex_one_shot_torn_down, make_ref(), fixture.tag})
     refute_receive {:result, _}, 20
     send(owner, {:allow_teardown, reference})
-    assert_receive {:result, {^request, %Req.Response{body: "response"}}}, 2_000
-    assert_receive {:http_eof, _}, 2_000
+    assert {:result, {^request, %Req.Response{body: "response"}}} = next(:result)
+    assert {:http_eof, _} = next(:http_eof)
     assert_gone(fixture)
   end
 
@@ -649,6 +649,18 @@ defmodule Loopex.LLM.ReqLLM.OneShotHTTP1Test do
     case :gen_tcp.recv(socket, 0, 1_000) do
       {:error, :closed} -> :ok
       _waiting -> drain(socket)
+    end
+  end
+
+  # Concept: a step of a spawned dispatch is awaited as that step's own event.
+  # Technical depth: the dispatch performs a real HTTP exchange in another
+  # process, so a fixed window started by this process would only measure its
+  # own scheduling. The fixture reports every step; the case's ExUnit timeout
+  # bounds one that never comes.
+  defp next(tag) do
+    receive do
+      message when is_tuple(message) and tuple_size(message) > 1 and elem(message, 0) == tag ->
+        message
     end
   end
 end

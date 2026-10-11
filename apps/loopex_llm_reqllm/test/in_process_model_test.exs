@@ -286,7 +286,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     }
 
     {caller, monitor} = spawn_monitor(fn -> Caller.run(arguments) end)
-    assert_receive {:in_process_caller_ready, ^caller, ^call_ref}, 1_000
+
+    assert {:in_process_caller_ready, ^caller, ^call_ref} =
+             await_from(caller, monitor, :in_process_caller_ready)
 
     send(caller, {:in_process_caller_begin, self(), call_ref, make_ref()})
     send(caller, {:in_process_caller_input, self(), call_ref, input_ref, prepared})
@@ -294,9 +296,8 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
 
     send(caller, {:in_process_caller_begin, self(), call_ref, input_ref})
 
-    assert_receive {^caller, ^call_ref, {:error, {:not_dispatched, "model_call_failed"}},
-                    finished_at},
-                   1_000
+    assert {^caller, ^call_ref, {:error, {:not_dispatched, "model_call_failed"}}, finished_at} =
+             receive(do: ({^caller, ^call_ref, _result, _finished_at} = answer -> answer))
 
     assert is_integer(finished_at)
     assert Process.alive?(caller)
@@ -325,11 +326,16 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
         })
       end)
 
-    assert_receive {:in_process_caller_ready, ^caller, ^call_ref}, 1_000
+    assert {:in_process_caller_ready, ^caller, ^call_ref} =
+             await_from(caller, monitor, :in_process_caller_ready)
+
     send(caller, {:in_process_caller_begin, owner, call_ref, input_ref})
     refute_receive {^caller, ^call_ref, _result, _instant}, 50
     send(callback, :stop)
-    assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
+
+    assert {:DOWN, ^monitor, :process, ^caller, :normal} =
+             receive(do: ({:DOWN, ^monitor, :process, _, _} = down -> down))
+
     refute_receive {^caller, ^call_ref, _result, _instant}, 50
   end
 
@@ -492,7 +498,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
         send(test, {:callback_result, result})
       end)
 
-    assert_receive {:stage_requested, ^callback, candidate, _call, _proof, _start_ref}, 1_000
+    assert {:stage_requested, ^callback, candidate, _call, _proof, _start_ref} =
+             await_from(callback, callback_monitor, :stage_requested)
+
     candidate_monitor = Process.monitor(candidate)
     Process.exit(candidate, :kill)
     assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}, 1_000
@@ -507,14 +515,15 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
   test "candidate expiry during staging accepts the owner's clean cancellation" do
     {:ok, supervisor} = Task.Supervisor.start_link()
     on_exit(fn -> stop_fixture_supervisor(supervisor) end)
-    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    starter = watched_starter(supervisor)
     {options, cell} = stage_race_options()
     model_request = request("ollama:small", 650)
     {callback, callback_monitor} = stage_race_callback(model_request, options, starter)
 
-    assert_receive {:stage_requested, ^callback, candidate, _call, _proof, _start_ref}, 1_000
-    candidate_monitor = Process.monitor(candidate)
-    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 1_000
+    assert {:stage_requested, ^callback, candidate, _call, _proof, _start_ref} =
+             await_from(callback, callback_monitor, :stage_requested)
+
+    assert candidate_down(candidate) == :normal
     assert System.system_time(:millisecond) >= model_request.deadline
     send(callback, {:stage_result, candidate, :clean_cancel})
 
@@ -530,13 +539,14 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
   test "model expiry after staging custody cancels the inert candidate before returning" do
     {:ok, supervisor} = Task.Supervisor.start_link()
     on_exit(fn -> stop_fixture_supervisor(supervisor) end)
-    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    starter = watched_starter(supervisor)
     {options, cell} = stage_race_options()
     model_request = request("ollama:small", 650)
     {callback, callback_monitor} = stage_race_callback(model_request, options, starter)
 
-    assert_receive {:stage_requested, ^callback, candidate, call, proof, _start_ref}, 1_000
-    candidate_monitor = Process.monitor(candidate)
+    assert {:stage_requested, ^callback, candidate, call, proof, _start_ref} =
+             await_from(callback, callback_monitor, :stage_requested)
+
     send(callback, {:stage_result, candidate, :deliver_custody})
     assert_receive {:model_custody_prepared, ^candidate, _, _, ^call, ^proof}, 1_000
 
@@ -550,7 +560,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
                    1_000
 
     assert is_reference(cancel_monitor)
-    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}, 1_000
+    assert candidate_down(candidate) == :killed
 
     assert_receive {:callback_outcome,
                     {:return, {:error, {:not_dispatched, "model_call_failed"}}}},
@@ -564,13 +574,14 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
   test "model expiry while pending acknowledgement is delayed cancels before registrar" do
     {:ok, supervisor} = Task.Supervisor.start_link()
     on_exit(fn -> stop_fixture_supervisor(supervisor) end)
-    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    starter = watched_starter(supervisor)
     {options, cell} = stage_race_options()
     model_request = request("ollama:small", 650)
     {callback, callback_monitor} = stage_race_callback(model_request, options, starter)
 
-    assert_receive {:stage_requested, ^callback, candidate, call, proof, _start_ref}, 1_000
-    candidate_monitor = Process.monitor(candidate)
+    assert {:stage_requested, ^callback, candidate, call, proof, _start_ref} =
+             await_from(callback, callback_monitor, :stage_requested)
+
     send(callback, {:stage_result, candidate, :deliver_custody})
     assert_receive {:model_custody_prepared, ^candidate, _, _, ^call, ^proof}, 1_000
 
@@ -598,7 +609,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
                    1_000
 
     assert is_reference(cancel_monitor)
-    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}, 1_000
+    assert candidate_down(candidate) == :killed
 
     assert_receive {:callback_outcome,
                     {:return, {:error, {:not_dispatched, "model_call_failed"}}}},
@@ -616,7 +627,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     {options, cell} = stage_race_options()
     {callback, callback_monitor} = stage_race_callback(request("ollama:small"), options, starter)
 
-    assert_receive {:stage_requested, ^callback, candidate, call, proof, _start_ref}, 1_000
+    assert {:stage_requested, ^callback, candidate, call, proof, _start_ref} =
+             await_from(callback, callback_monitor, :stage_requested)
+
     candidate_monitor = Process.monitor(candidate)
     send(callback, {:stage_result, candidate, :deliver_custody})
     assert_receive {:model_custody_prepared, ^candidate, _, _, ^call, ^proof}, 1_000
@@ -656,6 +669,45 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     {options, cell}
   end
 
+  # Concept: a candidate's exit is observed however soon its deadline ends it.
+  # Technical depth: each candidate runs behind a watcher whose monitor is in
+  # place before the candidate body starts, so the test learns the real exit
+  # reason even when the 650 ms request deadline retires the candidate before
+  # this process is scheduled; a monitor taken after `stage_requested` would
+  # then see only `:noproc`.
+  defp watched_starter(supervisor) do
+    test = self()
+
+    Starter.new(fn child ->
+      Task.Supervisor.start_child(supervisor, fn ->
+        candidate = self()
+
+        watcher =
+          spawn(fn ->
+            monitor = Process.monitor(candidate)
+            send(candidate, {:watching, self()})
+
+            receive do
+              {:DOWN, ^monitor, :process, ^candidate, reason} ->
+                send(test, {:candidate_down, candidate, reason})
+            end
+          end)
+
+        receive do
+          {:watching, ^watcher} -> :ok
+        end
+
+        child.()
+      end)
+    end)
+  end
+
+  defp candidate_down(candidate) do
+    receive do
+      {:candidate_down, ^candidate, reason} -> reason
+    end
+  end
+
   defp stage_race_callback(model_request, options, starter) do
     observer = self()
 
@@ -674,6 +726,23 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
 
       send(observer, {:callback_outcome, outcome})
     end)
+  end
+
+  # Concept: a spawned caller's or callback's first report is its own event.
+  # Technical depth: the process must first be scheduled and run the real
+  # in-process setup, so a fixed window started here would measure only this
+  # process's scheduling. Its DOWN ends a wait it can no longer satisfy, and
+  # the case's ExUnit timeout is the outer bound.
+  defp await_from(pid, monitor, tag) do
+    receive do
+      message
+      when is_tuple(message) and tuple_size(message) > 1 and elem(message, 0) == tag and
+             elem(message, 1) == pid ->
+        message
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        flunk("#{inspect(pid)} exited before #{inspect(tag)}: #{inspect(reason)}")
+    end
   end
 
   defp stop_fixture_supervisor(supervisor) do

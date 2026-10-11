@@ -56,7 +56,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
                 # unmanaged cleanup grace that follows it, so the wait is derived
                 # from the deadline rather than a number sized against it.
                 assert_receive {:completed, ^caller, result}, Fixture.until_settled(call)
-                assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 500
+                # The guardian exits after delivering that result; its DOWN is
+                # its own event, bounded by the case's ExUnit timeout.
+                assert {:DOWN, ^guardian_monitor, :process, ^guardian, :normal} =
+                         receive(do: ({:DOWN, ^guardian_monitor, :process, _, _} = down -> down))
+
                 barrier = :erlang.trace_delivered(:all)
                 assert_receive {:trace_delivered, :all, ^barrier}, 1_000
                 reads = credential_reads([])

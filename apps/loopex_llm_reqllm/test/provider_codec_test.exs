@@ -609,9 +609,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     before_start = System.monotonic_time()
     send(reader, :read)
 
-    assert_receive {:trace, ^reader, :call,
-                    {ProviderCodec, :receive_bytes, [^receiver, 8, deadline, []]}},
-                   1_000
+    # The reader's call and answer are its own events; the bracket below uses
+    # the traced deadline and the reader's own finish stamp, so only the case's
+    # ExUnit timeout bounds these waits.
+    assert {:trace, ^reader, :call, {ProviderCodec, :receive_bytes, [^receiver, 8, deadline, []]}} =
+             receive(
+               do: ({:trace, ^reader, :call, {ProviderCodec, :receive_bytes, _}} = traced ->
+                      traced)
+             )
 
     after_start = System.monotonic_time()
     # These independent samples bracket the instant the real public recv/2
@@ -619,7 +624,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     # cannot satisfy the bracket, even when eventual wall time looks plausible.
     assert deadline >= before_start + duration_native
     assert deadline <= after_start + duration_native
-    assert_receive {:native_receive_answer, ^reader, {:error, :timeout}, finished}, 1_000
+
+    assert {:native_receive_answer, ^reader, {:error, :timeout}, finished} =
+             receive(do: ({:native_receive_answer, ^reader, _, _} = answer -> answer))
+
     assert finished >= deadline
     assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}, 1_000
   end

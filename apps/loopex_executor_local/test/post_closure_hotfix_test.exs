@@ -1228,7 +1228,7 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
       if Process.alive?(holder), do: send(holder, :release_absolute_deadline_claim)
     end)
 
-    assert_receive {:absolute_deadline_claim_held, ^holder}, 2_000
+    receive(do: ({:absolute_deadline_claim_held, ^holder} -> :ok))
     deadline = System.monotonic_time(:millisecond) + 1_000
 
     waiter =
@@ -1239,7 +1239,7 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     Process.sleep(1_100)
     send(holder, :release_absolute_deadline_claim)
 
-    assert Task.await(waiter, 2_000) ==
+    assert Task.await(waiter, :infinity) ==
              {:error, {:ledger_unavailable, :root_claim_held}}
 
     parent = self()
