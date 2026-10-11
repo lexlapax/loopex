@@ -439,7 +439,7 @@ defmodule LoopexCli.ChatDriverTest do
 
       close_host_and_fixture(fixture, host, driver, expected_exit)
 
-      if @compact_display in [:failed, :lost],
+      if @compact_display == :failed or @compact_display == :lost,
         do: stop_devices([input]),
         else: stop_devices([input, output])
     end
