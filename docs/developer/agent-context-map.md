@@ -7420,3 +7420,25 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   recorded under the stress-chase cap.
 - **Profile keys.** The manifest declares the demonstrated profile keys rather
   than leaving the per-profile inventory empty.
+
+<a id="disposition-m7-long-overflow-prompts-2026-10-10"></a>
+### M7 long case overflows from fixed harness prompts, 2026-10-10
+
+- **Decision.** The maintainer chose fixed harness reference prompts for the
+  attended `m7.long` case, as `m7.oversized-source` does, with
+  `context_token_budget` 4,000 and the session's model as
+  `maintenance.model`. Three fixed reference blocks of about 1,100 estimated
+  tokens go between the explanation and the recall.
+- **Cause.** With the manifest prompts alone, no single budget both forced
+  compaction and kept the outputs run within the budget.
+- **Implementation choices.** Automatic compaction keeps the newest complete
+  exchange and must release more than its summary costs. With two blocks
+  adjacent, a near-limit summary measured `compaction_no_progress`. A
+  one-word acknowledgement therefore follows each of the first two blocks, so
+  every release exceeds the largest summary. A 1,024-token reply bound keeps
+  a long explanation from overflowing before the blocks. The arithmetic is in
+  `CaseRunner.long_overflow_prompts/0`.
+- **Ceilings.** `runs` rises from 4 to 9, and the block ceiling from
+  25,800,000 to 28,800,000 ms. `maintenance` stays 1: it counts standalone
+  steps, and automatic episodes run within their run's deadline. The campaign
+  genesis digest depends only on the campaign ID and is unchanged.

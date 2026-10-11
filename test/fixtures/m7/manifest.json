@@ -234,7 +234,7 @@
           "maintenance": 1,
           "maintenance_ms": 60000,
           "run_ms": 600000,
-          "runs": 4
+          "runs": 9
         },
         "credential": true,
         "driver": "fixture-chat",

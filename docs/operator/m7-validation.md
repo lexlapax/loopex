@@ -126,7 +126,7 @@ allowance; the block ceiling is the sum over its cases. Before the first case
 the wrapper prints, for example:
 
 ```text
-m7-fixture-chat: +0 ms block ceiling 25800000 ms for 20 cases, each with its 60000 ms setup allowance
+m7-fixture-chat: +0 ms block ceiling 28800000 ms for 20 cases, each with its 60000 ms setup allowance
 ```
 
 It then prints a `+ELAPSED ms` line as each case starts and ends. No ceiling
@@ -181,7 +181,13 @@ same host outside a lane for rehearsal; its record is not lane evidence.
 ## Compaction and thinking cases
 
 These cases need maintenance instructions, which chat now composes from the
-reference host's versioned block. `m7.oversized-source` sends a pinned,
+reference host's versioned block. `m7.long` runs V6.1's documented small
+context budget: the case pins `context_token_budget` 4,000, a 1,024-token
+reply bound and the session's model as `maintenance.model`, and between the
+explanation and the recall it sends three fixed reference blocks of about
+1,100 estimated tokens, each but the last followed by a one-word
+acknowledgement, so automatic compaction comes from that fixed text rather
+than from reply length. `m7.oversized-source` sends a pinned,
 backslash-dense ledger that fits an ordinary run. The ledger forces an
 excerpted summary source, and the case checks that the complete original
 stays in host history. `m7.thinking-rounds` runs each continuation-required

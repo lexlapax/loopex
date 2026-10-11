@@ -136,7 +136,7 @@ defmodule LoopexCli.M7ExecutionManifestTest do
         total
       end
 
-    assert Enum.sum(totals) == 25_800_000
+    assert Enum.sum(totals) == 28_800_000
     assert ExecutionManifest.case_ceiling(f.manifest, "m7.pipe-answer") == nil
 
     ceilings = ["cases", "m7.repair", "ceilings"]
