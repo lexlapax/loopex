@@ -88,11 +88,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
 
   # Concept: closing a writer that a stopping call already ended is a no-op;
   # that call released the lock before it answered.
+  # Technical depth: OTP 27's `proc_lib:stop` exits `normal` when the writer
+  # finishes exiting during the stop request; later releases return `ok`.
   @doc false
   def close(writer) do
     GenServer.stop(writer)
   catch
-    :exit, {:noproc, _} -> :ok
+    :exit, {reason, _} when reason in [:noproc, :normal] -> :ok
   end
 
   defp start(request) do
