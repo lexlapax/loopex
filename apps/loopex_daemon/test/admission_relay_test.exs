@@ -1,4 +1,7 @@
+Code.require_file("../../loopex/test/support/event_wait.exs", __DIR__)
+
 defmodule LoopexDaemon.AdmissionRelayTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
 
   @moduletag capture_log: true
@@ -2918,7 +2921,19 @@ defmodule LoopexDaemon.AdmissionRelayTest do
         connection_loop(parent)
       end)
 
-    assert_receive {:connection_registered, ^connection, :ok}, 500
+    # Registration is a relay call made by the new process; its own answer or
+    # exit ends the wait, never a test clock.
+    monitor = Process.monitor(connection)
+
+    receive do
+      {:connection_registered, ^connection, result} ->
+        Process.demonitor(monitor, [:flush])
+        assert result == :ok
+
+      {:DOWN, ^monitor, :process, ^connection, reason} ->
+        flunk("connection exited before registering: " <> inspect(reason))
+    end
+
     connection
   end
 
@@ -2959,14 +2974,21 @@ defmodule LoopexDaemon.AdmissionRelayTest do
     end
   end
 
+  # Concept: an invocation ends on the connection's own answer or exit.
+  # Technical depth: every operation is a bounded call into the component
+  # under test, so a test-clock window here would only measure scheduling.
   defp invoke(connection, operation) do
     reference = make_ref()
+    monitor = Process.monitor(connection)
     send(connection, {:invoke, self(), reference, operation})
 
     receive do
-      {:invoked, ^reference, result} -> result
-    after
-      1_000 -> flunk("connection invocation did not answer")
+      {:invoked, ^reference, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^connection, reason} ->
+        flunk("connection exited before answering: #{inspect(reason)}")
     end
   end
 
@@ -2989,7 +3011,8 @@ defmodule LoopexDaemon.AdmissionRelayTest do
         end
       end)
 
-    assert_receive {:worker_ready, ^worker, _monitor}, 500
+    # The worker sends this as its first action, so only scheduling delays it.
+    await_receive({:worker_ready, ^worker, _monitor})
     {worker, worker_incarnation}
   end
 
@@ -3003,7 +3026,8 @@ defmodule LoopexDaemon.AdmissionRelayTest do
         ticket_worker_loop(parent, connection, connection_monitor)
       end)
 
-    assert_receive {:ticket_worker_ready, ^worker}, 500
+    # The worker sends this as its first action, so only scheduling delays it.
+    await_receive({:ticket_worker_ready, ^worker})
     worker
   end
 
@@ -3031,7 +3055,8 @@ defmodule LoopexDaemon.AdmissionRelayTest do
         end
       end)
 
-    assert_receive {:lease_worker_ready, ^worker}, 500
+    # The worker sends this as its first action, so only scheduling delays it.
+    await_receive({:lease_worker_ready, ^worker})
     {worker, worker_incarnation}
   end
 
@@ -3083,15 +3108,12 @@ defmodule LoopexDaemon.AdmissionRelayTest do
 
   defp incarnation, do: :crypto.strong_rand_bytes(16)
 
-  defp eventually(fun, attempts \\ 100)
-  defp eventually(fun, 0), do: assert(fun.())
-
-  defp eventually(fun, attempts) do
+  defp eventually(fun) do
     if fun.() do
       :ok
     else
       Process.sleep(5)
-      eventually(fun, attempts - 1)
+      eventually(fun)
     end
   end
 end

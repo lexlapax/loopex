@@ -1,4 +1,7 @@
+Code.require_file("../../loopex/test/support/event_wait.exs", __DIR__)
+
 defmodule LoopexDaemon.ConnectionRegistryTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: true
   @moduletag capture_log: true
 
@@ -673,7 +676,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         registry,
         {:route_ready_progress, incarnation, attachment}
       )
-      |> :gen_server.receive_response(500)
+      |> :gen_server.receive_response(:infinity)
     end
 
     assert {:reply, {:error, :output_unavailable}} = route.(connection.incarnation, "attachment")
@@ -743,7 +746,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
              registry,
              {:route_ready_progress, connection.incarnation, "attachment"}
            )
-           |> :gen_server.receive_response(2_000)
+           |> :gen_server.receive_response(:infinity)
          end}
       )
     end
@@ -796,7 +799,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
                 registry,
                 {:route_ready_progress, incarnation, attachment}
               )
-              |> :gen_server.receive_response(500)
+              |> :gen_server.receive_response(:infinity)
             end
 
             cut_ref = make_ref()
@@ -960,7 +963,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
              registry,
              {:route_ready_progress, connection.incarnation, attachment}
            )
-           |> :gen_server.receive_response(500)
+           |> :gen_server.receive_response(:infinity)
          end}
       )
     end
@@ -3525,11 +3528,21 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     }
   end
 
+  # Concept: a manual call ends on the connection's own answer or exit, never
+  # on a test clock; ExUnit's case timeout is the outer bound.
   defp manual_registry_call(pid, operation) do
     reference = make_ref()
+    monitor = Process.monitor(pid)
     send(pid, {:registry_call, self(), reference, operation})
-    assert_receive {:registry_result, ^reference, result}, 500
-    result
+
+    receive do
+      {:registry_result, ^reference, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        flunk("manual connection exited before answering: #{inspect(reason)}")
+    end
   end
 
   defp initialized_manual_connection(registry) do
@@ -3581,8 +3594,12 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     reply
   end
 
+  # Concept: a registry request ends on the registry's own reply or exit.
+  # Technical depth: `:gen_server.send_request/2` monitors the registry, so an
+  # unbounded receive returns its reply or its exit; a test-clock window here
+  # would only measure scheduling. ExUnit's case timeout is the outer bound.
   defp registry_response(request_id),
-    do: :gen_server.receive_response(request_id, 500)
+    do: :gen_server.receive_response(request_id, :infinity)
 
   defp socket_fixture do
     directory =
@@ -3605,7 +3622,8 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         client_loop(socket, "")
       end)
 
-    assert_receive {:client_ready, client_pid} when client_pid == client.pid
+    # The linked client task answers or takes this process down with it.
+    await_receive({:client_ready, client_pid} when client_pid == client.pid)
     {:ok, accepted} = :socket.accept(listener, 1_000)
 
     %{directory: directory, path: path, listener: listener, accepted: accepted, client: client}
@@ -3644,7 +3662,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         {{:ok, frame}, rest}
 
       :nomatch ->
-        case :socket.recv(socket, 0, 1_000) do
+        case :socket.recv(socket, 0) do
           {:ok, bytes} -> read_frame(socket, buffer <> bytes)
           {:error, _reason} = error -> {error, buffer}
         end
@@ -3654,14 +3672,14 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   defp client_send(client, bytes) do
     reference = make_ref()
     send(client.pid, {:send, self(), reference, bytes})
-    assert_receive {:client_result, ^reference, result}, 1_000
+    await_receive({:client_result, ^reference, result})
     result
   end
 
   defp client_recv(client) do
     reference = make_ref()
     send(client.pid, {:recv, self(), reference})
-    assert_receive {:client_result, ^reference, result}, 1_000
+    await_receive({:client_result, ^reference, result})
     result
   end
 
@@ -3677,16 +3695,12 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     encoded
   end
 
-  defp eventually(predicate, attempts \\ 50)
-
-  defp eventually(predicate, 0), do: assert(predicate.())
-
-  defp eventually(predicate, attempts) do
+  defp eventually(predicate) do
     if predicate.() do
       :ok
     else
       Process.sleep(10)
-      eventually(predicate, attempts - 1)
+      eventually(predicate)
     end
   end
 

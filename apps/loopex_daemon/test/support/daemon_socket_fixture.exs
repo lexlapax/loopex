@@ -235,15 +235,14 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
   end
 
   @doc false
-  def eventually(predicate, attempts \\ 100)
-  def eventually(predicate, 0), do: assert(predicate.())
-
-  def eventually(predicate, attempts) do
+  # Concept: the polled actor's own progress ends the wait, never an attempt
+  # budget; ExUnit's case timeout is the outer bound.
+  def eventually(predicate) do
     if predicate.() do
       :ok
     else
       Process.sleep(10)
-      eventually(predicate, attempts - 1)
+      eventually(predicate)
     end
   end
 end

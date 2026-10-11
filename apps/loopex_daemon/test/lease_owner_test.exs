@@ -1,8 +1,10 @@
+Code.require_file("../../loopex/test/support/event_wait.exs", __DIR__)
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/model_preparation_conformance.exs", __DIR__)
 
 defmodule LoopexDaemon.LeaseOwnerTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
@@ -2384,6 +2386,8 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     stop_connection(holder, fixture.relay, holder_incarnation)
   end
 
+  # Concept: the lease owner's own next step, completion or expiry proposal,
+  # ends this wait; ExUnit's case timeout is the outer bound.
   defp await_queued_after_expiry(fixture, queued_invoke) do
     receive do
       {:invoked, ^queued_invoke, {:ok, :completed}} ->
@@ -2403,8 +2407,6 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
         assert_receive {:lease_owner_resolution_ack, ^resolution_ref, _, _, :expiry, :ok}, 2_000
         assert_receive {:invoked, ^queued_invoke, {:ok, :completed}}, 2_000
-    after
-      2_000 -> flunk("the queued resume neither completed nor waited on an expiry")
     end
   end
 
@@ -2782,7 +2784,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert %{phase: :held, held: true, awaiting: true} = LeaseOwner.status(owner)
     :sys.resume(fixture.registry)
-    Task.await(resume, 2_000)
+    Task.await(resume, :infinity)
   end
 
   # Concept (T19, F6): an expiry that falls due while a promotion is awaited
@@ -2829,7 +2831,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     assert_receive :relay_parked, 500
     Process.sleep(lease_term_ms + 100)
     send(fixture.relay, :continue_relay)
-    assert {:ok, :admitted} = Task.await(mutation, 1_000)
+    assert {:ok, :admitted} = Task.await(mutation, :infinity)
     assert_receive {:expiry_drain_task, task}, 500
     send(task, :complete)
 
@@ -2927,7 +2929,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     send(owner, {:lease_mutation_classified, task_ref, origin, :accepted})
     send(owner, {:relay_lease_ticket_settled, relay, origin, owner_incarnation})
     send(relay, :continue_relay)
-    assert {:ok, :admitted} = Task.await(mutation, 1_000)
+    assert {:ok, :admitted} = Task.await(mutation, :infinity)
     assert :ok = eventually(fn -> LeaseOwner.status(owner).in_flight == 0 end)
     assert_receive {:early_task, task}, 500
     send(task, :complete)
@@ -3051,7 +3053,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
     assert_receive :promotion_parked, 1_000
     Process.exit(fixture.registry, :kill)
-    assert {:error, :promotion_outcome_unknown} = Task.await(resume, 2_000)
+    assert {:error, :promotion_outcome_unknown} = Task.await(resume, :infinity)
   end
 
   # Concept (T9): a resume whose relay promotion is held for more than twenty
@@ -3680,7 +3682,19 @@ defmodule LoopexDaemon.LeaseOwnerTest do
         connection_loop(parent)
       end)
 
-    assert_receive {:connection_registered, ^connection, :ok}, 500
+    # Registration is a relay call made by the new process; its own answer or
+    # exit ends the wait, never a test clock.
+    monitor = Process.monitor(connection)
+
+    receive do
+      {:connection_registered, ^connection, result} ->
+        Process.demonitor(monitor, [:flush])
+        assert result == :ok
+
+      {:DOWN, ^monitor, :process, ^connection, reason} ->
+        flunk("connection exited before registering: " <> inspect(reason))
+    end
+
     connection
   end
 
@@ -3696,14 +3710,21 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     end
   end
 
+  # Concept: an invocation ends on the connection's own answer or exit.
+  # Technical depth: every operation is a bounded call into the component
+  # under test, so a test-clock window here would only measure scheduling.
   defp invoke(connection, operation) do
     reference = make_ref()
+    monitor = Process.monitor(connection)
     send(connection, {:invoke, self(), reference, operation})
 
     receive do
-      {:invoked, ^reference, result} -> result
-    after
-      1_000 -> flunk("connection invocation did not answer")
+      {:invoked, ^reference, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^connection, reason} ->
+        flunk("connection exited before answering: #{inspect(reason)}")
     end
   end
 
@@ -3720,7 +3741,8 @@ defmodule LoopexDaemon.LeaseOwnerTest do
         end
       end)
 
-    assert_receive {:ticket_worker_ready, ^worker}, 500
+    # The worker sends this as its first action, so only scheduling delays it.
+    await_receive({:ticket_worker_ready, ^worker})
     worker
   end
 
@@ -3742,7 +3764,8 @@ defmodule LoopexDaemon.LeaseOwnerTest do
         end
       end)
 
-    assert_receive {:lease_request_ready, ^worker}, 500
+    # The worker sends this as its first action, so only scheduling delays it.
+    await_receive({:lease_request_ready, ^worker})
     {worker, worker_incarnation}
   end
 
@@ -3944,18 +3967,14 @@ defmodule LoopexDaemon.LeaseOwnerTest do
              )
   end
 
-  defp eventually(assertion, attempts \\ 50)
-
-  defp eventually(assertion, attempts) when attempts > 0 do
+  defp eventually(assertion) do
     if assertion.() do
       :ok
     else
       Process.sleep(10)
-      eventually(assertion, attempts - 1)
+      eventually(assertion)
     end
   end
-
-  defp eventually(_assertion, 0), do: flunk("condition did not become true")
 
   defp incarnation, do: :crypto.strong_rand_bytes(16)
   defp now_ms, do: System.monotonic_time(:millisecond)

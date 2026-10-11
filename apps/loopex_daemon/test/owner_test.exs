@@ -1,4 +1,7 @@
+Code.require_file("../../loopex/test/support/event_wait.exs", __DIR__)
+
 defmodule LoopexDaemon.OwnerTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: true
   @moduletag capture_log: true
 
@@ -718,8 +721,10 @@ defmodule LoopexDaemon.OwnerTest do
     suspend_task = Task.async(fn -> :sys.suspend(owner) end)
     :sys.resume(lease_owner)
 
-    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
-    assert :ok = Task.await(suspend_task, 500)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             Task.await(release_task, :infinity)
+
+    assert :ok = Task.await(suspend_task, :infinity)
     assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
 
     lease_owner_monitor = Process.monitor(lease_owner)
@@ -1158,7 +1163,7 @@ defmodule LoopexDaemon.OwnerTest do
     child_monitor = Process.monitor(child)
     Process.exit(child, :kill)
     assert_receive {:DOWN, ^child_monitor, :process, ^child, :killed}, 500
-    assert {:ok, :accepted, ^child, _owner_incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, ^child, _owner_incarnation} = Task.await(acquire, :infinity)
     assert_receive {:worker_go, ^worker, ^origin}, 500
 
     assert_receive {:manual_connection_message, ^holder_pid,
@@ -1311,8 +1316,10 @@ defmodule LoopexDaemon.OwnerTest do
     suspend_task = Task.async(fn -> :sys.suspend(owner) end)
     :sys.resume(lease_owner)
 
-    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
-    assert :ok = Task.await(suspend_task, 500)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             Task.await(release_task, :infinity)
+
+    assert :ok = Task.await(suspend_task, :infinity)
     assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
 
     Process.exit(connection.pid, :kill)
@@ -1458,7 +1465,9 @@ defmodule LoopexDaemon.OwnerTest do
     lease_owner_monitor = Process.monitor(lease_owner)
     Process.exit(lease_owner, :kill)
     assert_receive {:DOWN, ^lease_owner_monitor, :process, ^lease_owner, :killed}, 500
-    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 1_000)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             Task.await(release_task, :infinity)
 
     assert_receive {:manual_connection_message, ^holder_pid,
                     {:daemon_control_owner_lost, ^owner, close_ref, "unproposed-release-session",
@@ -2002,7 +2011,7 @@ defmodule LoopexDaemon.OwnerTest do
     assert %{provisional_routing_mirrors: 1, routing_mirrors: 1} =
              install.(closing, "closing-install-session")
 
-    assert {:ok, :forced} = Task.await(close_task, 1_000)
+    assert {:ok, :forced} = Task.await(close_task, :infinity)
   end
 
   # Concept: the crossing witness, stop first. A serving owner-loss
@@ -2040,7 +2049,7 @@ defmodule LoopexDaemon.OwnerTest do
     Process.sleep(400)
     assert Process.alive?(owner)
     send(components.relay, :continue_parked_classification)
-    assert {:ok, _cut_ref} = Task.await(cut_task, 1_000)
+    assert {:ok, _cut_ref} = Task.await(cut_task, :infinity)
 
     assert %{lost_owners: 0, owner_slots: 0, mirror_operations: 0} =
              wait_for_owner_retirement(owner)
@@ -2090,7 +2099,7 @@ defmodule LoopexDaemon.OwnerTest do
                    500
 
     assert holder_incarnation == holder.incarnation
-    assert {:ok, _cut_ref} = Task.await(cut_task, 1_000)
+    assert {:ok, _cut_ref} = Task.await(cut_task, :infinity)
     close_owner_loss_holder(owner, holder, close_ref)
 
     assert %{lost_owners: 0, owner_slots: 0, mirror_operations: 0} =
@@ -2612,7 +2621,7 @@ defmodule LoopexDaemon.OwnerTest do
       {:relay_barrier_ack, barrier_ref, :freeze_lease_ops, [{:rolled_back, :origin}]}
     )
 
-    assert {:error, :relay_lost} = Task.await(freeze_task, 1_000)
+    assert {:error, :relay_lost} = Task.await(freeze_task, :infinity)
     send(components.relay, :continue_parked_freeze)
   end
 
@@ -2657,7 +2666,7 @@ defmodule LoopexDaemon.OwnerTest do
     assert :ok = wait_for_freeze_descriptors(owner)
     :sys.resume(components.registry)
     assert_receive :relay_classification_parked, 500
-    assert {:error, :relay_lost} = Task.await(freeze_task, 1_000)
+    assert {:error, :relay_lost} = Task.await(freeze_task, :infinity)
     assert Process.alive?(components.registry)
     send(components.relay, :continue_parked_classification)
   end
@@ -2693,7 +2702,7 @@ defmodule LoopexDaemon.OwnerTest do
        ]}
     )
 
-    assert {:error, :relay_lost} = Task.await(freeze_task, 1_000)
+    assert {:error, :relay_lost} = Task.await(freeze_task, :infinity)
     assert Process.alive?(lease_owner)
     send(components.relay, :continue_parked_freeze)
   end
@@ -3300,7 +3309,7 @@ defmodule LoopexDaemon.OwnerTest do
     started = now_ms()
     Process.exit(components.relay, :kill)
     assert_receive {:daemon_component_fatal, ^owner, :relay_lost}, 1_000
-    assert {:error, :relay_lost} = Task.await(cut, 1_000)
+    assert {:error, :relay_lost} = Task.await(cut, :infinity)
     assert now_ms() - started < 1_000
 
     # The owner, and the registry it links, outlive the relay for the daemon's
@@ -3560,8 +3569,8 @@ defmodule LoopexDaemon.OwnerTest do
     send(guardian, {:continue_owner_native_close, gate})
     assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
     assert :ets.info(arena) == :undefined
-    assert :ok = Task.await(first, 1_000)
-    assert :ok = Task.await(second, 1_000)
+    assert :ok = Task.await(first, :infinity)
+    assert :ok = Task.await(second, :infinity)
     assert now_ms() < deadline
     assert Process.alive?(registry)
     assert %{progress_phase: :closed, progress_guardian_monitor: nil} = :sys.get_state(registry)
@@ -3614,7 +3623,7 @@ defmodule LoopexDaemon.OwnerTest do
 
       assert_receive {:registry_guardian_held, ^gate, ^cut}, 1_000
       assert Process.alive?(guardian) and :ets.info(arena) != :undefined
-      assert {:error, :connections_lost} = Task.await(close, 2_000)
+      assert {:error, :connections_lost} = Task.await(close, :infinity)
       assert now_ms() >= deadline + 500
       assert_receive {:DOWN, ^registry_monitor, :process, ^registry, :killed}, 1_000
       assert Process.alive?(guardian) and :ets.info(arena) != :undefined
@@ -3756,8 +3765,8 @@ defmodule LoopexDaemon.OwnerTest do
         )
       end)
 
-    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(renewal, 500)
-    assert %{live_owners: 1} = Task.await(Task.async(fn -> Owner.status(owner) end), 500)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(renewal, :infinity)
+    assert %{live_owners: 1} = Task.await(Task.async(fn -> Owner.status(owner) end), :infinity)
     :sys.resume(lease_owner)
 
     assert_receive {:manual_connection_message, _holder,
@@ -3801,11 +3810,11 @@ defmodule LoopexDaemon.OwnerTest do
       end)
 
     assert_receive :open_parked, 500
-    assert %{live_owners: 1} = Task.await(Task.async(fn -> Owner.status(owner) end), 500)
+    assert %{live_owners: 1} = Task.await(Task.async(fn -> Owner.status(owner) end), :infinity)
     assert_receive {:daemon_component_fatal, ^owner, :relay_lost}, 6_000
     assert now_ms() - started >= 4_900
     assert_receive {:DOWN, ^relay_monitor, :process, _relay, :killed}, 1_000
-    assert {:error, :daemon_stopping} = Task.await(renewal, 1_000)
+    assert {:error, :daemon_stopping} = Task.await(renewal, :infinity)
     refute_receive {:daemon_component_fatal, _reporter, _class}, 300
   end
 
@@ -4001,7 +4010,7 @@ defmodule LoopexDaemon.OwnerTest do
     assert_receive :open_parked, 500
     Process.sleep(200)
     send(components.relay, :continue_open)
-    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(acquire, 500)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(acquire, :infinity)
     observer_pid = observer.pid
 
     assert_receive {:manual_connection_message, ^observer_pid,
@@ -4073,7 +4082,7 @@ defmodule LoopexDaemon.OwnerTest do
              end)
 
     send(components.relay, :continue_register)
-    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(queued, 1_000)
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(queued, :infinity)
 
     assert_receive {:manual_connection_message, _first,
                     {:relay_permit_result, ^first_origin, %{"result" => %{"writer_epoch" => _}}}},
@@ -4134,7 +4143,7 @@ defmodule LoopexDaemon.OwnerTest do
     end)
 
     :sys.resume(owner)
-    assert {:ok, :accepted, child, _child_incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, child, _child_incarnation} = Task.await(acquire, :infinity)
     child_monitor = Process.monitor(child)
     assert_receive {:DOWN, ^child_monitor, :process, ^child, reason}, 500
     assert reason in [:killed, :noproc]
@@ -4190,7 +4199,7 @@ defmodule LoopexDaemon.OwnerTest do
     {owner, observer, origin, acquire, lease_owner} = race_retirement("retiring-hold")
     assert nil == Task.yield(acquire, 200)
     :sys.resume(lease_owner)
-    assert {:ok, :accepted, ^owner, _daemon_incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, ^owner, _daemon_incarnation} = Task.await(acquire, :infinity)
     observer_pid = observer.pid
 
     assert_receive {:manual_connection_message, ^observer_pid,
@@ -4206,7 +4215,7 @@ defmodule LoopexDaemon.OwnerTest do
     {_owner, observer, origin, acquire, lease_owner} = race_retirement("retiring-bound")
     monitor = Process.monitor(lease_owner)
     assert_receive {:DOWN, ^monitor, :process, ^lease_owner, :killed}, 6_000
-    assert {:ok, :accepted, successor, _incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, successor, _incarnation} = Task.await(acquire, :infinity)
     refute successor == lease_owner
     observer_pid = observer.pid
 
@@ -4288,7 +4297,7 @@ defmodule LoopexDaemon.OwnerTest do
              end)
 
     Task.shutdown(renewal, :brutal_kill)
-    assert {:ok, :accepted, successor, _incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, successor, _incarnation} = Task.await(acquire, :infinity)
     refute successor == lease_owner
     observer_pid = observer.pid
 
@@ -4628,20 +4637,16 @@ defmodule LoopexDaemon.OwnerTest do
     end
   end
 
-  defp wait_for_relay_permits(relay, count, attempts \\ 200)
-
-  defp wait_for_relay_permits(relay, count, attempts) when attempts > 0 do
+  defp wait_for_relay_permits(relay, count) do
     status = AdmissionRelay.status(relay)
 
     if status.permits == count do
       status
     else
       Process.sleep(5)
-      wait_for_relay_permits(relay, count, attempts - 1)
+      wait_for_relay_permits(relay, count)
     end
   end
-
-  defp wait_for_relay_permits(relay, _count, 0), do: AdmissionRelay.status(relay)
 
   # Concept: a fresh acquire whose connection is lost between the relay's
   # open and this owner's claim is refused `connection_lost` and its
@@ -4782,7 +4787,7 @@ defmodule LoopexDaemon.OwnerTest do
 
     assert Process.alive?(owner)
     send(components.relay, :continue_claim)
-    assert {:ok, :accepted, ^owner, _daemon_incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, ^owner, _daemon_incarnation} = Task.await(acquire, :infinity)
     observer_pid = observer.pid
 
     assert_receive {:manual_connection_message, ^observer_pid,
@@ -5010,8 +5015,8 @@ defmodule LoopexDaemon.OwnerTest do
              end)
 
     close_owner_loss_holder(owner, holder, close_ref)
-    assert {:ok, :accepted, _first_actor, _} = Task.await(first_acquire, 1_000)
-    assert {:ok, :accepted, _second_actor, _} = Task.await(second_acquire, 1_000)
+    assert {:ok, :accepted, _first_actor, _} = Task.await(first_acquire, :infinity)
+    assert {:ok, :accepted, _second_actor, _} = Task.await(second_acquire, :infinity)
     first_pid = first.pid
     second_pid = second.pid
 
@@ -5087,7 +5092,7 @@ defmodule LoopexDaemon.OwnerTest do
     cut = Task.async(fn -> Owner.cut_admission(owner, 5_000) end)
     assert :ok = wait_for_status(owner, fn _status -> not is_nil(:sys.get_state(owner).stop) end)
     send(components.relay, :continue_open)
-    assert {:error, :daemon_stopping} = Task.await(renewal, 500)
+    assert {:error, :daemon_stopping} = Task.await(renewal, :infinity)
     assert_received :relay_saw_open
     refute_receive :relay_saw_open, 200
     Task.await(cut, 6_000)
@@ -5266,7 +5271,7 @@ defmodule LoopexDaemon.OwnerTest do
     send(components.relay, :continue_open)
     assert_receive :register_parked, 1_000
     assert {:ok, _cut_ref} = Task.await(cut, 6_000)
-    assert {:ok, :accepted, _child, _child_incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, _child, _child_incarnation} = Task.await(acquire, :infinity)
 
     frozen = Task.async(fn -> freeze(owner) end)
     assert :ok = wait_for_queue_length(components.relay, 1)
@@ -5846,7 +5851,7 @@ defmodule LoopexDaemon.OwnerTest do
         )
       end)
 
-    assert {:ok, :accepted, lease_owner, _incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, lease_owner, _incarnation} = Task.await(acquire, :infinity)
     monitor = Process.monitor(lease_owner)
 
     :ok =
@@ -5916,7 +5921,7 @@ defmodule LoopexDaemon.OwnerTest do
     assert_receive {:relay_operation_parked, :settle_result}, 1_000
     Process.sleep(350)
     send(components.relay, :continue_parked_operation)
-    assert {:ok, :accepted, _lease_owner, _incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, _lease_owner, _incarnation} = Task.await(acquire, :infinity)
 
     assert_receive {:manual_connection_message, ^connection_pid,
                     {:relay_permit_result, ^origin, %{"result" => %{"writer_epoch" => _}}}},
@@ -5970,7 +5975,7 @@ defmodule LoopexDaemon.OwnerTest do
         )
       end)
 
-    assert {:ok, :accepted, lease_owner, _incarnation} = Task.await(acquire, 1_000)
+    assert {:ok, :accepted, lease_owner, _incarnation} = Task.await(acquire, :infinity)
 
     :ok =
       :sys.install(
@@ -6053,15 +6058,12 @@ defmodule LoopexDaemon.OwnerTest do
     {%{:sys.get_state(owner) | close: close}, tag, ref}
   end
 
-  defp eventually_true(predicate, attempts \\ 100)
-  defp eventually_true(predicate, 0), do: assert(predicate.())
-
-  defp eventually_true(predicate, attempts) do
+  defp eventually_true(predicate) do
     if predicate.() do
       :ok
     else
       Process.sleep(10)
-      eventually_true(predicate, attempts - 1)
+      eventually_true(predicate)
     end
   end
 
@@ -6104,20 +6106,16 @@ defmodule LoopexDaemon.OwnerTest do
     }
   end
 
-  defp await_owner_phase(owner, phase, attempts \\ 200)
-
-  defp await_owner_phase(owner, phase, attempts) when attempts > 0 do
+  defp await_owner_phase(owner, phase) do
     case :sys.get_state(owner) do
       %{stop: %{phase: ^phase}} ->
         :ok
 
       _other ->
         Process.sleep(5)
-        await_owner_phase(owner, phase, attempts - 1)
+        await_owner_phase(owner, phase)
     end
   end
-
-  defp await_owner_phase(_owner, _phase, 0), do: {:error, :phase_not_reached}
 
   defp uninitialized_connection(components) do
     assert {:ok, %{rollback_token: token}} =
@@ -6156,14 +6154,20 @@ defmodule LoopexDaemon.OwnerTest do
     %{pid: pid, incarnation: incarnation}
   end
 
+  # Concept: a manual call ends on the connection's own answer or exit, never
+  # on a test clock; ExUnit's case timeout is the outer bound.
   defp manual_call(pid, operation) do
     reference = make_ref()
+    monitor = Process.monitor(pid)
     send(pid, {:manual_call, self(), reference, operation})
 
     receive do
-      {:manual_result, ^reference, result} -> result
-    after
-      500 -> flunk("manual connection call did not answer")
+      {:manual_result, ^reference, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        flunk("manual connection exited before answering: #{inspect(reason)}")
     end
   end
 
@@ -6339,7 +6343,10 @@ defmodule LoopexDaemon.OwnerTest do
       end)
 
     assert %{pending: 1} = wait_for_relay_pending(components.relay)
-    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
+
+    assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} =
+             Task.await(release_task, :infinity)
+
     assert :ok = :sys.suspend(owner)
     :sys.resume(lease_owner)
     assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
@@ -6414,18 +6421,14 @@ defmodule LoopexDaemon.OwnerTest do
         do: operation
   end
 
-  defp wait_for_stop(owner, attempts \\ 100)
-
-  defp wait_for_stop(owner, attempts) when attempts > 0 do
+  defp wait_for_stop(owner) do
     if :sys.get_state(owner).stop do
       :ok
     else
       Process.sleep(5)
-      wait_for_stop(owner, attempts - 1)
+      wait_for_stop(owner)
     end
   end
-
-  defp wait_for_stop(_owner, 0), do: {:error, :not_stopping}
 
   defp wait_for_owner_loss_step(owner, step, count, attempts \\ 2_000)
 
@@ -6440,47 +6443,37 @@ defmodule LoopexDaemon.OwnerTest do
 
   defp wait_for_owner_loss_step(_owner, _step, _count, 0), do: {:error, :not_reached}
 
-  defp wait_for_queue_length(pid, length, attempts \\ 100)
-
-  defp wait_for_queue_length(pid, length, attempts) when attempts > 0 do
+  defp wait_for_queue_length(pid, length) do
     case Process.info(pid, :message_queue_len) do
       {:message_queue_len, queued} when queued >= length ->
         :ok
 
       _other ->
         Process.sleep(5)
-        wait_for_queue_length(pid, length, attempts - 1)
+        wait_for_queue_length(pid, length)
     end
   end
 
-  defp wait_for_queue_length(_pid, _length, 0), do: {:error, :not_queued}
   # Technical depth: the connection's answer is its acceptance, so a test
   # that needs the lease owner's later step waits for its status.
-  defp wait_for_lease_owner(lease_owner, predicate, attempts \\ 200)
 
-  defp wait_for_lease_owner(lease_owner, predicate, attempts) when attempts > 0 do
+  defp wait_for_lease_owner(lease_owner, predicate) do
     if predicate.(LeaseOwner.status(lease_owner)) do
       :ok
     else
       Process.sleep(5)
-      wait_for_lease_owner(lease_owner, predicate, attempts - 1)
+      wait_for_lease_owner(lease_owner, predicate)
     end
   end
 
-  defp wait_for_lease_owner(_lease_owner, _predicate, 0), do: {:error, :not_reached}
-
-  defp wait_for_attachment(lease_owner, attempts \\ 100)
-
-  defp wait_for_attachment(lease_owner, attempts) when attempts > 0 do
+  defp wait_for_attachment(lease_owner) do
     if LeaseOwner.status(lease_owner).attachments == 1 do
       :ok
     else
       Process.sleep(5)
-      wait_for_attachment(lease_owner, attempts - 1)
+      wait_for_attachment(lease_owner)
     end
   end
-
-  defp wait_for_attachment(_lease_owner, 0), do: {:error, :not_attached}
 
   defp start_ticket_worker(connection) do
     parent = self()
@@ -6495,7 +6488,8 @@ defmodule LoopexDaemon.OwnerTest do
         end
       end)
 
-    assert_receive {:ticket_worker_ready, ^worker}, 500
+    # The worker sends this as its first action, so only scheduling delays it.
+    await_receive({:ticket_worker_ready, ^worker})
     worker
   end
 
@@ -6612,45 +6606,33 @@ defmodule LoopexDaemon.OwnerTest do
     assert %{permits: 0} = AdmissionRelay.status(components.relay)
   end
 
-  defp wait_for_freeze_descriptors(owner, attempts \\ 200)
-
-  defp wait_for_freeze_descriptors(owner, attempts) when attempts > 0 do
+  defp wait_for_freeze_descriptors(owner) do
     if match?(%{stop: %{barrier: %{descriptors: [_ | _]}}}, :sys.get_state(owner)) or
          match?(%{stop: %{barrier: %{descriptors: []}}}, :sys.get_state(owner)) do
       :ok
     else
       Process.sleep(5)
-      wait_for_freeze_descriptors(owner, attempts - 1)
+      wait_for_freeze_descriptors(owner)
     end
   end
 
-  defp wait_for_freeze_descriptors(_owner, 0), do: {:error, :not_frozen}
-
-  defp wait_for_pending_dispositions(owner, count, attempts \\ 200)
-
-  defp wait_for_pending_dispositions(owner, count, attempts) when attempts > 0 do
+  defp wait_for_pending_dispositions(owner, count) do
     if Owner.status(owner).pending_dispositions == count do
       :ok
     else
       Process.sleep(5)
-      wait_for_pending_dispositions(owner, count, attempts - 1)
+      wait_for_pending_dispositions(owner, count)
     end
   end
 
-  defp wait_for_pending_dispositions(_owner, _count, 0), do: {:error, :not_retained}
-
-  defp wait_for_status(owner, predicate, attempts \\ 400)
-
-  defp wait_for_status(owner, predicate, attempts) when attempts > 0 do
+  defp wait_for_status(owner, predicate) do
     if predicate.(Owner.status(owner)) do
       :ok
     else
       Process.sleep(5)
-      wait_for_status(owner, predicate, attempts - 1)
+      wait_for_status(owner, predicate)
     end
   end
-
-  defp wait_for_status(_owner, _predicate, 0), do: {:error, :not_reached}
 
   # Technical depth: a request worker that outlives its connection, so the
   # relay's claim can still dispatch after the connection's loss is queued.

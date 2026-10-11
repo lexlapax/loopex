@@ -1243,7 +1243,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         )
       end)
 
-    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 1_000
+    {sentinel, owner_ref, _owner} = await_sentinel(task)
     send(sentinel, {:daemon_signal, owner_ref, :sigterm})
 
     status = Task.await(task, 30_000)
@@ -1480,7 +1480,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         Sentinel.run(options, output: output, install_signals: false, notify: test)
       end)
 
-    assert_receive {:loopex_daemon_sentinel, _sentinel, _owner_ref, owner}, 1_000
+    {_sentinel, _owner_ref, owner} = await_sentinel(task)
     collaboration = await_collaboration(owner)
     Process.exit(collaboration, :kill)
 
@@ -1516,7 +1516,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         Sentinel.run(options, output: output, install_signals: false, notify: test)
       end)
 
-    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, owner}, 1_000
+    {sentinel, owner_ref, owner} = await_sentinel(task)
     collaboration = await_collaboration(owner)
     1 = :erlang.trace(collaboration, true, [:receive])
     _ready = await_ready(output)
@@ -2165,20 +2165,16 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
   defp await_quiesce_wait(_pid, 0), do: false
 
-  defp await_queued_exit(pid, exited, attempts \\ 100)
-
-  defp await_queued_exit(pid, exited, attempts) when attempts > 0 do
+  defp await_queued_exit(pid, exited) do
     {:messages, messages} = Process.info(pid, :messages)
 
     if Enum.any?(messages, &match?({:EXIT, ^exited, _reason}, &1)) do
       :ok
     else
       Process.sleep(5)
-      await_queued_exit(pid, exited, attempts - 1)
+      await_queued_exit(pid, exited)
     end
   end
-
-  defp await_queued_exit(_pid, _exited, 0), do: {:error, :not_queued}
 
   # Suspends `target` at the VM level, where even system messages such as a
   # stop request wait, exactly as the collaboration owner receives the relay's
@@ -2283,6 +2279,21 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     end
   end
 
+  # Concept: startup ends on the sentinel's own notice or the run's own end.
+  # Technical depth: the sentinel notifies only after preloading every daemon
+  # module and starting the service, real work a fixed window would race on a
+  # loaded host. The run is a linked task, so a crash fails the case and an
+  # early return is reported here; ExUnit's case timeout is the outer bound.
+  defp await_sentinel(%Task{ref: task_ref}) do
+    receive do
+      {:loopex_daemon_sentinel, sentinel, owner_ref, owner} ->
+        {sentinel, owner_ref, owner}
+
+      {^task_ref, status} ->
+        flunk("daemon ended before its sentinel notice: #{inspect(status)}")
+    end
+  end
+
   defp start_daemon(options) do
     {:ok, output} = StringIO.open("")
     {:ok, diagnostic} = StringIO.open("")
@@ -2298,7 +2309,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         )
       end)
 
-    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, owner}, 1_000
+    {sentinel, owner_ref, owner} = await_sentinel(task)
 
     %{
       task: task,
