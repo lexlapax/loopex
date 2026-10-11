@@ -150,6 +150,24 @@ defmodule LoopexCli.M7AttemptWriterTest do
     stop_vm(vm)
   end
 
+  # Concept: a writer that stops on request has released its lock before its
+  # caller is answered, so the same host can reopen at once.
+  # Technical depth: a listener left to the owner's exit signal closes after
+  # the writer's exit, and so possibly after `close/1` returns or a stopping
+  # call replies; the trace order of the listener's close and the writer's
+  # exit is deterministic either way.
+  test "closing and a stopping call release the lock before answering the caller",
+       %{dir: dir, index: index} do
+    {writer, _} = created!(dir, index)
+    assert releases_before_exit(writer, fn -> Writer.close(writer) end) == :ok
+    {:ok, writer} = Writer.open(index, host(dir, 1))
+    q = Path.join(dir, "q")
+    relinquish = fn -> Writer.relinquish(writer, "writer-2", "host-2", "h", q) end
+    assert {:ok, _} = releases_before_exit(writer, relinquish)
+    assert {:ok, writer} = Writer.open(index, host(dir, 1))
+    :ok = Writer.close(writer)
+  end
+
   test "a killed writer VM releases the lock and its acknowledged start stays consumed",
        %{dir: dir, index: index} do
     created!(dir, index) |> elem(0) |> Writer.close()
@@ -741,6 +759,18 @@ defmodule LoopexCli.M7AttemptWriterTest do
     {writer, head_line(designation)}
   end
 
+  defp releases_before_exit(writer, stop) do
+    {:links, links} = Process.info(writer, :links)
+    [listener] = Enum.filter(links, &is_port/1)
+    1 = :erlang.trace(writer, true, [:procs, :strict_monotonic_timestamp])
+    1 = :erlang.trace(listener, true, [:ports, :strict_monotonic_timestamp])
+    result = stop.()
+    assert_receive {:trace_ts, ^listener, :closed, _, closed}, 5_000
+    assert_receive {:trace_ts, ^writer, :exit, _, exited}, 5_000
+    assert closed < exited
+    result
+  end
+
   defp transfer!(dir, index, host) do
     root = Path.join(dir, "host-#{host}")
     File.mkdir_p!(Path.join(dir, "markers-#{host}"))
@@ -903,12 +933,19 @@ defmodule LoopexCli.M7AttemptWriterTest do
       {:ok, w} ->
         IO.puts("OPEN ok")
         ref = Process.monitor(w)
+        # A killed owner's listener closes after its DOWN, through the exit
+        # signal the runtime delivers to the linked port; the release is that
+        # port's own DOWN.
+        {:links, links} = Process.info(w, :links)
+        [listener] = Enum.filter(links, &is_port/1)
+        released = Port.monitor(listener)
 
         Stream.repeatedly(fn -> IO.read(:stdio, :line) end)
         |> Enum.reduce_while(nil, fn
           "crash\\n", _ ->
             Process.exit(w, :kill)
-            receive do: ({:DOWN, ^ref, _, _, _} -> IO.puts("RELEASED"))
+            receive do: ({:DOWN, ^ref, _, _, _} -> :ok)
+            receive do: ({:DOWN, ^released, :port, _, _} -> IO.puts("RELEASED"))
             {:cont, nil}
 
           "alive\\n", _ ->
