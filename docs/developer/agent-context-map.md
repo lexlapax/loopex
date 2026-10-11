@@ -7442,3 +7442,21 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   25,800,000 to 28,800,000 ms. `maintenance` stays 1: it counts standalone
   steps, and automatic episodes run within their run's deadline. The campaign
   genesis digest depends only on the campaign ID and is unchanged.
+
+<a id="disposition-m7-release-matrix-reuse-2026-10-11"></a>
+### M7 release matrix reuses its run across a test-only change, 2026-10-11
+
+- **Decision.** The maintainer kept the attended release matrix (T17) and the
+  Darwin run on `f85d7952d1c367166d0168ec8600cb92cf32f7eb` and accepted a
+  later closure candidate whose only change from that commit is
+  `apps/loopex/test/artifact_runtime_test.exs`. The fast check runs on both
+  toolchain pairs for the later candidate; `check-release.sh` and the Darwin
+  lanes never run that file.
+- **Cause.** Review found that the timing sweep let "the committed run cutoff
+  joins retention" pass on a loaded host without the retention join, the only
+  test of the run cutoff joining a retention worker.
+- **Fix.** The test again requires retention to start, the run cutoff to kill
+  its worker and the reservation's origin to be `run`. The run bound is
+  5,000 ms, under the 60,000 ms episode, because the coordinator reads the
+  system clock. The file's run-finished wait ends on the run's own event; the
+  long-bound test asserts its finish within 5,000 ms of the product cutoff.

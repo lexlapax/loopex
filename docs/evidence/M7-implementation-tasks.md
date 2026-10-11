@@ -10,7 +10,7 @@ awaited actor's own events (`Loopex.EventWait.await_receive/1`), including the
 whichever order it lands; per-worker fixture marker staging fixed the
 credential-rotation race (`timing-sweep/`). The attempts writer now releases
 its lock before a stopping call or `close/1` answers, and closing a writer that
-already stopped is a no-op. `m7.long` overflows its 4,000-token budget from
+already stopped is a no-op. Review then found the sweep had let the run-cutoff retention-join test pass without the join; it again requires the join, and T17 is reused across that test-only change ([disposition](../developer/agent-context-map.md#disposition-m7-release-matrix-reuse-2026-10-11)). `m7.long` overflows its 4,000-token budget from
 three fixed reference prompts
 ([disposition](../developer/agent-context-map.md#disposition-m7-long-overflow-prompts-2026-10-10)),
 and the plan records the campaign's committed attempts head.

@@ -383,38 +383,27 @@ defmodule Loopex.ArtifactRuntimeTest do
 
     {fixture, session, attachment} =
       start_live_preparation(
-        bounds_deadline_ms: 1_000,
+        bounds_deadline_ms: 5_000,
         artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
       )
 
-    # Concept: the run's own 1,000 ms deadline, not this test, decides how far
-    # the run gets before its cutoff, and the run ends at that bound either way.
-    # Technical depth: the deadline instant is fixed when the first model call
-    # commits. A loaded host can reach it before the tool runs or retention
-    # starts: with the scripted model held past it, the run ends bound_reached
-    # with no tool progress. When retention did start first, the cutoff must
-    # also join its worker under the committed run deadline.
-    {retention, finished} = await_retention_or_finish(attachment)
+    # Concept: retention must start inside the run's bound so the run cutoff,
+    # not this test, ends it; the cutoff then joins the worker.
+    # Technical depth: the coordinator reads the system clock, so the bound is
+    # sized for the scripted model, tool and reservation to commit first; it
+    # stays under the 60,000 ms episode so the reservation's origin is "run".
+    # Retention is gated, so the run waits for its own deadline either way, and
+    # a deadline that lands before retention fails here rather than passing.
+    await_receive({:artifact_put, worker, _bytes, _metadata})
+    finished = List.last(await_run_finished(attachment))
     assert finished["outcome"] == "bound_reached"
     assert finished["bound"] == "deadline"
+    refute Process.alive?(worker)
+    await_receive({:artifact_worker_down, ^worker, reason})
+    assert reason == :killed
     records = Fixture.records(fixture, session)
-
-    case retention do
-      {:retention, worker} ->
-        refute Process.alive?(worker)
-        await_receive({:artifact_worker_down, ^worker, reason})
-        assert reason == :killed
-
-        [reserved] =
-          Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
-
-        assert reserved.payload["deadline_origin"] == "run"
-
-      # The deadline came before retention: the shared assertions below hold.
-      :finished_first ->
-        :ok
-    end
-
+    [reserved] = Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
+    assert reserved.payload["deadline_origin"] == "run"
     assert Agent.get(artifact_pid, & &1.objects) == %{}
     refute Enum.any?(records, &(&1.payload.kind == "tool_result_preparation_failed_v1"))
     refute Enum.any?(records, &(&1.payload.kind == "tool_result_reference_prepared"))
@@ -449,7 +438,8 @@ defmodule Loopex.ArtifactRuntimeTest do
       System.monotonic_time(:millisecond) +
         max(cutoff - System.system_time(:millisecond), 0) + 5_000
 
-    finished = List.last(collect(attachment, fixture_until, 65_000, []))
+    finished = List.last(await_run_finished(attachment))
+    assert System.monotonic_time(:millisecond) <= fixture_until
     assert finished["outcome"] == "failed"
     assert finished["failure"]["category"] == "context_preparation_failed"
     assert finished["failure"]["cause"] == "artifact_preparation_deadline"
@@ -1257,37 +1247,6 @@ defmodule Loopex.ArtifactRuntimeTest do
     {fixture, session, attachment}
   end
 
-  # Concept: the run reaches retention or its own end first, and either is
-  # observed as the product's event, with no test-clock window.
-  # Technical depth: each retention put is noticed while its worker is watched
-  # and before it can be cut off, and the run cannot finish before it joins
-  # that worker, so a run that finished without a notice never started
-  # retention. The wait ends at the run's own finish.
-  defp await_retention_or_finish(attachment, retention \\ :finished_first) do
-    retention =
-      receive do
-        {:artifact_put, worker, _bytes, _metadata} -> {:retention, worker}
-      after
-        0 -> retention
-      end
-
-    case Loopex.next_event(attachment) do
-      {:ok, %{kind: "run.finished"} = finished} ->
-        receive do
-          {:artifact_put, worker, _bytes, _metadata} -> {{:retention, worker}, finished}
-        after
-          0 -> {retention, finished}
-        end
-
-      {:ok, _event} ->
-        await_retention_or_finish(attachment, retention)
-
-      _none ->
-        Process.sleep(10)
-        await_retention_or_finish(attachment, retention)
-    end
-  end
-
   defp preparation_fixture do
     [range] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
@@ -1476,31 +1435,19 @@ defmodule Loopex.ArtifactRuntimeTest do
     end
   end
 
-  defp await_run_finished(attachment, deadline_ms \\ 5_000) do
-    deadline = System.monotonic_time(:millisecond) + deadline_ms
-    collect(attachment, deadline, deadline_ms, [])
-  end
-
-  defp collect(attachment, deadline, deadline_ms, acc) do
+  # Concept: a run's events, ending at its own run.finished, bounded by the
+  # ExUnit per-test timeout rather than a test-clock window.
+  defp await_run_finished(attachment, acc \\ []) do
     case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"} = event} ->
+        Enum.reverse([event | acc])
+
       {:ok, event} ->
-        acc = [event | acc]
+        await_run_finished(attachment, [event | acc])
 
-        if event.kind == "run.finished",
-          do: Enum.reverse(acc),
-          else: collect(attachment, deadline, deadline_ms, acc)
-
-      other ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          flunk("""
-          no run.finished within #{deadline_ms}ms.
-          last read: #{inspect(other)}
-          events observed: #{inspect(Enum.map(Enum.reverse(acc), & &1.kind))}
-          """)
-        else
-          Process.sleep(10)
-          collect(attachment, deadline, deadline_ms, acc)
-        end
+      _none ->
+        Process.sleep(10)
+        await_run_finished(attachment, acc)
     end
   end
 end
