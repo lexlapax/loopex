@@ -348,7 +348,7 @@ defmodule Loopex.LLM.ReqLLM do
       identity = %{
         provider: "anthropic",
         model: prepared.model.id,
-        endpoint: prepared.endpoint.host
+        endpoint: Keyword.fetch!(prepared.options, :base_url)
       }
 
       {:ok, identity, Keyword.put(options, :loopex_native_prepared, prepared)}
