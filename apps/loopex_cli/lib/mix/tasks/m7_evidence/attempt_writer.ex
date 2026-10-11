@@ -21,7 +21,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
   This GenServer owns the listener and the raw index descriptor, and performs
   every read, append and `:file.sync/1`. Its death, or its VM's, releases the
   lock and stops IO together; it also stops when the process that opened it
-  exits. Every append re-reads and replays the complete index through
+  exits. A writer that stops through `close/1`, a stopping call or a failed
+  open or create closes its listener before its caller is answered; after a
+  kill the runtime closes the orphaned listener after the writer's DOWN.
+  Every append re-reads and replays the complete index through
   `AttemptEvents`, refuses a record that would add an unresolved case fact or
   contains a supplied secret value, and acknowledges only after the complete
   write and sync. A failed write or sync replies `:uncertain_attempt_append`
@@ -111,6 +114,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
         :create -> initialize(state, campaign, identity, Keyword.get(opts, :succession))
         :open -> verify_open(state)
       end
+      |> case do
+        {:stop, _} = stop -> release(state.listener, stop)
+        ok -> ok
+      end
     else
       false -> {:stop, :invalid_attempt_writer_request}
       {:error, reason} -> {:stop, reason}
@@ -127,34 +134,52 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
     candidates = if port, do: [port], else: Enum.take(Enum.shuffle(@ports), 64)
 
     with false <- File.exists?(path) or File.exists?(path <> ".lock"),
-         {:ok, listener, port} <- listen_free(candidates),
-         :ok <- write_exclusive(path <> ".lock", ~s({"port":#{port},"version":1}\n)),
-         {:ok, fd} <- :file.open(path, [:raw, :binary, :read, :append, :exclusive]) do
-      {:ok, state(path, identity, listener, fd)}
+         {:ok, listener, port} <- listen_free(candidates) do
+      with :ok <- write_exclusive(path <> ".lock", ~s({"port":#{port},"version":1}\n)),
+           {:ok, fd} <- :file.open(path, [:raw, :binary, :read, :append, :exclusive]) do
+        {:ok, state(path, identity, listener, fd)}
+      else
+        error -> release(listener, create_error(error))
+      end
     else
-      true ->
-        {:error, :attempt_evidence_exists}
-
-      {:error, :eexist} ->
-        {:error, :attempt_evidence_exists}
-
-      {:error, reason} when reason in [:attempt_writer_contention, :attempt_lock_unavailable] ->
-        {:error, reason}
-
-      {:error, reason} when reason in [:attempt_evidence_exists, :attempt_evidence_unavailable] ->
-        {:error, reason}
-
-      _ ->
-        {:error, :attempt_index_unavailable}
+      error -> create_error(error)
     end
   end
 
   defp acquire(:open, path, identity, _port) do
     with {:ok, port} <- lock_port(path),
-         {:ok, listener} <- listen(port),
-         {:ok, fd} <- open_index(path) do
-      {:ok, state(path, identity, listener, fd)}
+         {:ok, listener} <- listen(port) do
+      case open_index(path) do
+        {:ok, fd} -> {:ok, state(path, identity, listener, fd)}
+        error -> release(listener, error)
+      end
     end
+  end
+
+  defp create_error(true), do: {:error, :attempt_evidence_exists}
+  defp create_error({:error, :eexist}), do: {:error, :attempt_evidence_exists}
+
+  defp create_error({:error, reason})
+       when reason in [
+              :attempt_writer_contention,
+              :attempt_lock_unavailable,
+              :attempt_evidence_exists,
+              :attempt_evidence_unavailable
+            ],
+       do: {:error, reason}
+
+  defp create_error(_), do: {:error, :attempt_index_unavailable}
+
+  # Concept: a writer that stops, or an open that fails, has released its lock
+  # by the time its caller learns so.
+  # Technical depth: an exiting owner's port closes through an exit signal the
+  # runtime handles asynchronously, so `close/1` (which waits for the writer's
+  # DOWN), a stopping call's reply or a failed start can otherwise reach the
+  # caller while the listener is still bound, and an immediate reopen refuses
+  # as contention. `:gen_tcp.close/1` closes the port synchronously.
+  defp release(listener, result) do
+    :ok = :gen_tcp.close(listener)
+    result
   end
 
   defp state(path, identity, listener, fd) do
@@ -241,6 +266,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
 
   @impl true
   def handle_info({:DOWN, _, :process, _, _}, state), do: {:stop, :normal, state}
+
+  @impl true
+  def terminate(_reason, state), do: release(state.listener, :ok)
 
   @impl true
   def handle_call(:read, _from, state) do
