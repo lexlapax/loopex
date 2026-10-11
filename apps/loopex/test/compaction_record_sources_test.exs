@@ -1,9 +1,11 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.Runtime.CompactionRecordSourcesTest do
   use ExUnit.Case, async: true
+  import Loopex.EventWait
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.ConfiguredGenesisFixture, as: Genesis
@@ -123,7 +125,10 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
 
   test "session scope protects an unfinished latest run while retaining settled earlier history" do
     {fixture, session, attachment} =
-      start([%{text: "first done", calls: []}, %{text: "held", calls: [], hold: self()}])
+      start([
+        %{text: "first done", calls: []},
+        %{text: "held", calls: [], hold: self(), hold_timeout_ms: :infinity}
+      ])
 
     prompt(attachment)
     finish(attachment)
@@ -135,7 +140,7 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
                content: "still in progress"
              })
 
-    assert_receive {:holding, worker}, 5_000
+    await_receive({:holding, worker})
     {live, replayed, _} = states(fixture, session)
     assert {:ok, [earlier, current]} = SessionState.compaction_units(replayed, :session)
     refute earlier.protected?
@@ -240,13 +245,13 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
   test "queued steer and promoted follow up keep their original admission records" do
     {fixture, session, attachment} =
       start([
-        %{text: "working", calls: [call("write")], hold: self()},
+        %{text: "working", calls: [call("write")], hold: self(), hold_timeout_ms: :infinity},
         %{text: "first done", calls: []},
         %{text: "follow up done", calls: []}
       ])
 
     prompt(attachment)
-    assert_receive {:holding, worker}, 5_000
+    await_receive({:holding, worker})
     {:ok, %{active_run_id: run}} = Loopex.session_status(fixture.runtime, session)
 
     assert {:accepted, "steer"} =
@@ -580,20 +585,21 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
 
   defp finish(attachment), do: event(attachment, "run.finished")
 
-  defp event(attachment, kind, cutoff \\ nil) do
-    cutoff = cutoff || System.monotonic_time(:millisecond) + 5_000
-
+  # Concept: a case waits for the session's own event, not a test clock.
+  # Technical depth: the run is driven by freshly scheduled model and executor
+  # workers, so a fixed window races only scheduling. `:empty` is the
+  # attachment's not-yet answer; ExUnit's per-test timeout is the outer bound.
+  defp event(attachment, kind) do
     case Loopex.next_event(attachment) do
       {:ok, %{kind: ^kind} = row} ->
         row
 
       {:ok, _row} ->
-        event(attachment, kind, cutoff)
+        event(attachment, kind)
 
       {:error, :empty} ->
-        assert System.monotonic_time(:millisecond) < cutoff, "missing #{kind}"
         Process.sleep(10)
-        event(attachment, kind, cutoff)
+        event(attachment, kind)
 
       other ->
         flunk("event read failed: #{inspect(other)}")
