@@ -9,6 +9,42 @@ alias LoopexCli.Output
 leader = fn {:loopex_cli_output, owner, _} -> :sys.get_state(owner).target.leader end
 write_report = fn map -> File.write!(report, :erlang.term_to_binary(map)) end
 
+# Concept: read the exec-time environment from the kernel, not from the process.
+# Technical depth: Linux exposes the writer's block NUL-separated in /proc.
+# Darwin has no /proc and SIP hides a platform binary's (`/bin/bash`, `/bin/dd`)
+# environment from `ps -E`, so there the writer's exact port environment list is
+# exec'd as the non-platform ERTS `inet_gethost`, which blocks on its stdin, and
+# `ps -E` reads the block back after its argv once the exec has landed. Only the
+# Linux lane proves the block on the writer itself.
+visible_environ = fn ->
+  [probe] = Path.wildcard(Path.join([:code.root_dir(), "erts-*", "bin", "inet_gethost"]))
+
+  port =
+    Port.open({:spawn_executable, String.to_charlist(probe)}, [
+      :binary,
+      {:env, LoopexCli.Output.Stdio.environment()}
+    ])
+
+  {:os_pid, pid} = Port.info(port, :os_pid)
+
+  line =
+    Enum.find_value(1..500, fn _ ->
+      {line, 0} = System.cmd("/bin/ps", ["-E", "-ww", "-o", "command=", "-p", "#{pid}"])
+      line = String.trim_trailing(line, "\n")
+      (line == probe or String.starts_with?(line, probe <> " ")) && line
+    end) || raise "the probe never exec'd"
+
+  Port.close(port)
+  line |> String.replace_prefix(probe, "") |> String.split(" ", trim: true) |> Enum.join(<<0>>)
+end
+
+environ = fn output ->
+  case :os.type() do
+    {:unix, :darwin} -> visible_environ.()
+    _ -> File.read!("/proc/#{leader.(output)}/environ")
+  end
+end
+
 case mode do
   "bytes" ->
     {:ok, output, _sink} = Output.open(:stdio, Output.acquisition())
@@ -32,7 +68,7 @@ case mode do
   "environment" ->
     {:ok, output, _sink} = Output.open(:stdio, Output.acquisition())
     group = leader.(output)
-    environ = File.read!("/proc/#{group}/environ")
+    environ = environ.(output)
     :ok = Output.write(output, :text, :stdout, "ok\n")
     write_report.(%{finish: Output.finish(output), leader: group, environ: environ})
 

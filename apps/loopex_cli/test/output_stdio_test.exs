@@ -32,7 +32,7 @@ defmodule LoopexCli.OutputStdioTest do
   end
 
   test "a PTY receives the same records through terminal line discipline", f do
-    {output, 0} = shell("script -qec #{sh_quote(child("pty", f.report))} /dev/null")
+    {output, 0} = shell(pty(child("pty", f.report)))
     report = report(f.report)
     assert report.finish == :ok
     assert output =~ "line1\r\nline2\r\n"
@@ -102,6 +102,16 @@ defmodule LoopexCli.OutputStdioTest do
       |> Enum.flat_map(&["-pa", &1])
 
     Enum.map_join([elixir | paths] ++ [@driver, mode, report], " ", &sh_quote/1)
+  end
+
+  # Concept: run the command with fd 1 and fd 2 on a real PTY.
+  # Technical depth: util-linux `script` takes the command as `-c` text; BSD
+  # `script` (Darwin) takes argv after the transcript file.
+  defp pty(command) do
+    case :os.type() do
+      {:unix, :darwin} -> "script -q /dev/null /bin/sh -c #{sh_quote(command)}"
+      _ -> "script -qec #{sh_quote(command)} /dev/null"
+    end
   end
 
   defp shell(script, options \\ []) do

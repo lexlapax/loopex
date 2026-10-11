@@ -204,7 +204,8 @@ defmodule LoopexCli.Output.Stdio do
     end
   end
 
-  defp environment do
+  @doc false
+  def environment do
     clear = for {name, _value} <- System.get_env(), do: {String.to_charlist(name), false}
     clear ++ [{~c"PATH", ~c"/usr/bin:/bin"}, {~c"LC_ALL", ~c"C"}]
   end
