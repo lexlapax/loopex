@@ -1152,11 +1152,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     Application.put_env(:req_llm, :finch_request_adapter, LoopexProviderFixtureTransport)
     [path | _] = Enum.map(arguments, &List.to_string/1)
     # A marker appears only complete: a reader polling for it never sees the
-    # empty file a direct write creates before its bytes land.
+    # empty file a direct write creates before its bytes land. Concurrent
+    # workers of one fixture share its root, so each stages under its own OS
+    # pid: a shared staging name let one worker's rename take the other's file
+    # and crash that worker with :enoent before readiness.
     for {name, value} <- [{"pid", System.pid()}, {"namespace", Path.dirname(path)}] do
       marker = Path.join(#{inspect(root)}, name)
-      File.write!(marker <> ".partial", value)
-      File.rename!(marker <> ".partial", marker)
+      partial = marker <> ".partial." <> System.pid()
+      File.write!(partial, value)
+      File.rename!(partial, marker)
     end
     File.write!(#{inspect(Path.join(root, "entry-env"))}, inspect(Enum.sort(Map.keys(System.get_env()))))
     if #{inspect(mode)} == :dotenv, do: File.cd!(#{inspect(root)})
