@@ -18,6 +18,35 @@ defmodule Loopex.LLM.ReqLLM.NativeContent do
   alias Loopex.Model.ContentReferences
 
   @invalid {:error, :invalid_native_content}
+  @message ~w(content id model role stop_reason stop_sequence type usage)
+  @message_nulls ~w(container diagnostics stop_details)
+
+  # Concept: Anthropic adds envelope members over time; a reply stays admissible
+  # when every required member is present and each added one is a known member
+  # left null.
+  # Technical depth: a non-null `container`, `diagnostics` or `stop_details`
+  # describes behavior this adapter never requests, so it is still refused, as
+  # is any unknown member.
+  @doc false
+  def envelope?(map, required, nullable) when is_map(map) do
+    Enum.all?(required, &Map.has_key?(map, &1)) and
+      Enum.all?(Map.keys(map) -- required, &(&1 in nullable and is_nil(map[&1])))
+  end
+
+  # Concept: a tool call the model made directly carries no caller information
+  # a continuation needs.
+  # Technical depth: Anthropic marks it `caller: {"type": "direct"}`; that exact
+  # marker is dropped so captured and replayed blocks keep the four-member form.
+  # Any other caller stays on the block and is refused by its template.
+  @doc false
+  def direct_call(%{"type" => "tool_use", "caller" => %{"type" => "direct"} = caller} = block)
+      when map_size(caller) == 1,
+      do: Map.delete(block, "caller")
+
+  def direct_call(block), do: block
+
+  defp direct_calls(content) when is_list(content), do: Enum.map(content, &direct_call/1)
+  defp direct_calls(content), do: content
 
   @doc """
   ## Concept
@@ -40,16 +69,15 @@ defmodule Loopex.LLM.ReqLLM.NativeContent do
       when is_boolean(required) and is_binary(body) and byte_size(body) <= 8_388_608 and
              (is_nil(credential) or (is_binary(credential) and byte_size(credential) in 1..65_536)) do
     with {:ok, native} when is_map(native) <- Jason.decode(body),
-         true <-
-           Enum.sort(Map.keys(native)) ==
-             ~w(content id model role stop_reason stop_sequence type usage),
+         true <- envelope?(native, @message, @message_nulls),
          true <- native["type"] == "message" and native["role"] == "assistant",
          true <- bounded_text?(native["id"], 256),
          true <- bounded_text?(native["model"], 512),
          true <- is_nil(expected_model) or native["model"] == expected_model,
          true <- is_nil(native["stop_sequence"]) or bounded_text?(native["stop_sequence"], 256),
          counters when is_map(counters) <- native["usage"],
-         {:ok, captured} <- project(model, required, native["stop_reason"], native["content"]),
+         {:ok, captured} <-
+           project(model, required, native["stop_reason"], direct_calls(native["content"])),
          false <- contains_key?([native["content"], counters], credential) do
       usage =
         for {key, source} <- [{:input_tokens, "input_tokens"}, {:output_tokens, "output_tokens"}],

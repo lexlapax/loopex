@@ -16,6 +16,12 @@ overflows its 4,000-token budget from three fixed reference prompts
 ([disposition](../developer/agent-context-map.md#disposition-m7-long-overflow-prompts-2026-10-10)),
 and the plan records the campaign's committed attempts head.
 
+The first closure matrix on `d00e06eb` ended at real-provider lane 1 twice:
+once for an unanswered skill-import prompt and once for Anthropic wire drift
+in its native stream envelope and `tool_use` blocks, which the adapter now
+admits only as null members and a direct caller
+([disposition](../developer/agent-context-map.md#disposition-m7-t17-operator-override-2026-10-11)).
+
 The Darwin run of `f85d7952` failed 34 of 942 `loopex_cli` tests. Under macOS's
 symlinked `/var/folders` temporary root, three owners met a logical path where
 they hold physical ones: the fixture policy rendered the oracle runner from

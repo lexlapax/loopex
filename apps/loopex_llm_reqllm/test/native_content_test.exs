@@ -98,6 +98,92 @@ defmodule Loopex.LLM.ReqLLM.NativeContentTest do
              NativeContent.response(model(), true, id, Jason.encode!(echoed), "selected-key")
   end
 
+  test "the current wire envelope and direct-call marker capture the same content" do
+    alias Loopex.LLM.ReqLLM.NativeStream
+    id = String.replace_prefix(model(), "anthropic:", "")
+    call = %{"type" => "tool_use", "id" => "toolu_1", "name" => "read", "input" => %{}}
+    direct = Map.put(call, "caller", %{"type" => "direct"})
+    arguments = %{"path" => "a.txt"}
+    nulls = %{"container" => nil, "stop_details" => nil, "diagnostics" => nil}
+
+    plain = %{
+      "id" => "message",
+      "type" => "message",
+      "role" => "assistant",
+      "model" => id,
+      "content" => [%{call | "input" => arguments}],
+      "stop_reason" => "tool_use",
+      "stop_sequence" => nil,
+      "usage" => %{"input_tokens" => 7, "output_tokens" => 11}
+    }
+
+    current = Map.merge(plain, nulls) |> Map.put("content", [%{direct | "input" => arguments}])
+    assert {:ok, expected} = NativeContent.response(model(), true, id, Jason.encode!(plain))
+    assert {:ok, ^expected} = NativeContent.response(model(), true, id, Jason.encode!(current))
+
+    start = %{current | "content" => [], "stop_reason" => nil, "usage" => %{"input_tokens" => 7}}
+
+    events = [
+      %{"type" => "message_start", "message" => start},
+      %{"type" => "content_block_start", "index" => 0, "content_block" => direct},
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "input_json_delta", "partial_json" => Jason.encode!(arguments)}
+      },
+      %{"type" => "content_block_stop", "index" => 0},
+      %{
+        "type" => "message_delta",
+        "delta" => %{
+          "stop_reason" => "tool_use",
+          "stop_sequence" => nil,
+          "stop_details" => nil,
+          "container" => nil
+        },
+        "usage" => %{"output_tokens" => 11}
+      },
+      %{"type" => "message_stop"}
+    ]
+
+    state =
+      Enum.reduce(events, NativeStream.new(id), fn event, state ->
+        assert {:ok, next} = NativeStream.feed(state, event)
+        next
+      end)
+
+    assert {:ok, streamed} = NativeStream.finish(state)
+    assert streamed.content == plain["content"]
+
+    for invalid <- [
+          %{current | "stop_details" => %{"type" => "refusal"}},
+          %{current | "container" => %{"id" => "container"}},
+          %{current | "diagnostics" => %{}},
+          Map.put(current, "extra", nil),
+          %{current | "content" => [Map.put(call, "caller", %{"type" => "code_execution"})]}
+        ] do
+      assert {:error, :invalid_native_content} =
+               NativeContent.response(model(), true, id, Jason.encode!(invalid))
+    end
+
+    [message_start, block_start | rest] = events
+
+    for refused <- [
+          [put_in(message_start, ["message", "stop_details"], %{"type" => "refusal"})],
+          [put_in(message_start, ["message", "extra"], nil)],
+          [message_start, put_in(block_start, ["content_block", "caller", "type"], "server")],
+          [message_start, block_start] ++
+            List.update_at(rest, 2, &put_in(&1, ["delta", "container"], %{"id" => "c"}))
+        ] do
+      assert {:error, _failed} =
+               Enum.reduce_while(refused, {:ok, NativeStream.new(id)}, fn event, {:ok, state} ->
+                 case NativeStream.feed(state, event) do
+                   {:ok, next} -> {:cont, {:ok, next}}
+                   failed -> {:halt, failed}
+                 end
+               end)
+    end
+  end
+
   test "complete native arrays round trip with exact strings, order, IDs and parsed arguments" do
     content = [
       %{"type" => "thinking", "thinking" => "summary\n猫", "signature" => "signature+/="},

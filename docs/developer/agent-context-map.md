@@ -7456,3 +7456,24 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   environment of platform binaries (`/bin/bash` and its `/bin/dd` children)
   from every unprivileged reader, so no Darwin lane can read the writer's own
   block.
+
+<a id="disposition-m7-t17-operator-override-2026-10-11"></a>
+### M7 release matrix restarts on a fresh index under an agent operator, 2026-10-11
+
+- **Decision.** The maintainer overrode, for M7's closure release matrix, the
+  rule that a started lane which did not pass ends its candidate's matrix and
+  the requirement of a committed attendance-procedure repair before another
+  run. The consumed index and its run outputs are retained beside the fresh
+  one under the evidence root's `t17-release/attempt1/`. The recreated index
+  is byte-identical to the committed head's (SHA-256 `7c63d8ec…`). The
+  maintainer authorized the coding agent to load the two provider keys and to
+  answer the attended prompts as the operator; evidence names it.
+- **Cause.** On `d00e06eb` the first matrix's real-provider lane 1 saw no
+  answer at its skill-import prompt, before any model call. The second, with
+  both prompts answered, met Anthropic wire drift: `message_start` and
+  `message_delta` gained null `container`, `stop_details` and `diagnostics`
+  members and `tool_use` blocks gained `caller: {"type": "direct"}`, which
+  the exact native envelope checks refused as `model_call_failed`.
+- **Fix.** The native stream and buffered content admit those members only
+  when null and drop only a direct caller; any other value or member is still
+  refused.

@@ -15,6 +15,7 @@ defmodule Loopex.LLM.ReqLLM.NativeStream do
   This module emits no public progress and grants no disclosure eligibility.
   """
 
+  alias Loopex.LLM.ReqLLM.NativeContent
   alias Loopex.Model.ContentReferences
   alias ReqLLM.Streaming.SSE
   alias ServerSentEvents.Parser
@@ -173,8 +174,11 @@ defmodule Loopex.LLM.ReqLLM.NativeStream do
   defp step(%{phase: :new} = state, %{"type" => "message_start", "message" => message} = event)
        when map_size(event) == 2 and is_map(message) do
     with true <-
-           Enum.sort(Map.keys(message)) ==
+           NativeContent.envelope?(
+             message,
              ~w(content id model role stop_reason stop_sequence type usage),
+             ~w(container diagnostics stop_details)
+           ),
          true <- message["type"] == "message" and message["role"] == "assistant",
          true <- message["content"] == [] and is_nil(message["stop_reason"]),
          true <- is_nil(message["stop_sequence"]),
@@ -234,7 +238,12 @@ defmodule Loopex.LLM.ReqLLM.NativeStream do
        )
        when phase in [:blocks, :ending] and map_size(event) == 3 and is_map(delta) and
               is_map(counters) do
-    with true <- Enum.sort(Map.keys(delta)) == ~w(stop_reason stop_sequence),
+    with true <-
+           NativeContent.envelope?(
+             delta,
+             ~w(stop_reason stop_sequence),
+             ~w(container stop_details)
+           ),
          true <-
            is_nil(delta["stop_reason"]) or
              (text?(delta["stop_reason"]) and byte_size(delta["stop_reason"]) <= 256),
@@ -268,6 +277,13 @@ defmodule Loopex.LLM.ReqLLM.NativeStream do
   defp open_block(%{"type" => "redacted_thinking", "data" => value} = block)
        when map_size(block) == 2 and is_binary(value) and byte_size(value) > 0,
        do: {:ok, %{block: block}}
+
+  defp open_block(%{"type" => "tool_use", "caller" => _} = block) do
+    case NativeContent.direct_call(block) do
+      ^block -> :invalid
+      direct -> open_block(direct)
+    end
+  end
 
   defp open_block(%{"type" => "tool_use", "id" => id, "name" => name, "input" => input} = block)
        when map_size(block) == 4 and is_map(input) and map_size(input) == 0 do
