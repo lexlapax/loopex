@@ -10,10 +10,27 @@ awaited actor's own events (`Loopex.EventWait.await_receive/1`), including the
 whichever order it lands; per-worker fixture marker staging fixed the
 credential-rotation race (`timing-sweep/`). The attempts writer now releases
 its lock before a stopping call or `close/1` answers, and closing a writer that
-already stopped is a no-op. Review then found the sweep had let the run-cutoff retention-join test pass without the join; it again requires the join, and T17 is reused across that test-only change ([disposition](../developer/agent-context-map.md#disposition-m7-release-matrix-reuse-2026-10-11)). `m7.long` overflows its 4,000-token budget from
-three fixed reference prompts
+already stopped is a no-op. Review found the sweep had let the run-cutoff
+retention-join test pass without the join; `69e0d84a` restored it. `m7.long`
+overflows its 4,000-token budget from three fixed reference prompts
 ([disposition](../developer/agent-context-map.md#disposition-m7-long-overflow-prompts-2026-10-10)),
 and the plan records the campaign's committed attempts head.
+
+The Darwin run of `f85d7952` failed 34 of 942 `loopex_cli` tests. Under macOS's
+symlinked `/var/folders` temporary root, three owners met a logical path where
+they hold physical ones: the fixture policy rendered the oracle runner from
+whichever spelling its caller passed, so the case runner's pinned bytes never
+matched preparation, where all 29 harness failures stopped first; `Delegation.host/4` opened retained helper
+objects, which refuse a symlinked ancestor, under the configured root; and the
+M7 restore harness passed a logical destination to the physical restore
+administrator. The runner now renders physical workspace and oracle paths, the
+helper owner opens the physical root and placement owner, and the restore
+harness resolves its attempt root; symlinked-root tests cover the first two on
+every host. Three tests passed once stdin was `/dev/null` as `check.sh` runs
+them. The output test selects BSD `script` syntax on Darwin, and its Darwin
+environment proof follows the maintainer's
+[disposition](../developer/agent-context-map.md#disposition-m7-darwin-writer-environment-2026-10-11).
+Those fixes change M7 harness source, so T17 runs on the new candidate.
 
 ### Closure candidate nominated, 2026-10-10
 
