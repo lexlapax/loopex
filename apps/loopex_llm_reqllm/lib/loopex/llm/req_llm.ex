@@ -343,14 +343,9 @@ defmodule Loopex.LLM.ReqLLM do
   end
 
   defp prepare_transport(%{model: "anthropic:" <> _} = request, context, options) do
-    with {:ok, prepared} <-
+    with {:ok, identity} <- identity(request.model),
+         {:ok, prepared} <-
            NativeTransport.prepare(request, context, Keyword.delete(options, :api_key)) do
-      identity = %{
-        provider: "anthropic",
-        model: prepared.model.id,
-        endpoint: Keyword.fetch!(prepared.options, :base_url)
-      }
-
       {:ok, identity, Keyword.put(options, :loopex_native_prepared, prepared)}
     end
   end
