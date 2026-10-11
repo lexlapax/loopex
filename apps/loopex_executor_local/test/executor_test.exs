@@ -183,8 +183,11 @@ defmodule Loopex.Executor.LocalTest do
         )
       end)
 
-    assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
-    assert_receive {:session_effect_fence_checked, worker, ^barrier, :filesystem}, 2_000
+    await_task_event(:session_tool_grant_requested)
+
+    assert {:session_effect_fence_checked, worker, ^barrier, :filesystem} =
+             await_task_event(:session_effect_fence_checked)
+
     monitor = Process.monitor(worker)
 
     try do
@@ -242,7 +245,7 @@ defmodule Loopex.Executor.LocalTest do
         )
       end)
 
-    assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
+    await_task_event(:session_tool_grant_requested)
     assert_receive {:session_effect_fence_checked, worker, ^barrier, :shell}, 5_000
     monitor = Process.monitor(worker)
 
@@ -352,7 +355,7 @@ defmodule Loopex.Executor.LocalTest do
 
     parent = self()
     running = Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
-    assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
+    await_task_event(:session_tool_grant_requested)
 
     assert_receive {:executor_process_started, job_id, "loopex.bash", ["PATH"]},
                    5_000
@@ -1496,7 +1499,7 @@ defmodule Loopex.Executor.LocalTest do
     assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
 
     send(holders.released, {:release, reservations.released})
-    assert_receive {:holder_released, :released}, 1_000
+    receive(do: ({:holder_released, :released} -> :ok))
     assert await_reservation_count(fixture.executor, job.job_id, 2, 2_000)
     assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
 
@@ -1508,7 +1511,7 @@ defmodule Loopex.Executor.LocalTest do
     assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
 
     send(holders.survivor, {:release, reservations.survivor})
-    assert_receive {:holder_released, :survivor}, 1_000
+    receive(do: ({:holder_released, :survivor} -> :ok))
     assert await_reservation_count(fixture.executor, job.job_id, 0, 2_000)
 
     assert Local.receipt(fixture.executor, job.job_id) == {:error, :effect_unresolved},
@@ -1622,7 +1625,7 @@ defmodule Loopex.Executor.LocalTest do
              "the same-job joiners never obtained independent reservations"
 
       send(released_joiner, {:release, released_ref})
-      assert_receive {:holder_released, :owner_test_release}, 1_000
+      receive(do: ({:holder_released, :owner_test_release} -> :ok))
 
       assert await_reservation_count(fixture.executor, job.job_id, 3, 2_000),
              "releasing one joiner erased another same-job holder"
@@ -2179,7 +2182,7 @@ defmodule Loopex.Executor.LocalTest do
     Process.exit(fixture.executor, :kill)
     assert_receive {:DOWN, ^executor_monitor, :process, _executor, :killed}, 2_000
 
-    assert {:abandoned, :effect_owner_lost, true, :none} = Task.await(running, 2_000)
+    assert {:abandoned, :effect_owner_lost, true, :none} = Task.await(running, :infinity)
     assert_receive {:DOWN, ^effect_monitor, :process, ^effect_worker, :killed}, 2_000
 
     send(effect_worker, {barrier_ref, :perform_effect})
@@ -2254,7 +2257,7 @@ defmodule Loopex.Executor.LocalTest do
         end)
       end)
 
-    assert_receive :reservation_claim_held, 1_000
+    receive(do: (:reservation_claim_held -> :ok))
     started = System.monotonic_time(:millisecond)
     result = Local.execute(fixture.executor, job, grant)
     elapsed = System.monotonic_time(:millisecond) - started
@@ -2366,6 +2369,19 @@ defmodule Loopex.Executor.LocalTest do
 
       _other ->
         exclusion_trace_loop(parent, events)
+    end
+  end
+
+  # Concept: a spawned job, holder or claim task is awaited on its own event.
+  # Technical depth: the producer must first be scheduled and reach the
+  # executor or ledger, so a fixed window started by this process would measure
+  # only its own scheduling. Tasks are linked and holders report every step;
+  # the case's ExUnit timeout bounds an event that never comes. The holder and
+  # claim waits use the same plain `receive` with their exact message.
+  defp await_task_event(tag) do
+    receive do
+      message when is_tuple(message) and tuple_size(message) > 1 and elem(message, 0) == tag ->
+        message
     end
   end
 

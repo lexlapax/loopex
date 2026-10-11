@@ -305,14 +305,21 @@ defmodule LoopexCli.AskOSSignalTest do
 
   defp await_exit(state, timeout) do
     result = await_port_exit(state.port, "", System.monotonic_time(:millisecond) + timeout)
-    assert_process_gone(state.child_pid, System.monotonic_time(:millisecond) + 2_000)
-
-    assert_process_gone(
-      Integer.to_string(state.launcher_pid),
-      System.monotonic_time(:millisecond) + 2_000
-    )
-
+    await_process_gone(state.child_pid)
+    await_process_gone(Integer.to_string(state.launcher_pid))
     result
+  end
+
+  # Concept: after the wrapper exits, the child VM and launcher are awaited
+  # as their own OS exits, never against a test clock.
+  # Technical depth: a halting VM's teardown is scheduled by the host OS, so a
+  # fixed window would measure host load. A process that never exits fails
+  # the case under the ExUnit test timeout.
+  defp await_process_gone(pid) do
+    if os_process_alive?(pid) do
+      Process.sleep(10)
+      await_process_gone(pid)
+    end
   end
 
   defp await_port_exit(port, output, deadline) do

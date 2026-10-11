@@ -65,7 +65,18 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
 
       on_exit(fn -> stop_caller(caller) end)
 
-      assert_receive {:creation_checkpoint, ^probe, ^local, reference, ^target}, 1_000
+      reference =
+        receive do
+          {:creation_checkpoint, ^probe, ^local, reference, ^target} ->
+            reference
+
+          {:original_reply, reply} ->
+            flunk("creation answered before its checkpoint: #{inspect(reply)}")
+
+          {:DOWN, ^caller_monitor, :process, ^caller, reason} ->
+            flunk("creation caller exited before its checkpoint: #{inspect(reason)}")
+        end
+
       original = Fixture.capture(runtime, path, terminal)
 
       actors =
@@ -73,11 +84,13 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
           [original.action.pid, original.action.group, original.action.worker]
 
       monitors = Enum.map(Enum.uniq(actors), &{&1, Process.monitor(&1)})
-      cutoff = System.monotonic_time(:millisecond) + 1_000
       Process.exit(runtime.supervisor, :kill)
-      join(monitors, cutoff)
-      assert_receive {:original_reply, {:error, :runtime_unavailable}}, remaining(cutoff)
-      assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, remaining(cutoff)
+      join(monitors)
+
+      assert {:original_reply, {:error, :runtime_unavailable}} =
+               receive(do: ({:original_reply, _reply} = reply -> reply))
+
+      assert {:DOWN, ^caller_monitor, :process, ^caller, :normal} = await_down(caller_monitor)
       refute Runtime.alive?(runtime)
       send(probe, {:release, reference})
       stop_local(local)
@@ -275,55 +288,58 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
 
   defp stop_runtime(runtime) do
     if Process.alive?(runtime.supervisor) do
-      cutoff = System.monotonic_time(:millisecond) + 1_000
       monitor = Process.monitor(runtime.supervisor)
       assert :ok = Runtime.stop(runtime)
-      root = runtime.supervisor
-      assert_receive {:DOWN, ^monitor, :process, ^root, _}, remaining(cutoff)
+      await_down(monitor)
     end
   end
 
   defp stop_local(local) do
     if Process.alive?(local) do
-      cutoff = System.monotonic_time(:millisecond) + 1_000
       monitor = Process.monitor(local)
       GenServer.stop(local)
-      assert_receive {:DOWN, ^monitor, :process, ^local, _}, remaining(cutoff)
+      await_down(monitor)
     end
   end
 
   defp stop_probe(probe) do
     if Process.alive?(probe) do
-      cutoff = System.monotonic_time(:millisecond) + 1_000
       monitor = Process.monitor(probe)
       send(probe, :stop)
-      assert_receive {:DOWN, ^monitor, :process, ^probe, _}, remaining(cutoff)
+      await_down(monitor)
     end
   end
 
   defp release_probe(probe) do
     if Process.alive?(probe) do
-      cutoff = System.monotonic_time(:millisecond) + 1_000
+      monitor = Process.monitor(probe)
       reference = make_ref()
       send(probe, {:release_all, self(), reference})
-      assert_receive {:creation_probe_released, ^probe, ^reference}, remaining(cutoff)
+
+      receive do
+        {:creation_probe_released, ^probe, ^reference} -> Process.demonitor(monitor, [:flush])
+        {:DOWN, ^monitor, :process, ^probe, reason} -> flunk("probe exited: #{inspect(reason)}")
+      end
     end
   end
 
   defp stop_caller(caller) do
     if Process.alive?(caller) do
-      cutoff = System.monotonic_time(:millisecond) + 1_000
       monitor = Process.monitor(caller)
       Process.exit(caller, :kill)
-      assert_receive {:DOWN, ^monitor, :process, ^caller, _}, remaining(cutoff)
+      await_down(monitor)
     end
   end
 
-  defp join(monitors, cutoff) do
-    for {actor, monitor} <- monitors do
-      assert_receive {:DOWN, ^monitor, :process, ^actor, _}, remaining(cutoff)
-    end
+  defp join(monitors) do
+    for {_actor, monitor} <- monitors, do: await_down(monitor)
   end
 
-  defp remaining(cutoff), do: max(cutoff - System.monotonic_time(:millisecond), 0)
+  # Concept: every join and step waits for the actor's own event.
+  # Technical depth: each actor must still be scheduled to stop, unwind or
+  # answer, so a fixed window started by this process would measure only its
+  # own scheduling. A DOWN is always delivered for a monitored process, and the
+  # case's ExUnit timeout bounds any other event that never comes.
+  defp await_down(monitor),
+    do: receive(do: ({:DOWN, ^monitor, :process, _pid, _reason} = down -> down))
 end

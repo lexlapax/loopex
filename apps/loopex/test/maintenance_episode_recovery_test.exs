@@ -84,7 +84,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     assert {:ok, ^session} =
              Loopex.resume_session(successor.runtime, session, command_id: "resume-headroom")
 
-    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    rows = await_parent_terminal(successor, session, run_id)
     assert List.last(rows).payload["outcome"] == "completed"
     assert [episode] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
     assert episode.payload["trigger"] == "thinking_headroom"
@@ -179,7 +179,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                command_id: "resume-irreducible-headroom"
              )
 
-    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    rows = await_parent_terminal(successor, session, run_id)
     assert [refusal, terminal] = Enum.take(rows, -2)
     assert refusal.payload["failure"]["category"] == "thinking_exchange_headroom"
     assert refusal.payload["failure"]["dimension"] == "context_tokens"
@@ -257,7 +257,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       join_wait = metadata.deadline - System.system_time(:millisecond) + 5_000
       assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, join_wait
       assert System.system_time(:millisecond) >= metadata.deadline
-      rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+      rows = await_parent_terminal(successor, session, run_id)
       ending = Enum.find(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
       assert ending.payload["episode_id"] == episode["episode_id"]
       assert ending.payload["result"]["checkpoint_id"] == original.active_checkpoint
@@ -379,7 +379,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       assert replacement_state.durable.checkpoints == original.checkpoints
       assert replacement_state.durable.charged == original.charged
       assert {:ok, ^session} = Loopex.activate_resume(replacement_activation)
-      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      rows = await_parent_terminal(successor, session, episode["run_id"])
       assert List.last(rows).payload["outcome"] == "completed"
       refute Enum.any?(rows, &(&1.payload.kind == "context_admission_refused_v2"))
 
@@ -464,7 +464,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       Process.exit(worker, :kill)
       assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 5_000
 
-      rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+      rows = await_parent_terminal(successor, session, run_id)
       events = Fixture.events(successor, session)
 
       if @phase == :recovery_representation do
@@ -570,7 +570,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                Loopex.command(attachment, %{type: :abort, command_id: "abort-held-source"})
 
       assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 5_000
-      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      rows = await_parent_terminal(successor, session, episode["run_id"])
       assert [ending, terminal] = Enum.take(rows, -2)
       assert ending.payload.kind == "maintenance_episode_terminal_v1"
       assert terminal.payload.kind == "run_terminal_committed"
@@ -623,7 +623,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       refute Enum.any?(before, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
       assert {:ok, ^session} = Loopex.activate_resume(activation)
 
-      rows = await_terminal(successor, session, now() + 5_000)
+      rows = await_terminal(successor, session)
       endings = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
       assert [prefix] = endings
       assert prefix.payload["episode_id"] == episode["episode_id"]
@@ -696,7 +696,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     assert {:ok, ^session} =
              Loopex.resume_session(successor.runtime, session, command_id: "resume")
 
-    rows = await_terminal(successor, session, now() + 5_000)
+    rows = await_terminal(successor, session)
     assert [prefix, terminal] = Enum.take(rows, -2)
     assert prefix.payload.kind == "maintenance_episode_terminal_v1"
 
@@ -753,7 +753,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       assert {:ok, ^session} =
                Loopex.resume_session(successor.runtime, session, command_id: "resume")
 
-      rows = await_terminal(successor, session, now() + 5_000)
+      rows = await_terminal(successor, session)
       assert [prefix] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
       assert prefix.payload["episode_id"] == episode["episode_id"]
       assert prefix.payload["result"]["checkpoint_id"] == nil
@@ -843,7 +843,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       coordinator = :sys.get_state(children.control).sessions[session].coordinator
       monitor = Process.monitor(coordinator)
       assert {:ok, ^session} = Loopex.activate_resume(activation)
-      rows = await_terminal(successor, session, now() + 5_000)
+      rows = await_terminal(successor, session)
       assert [prefix] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
       assert prefix.payload["episode_id"] == episode["episode_id"]
 
@@ -956,7 +956,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                  )
       end
 
-      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      rows = await_parent_terminal(successor, session, episode["run_id"])
       assert Enum.count(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1")) == 1
 
       assert [completed] =
@@ -1018,7 +1018,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       assert {:ok, ^session} =
                Loopex.resume_session(successor.runtime, session, command_id: "resume")
 
-      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      rows = await_parent_terminal(successor, session, episode["run_id"])
 
       assert Enum.count(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1")) ==
                if(@committed, do: 1, else: 0)
@@ -1100,7 +1100,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                  Loopex.resume_session(successor.runtime, session, command_id: "resolve-reserve")
       end
 
-      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      rows = await_parent_terminal(successor, session, episode["run_id"])
       assert [prefix] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
 
       assert [refusal, terminal] =
@@ -1189,7 +1189,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                  Loopex.resume_session(successor.runtime, session, command_id: "resolve-#{@mode}")
       end
 
-      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      rows = await_parent_terminal(successor, session, episode["run_id"])
       assert [prefix] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
 
       assert [refusal, terminal] =
@@ -1357,7 +1357,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                  )
       end
 
-      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      rows = await_parent_terminal(successor, session, episode["run_id"])
 
       if @phase == :recovery_representation do
         assert AgentLoopTestModel.dispatched(successor.model) == []
@@ -1398,7 +1398,12 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         assert provenance["kind"] == "compaction_summary"
         assert provenance["summary"] == "live retained facts"
         assert List.last(ordinary.messages) == %{"role" => "user", "content" => "retained"}
-        assert_progress({:loopex_progress, %{kind: :text_delta, text: "ordinary delta"}}, 5_000)
+        # The ordinary call already ran; its relayed delta is awaited as the
+        # relay's own event rather than in a window started at acceptance.
+        assert_progress(
+          {:loopex_progress, %{kind: :text_delta, text: "ordinary delta"}},
+          :infinity
+        )
 
         refute_progress_received(
           {:loopex_progress, %{kind: :text_delta, text: "PRIVATE_SUMMARY_DELTA"}}
@@ -1494,7 +1499,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     assert AgentLoopTestModel.dispatched(successor.model) == []
     assert {:ok, ^session} = Loopex.activate_resume(activation)
 
-    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    rows = await_parent_terminal(successor, session, run_id)
 
     assert Enum.count(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1")) == 1,
            inspect(Enum.map(rows, & &1.payload.kind))
@@ -1527,7 +1532,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       Loopex.prepare_resume_session(successor.runtime, session, "resume-unconfigured")
 
     assert {:ok, ^session} = Loopex.activate_resume(activation)
-    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    rows = await_parent_terminal(successor, session, run_id)
 
     refute Enum.any?(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
     assert [refusal] = Enum.filter(rows, &(&1.payload.kind == "context_admission_refused_v2"))
@@ -1581,7 +1586,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     assert {:ok, ^session} =
              Loopex.resume_session(successor.runtime, session, command_id: "resume-excerpt")
 
-    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    rows = await_parent_terminal(successor, session, run_id)
     assert [episode] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
     assert [ending] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
     assert ending.payload["episode_id"] == episode.payload["episode_id"]
@@ -1605,7 +1610,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                command_id: "resume-source-numeric"
              )
 
-    rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+    rows = await_parent_terminal(successor, session, episode["run_id"])
     assert Enum.count(rows, &(&1.payload.kind == "maintenance_request_committed_v1")) == 1
     assert [ending] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
     assert ending.payload["result"]["checkpoint_id"] != nil
@@ -1666,7 +1671,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     assert {:ok, ^session} =
              Loopex.resume_session(successor.runtime, session, command_id: "resume-system-limit")
 
-    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    rows = await_parent_terminal(successor, session, run_id)
     assert [episode] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
     assert [refusal] = Enum.filter(rows, &(&1.payload.kind == "context_admission_refused_v2"))
     assert refusal.payload["episode_id"] == episode.payload["episode_id"]
@@ -1690,7 +1695,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       Loopex.prepare_resume_session(successor.runtime, session, "resume-irreducible")
 
     assert {:ok, ^session} = Loopex.activate_resume(activation)
-    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    rows = await_parent_terminal(successor, session, run_id)
 
     refute Enum.any?(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
     assert [refusal] = Enum.filter(rows, &(&1.payload.kind == "context_admission_refused_v2"))
@@ -1702,7 +1707,11 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     stop_and_join(successor, session)
   end
 
-  defp await_parent_terminal(fixture, session, run, cutoff) do
+  # Concept: the parent run's own committed terminal ends this poll.
+  # Technical depth: the terminal follows model, maintenance and relay work the
+  # loaded host schedules after resume, so a cutoff started here would measure
+  # only that scheduling; the case's ExUnit timeout bounds a run that never ends.
+  defp await_parent_terminal(fixture, session, run) do
     rows = Fixture.records(fixture, session)
 
     if Enum.any?(
@@ -1711,9 +1720,8 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
        ) do
       rows
     else
-      assert now() < cutoff
       Process.sleep(1)
-      await_parent_terminal(fixture, session, run, cutoff)
+      await_parent_terminal(fixture, session, run)
     end
   end
 
@@ -2223,15 +2231,15 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     end)
   end
 
-  defp await_terminal(fixture, session, cutoff) do
+  # The episode's own committed terminal ends this poll, as for the parent run.
+  defp await_terminal(fixture, session) do
     rows = Fixture.records(fixture, session)
 
     if Enum.any?(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1")) do
       rows
     else
-      assert now() < cutoff
       Process.sleep(1)
-      await_terminal(fixture, session, cutoff)
+      await_terminal(fixture, session)
     end
   end
 
@@ -2255,6 +2263,4 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       assert reason in [:normal, :shutdown]
     end
   end
-
-  defp now, do: System.monotonic_time(:millisecond)
 end

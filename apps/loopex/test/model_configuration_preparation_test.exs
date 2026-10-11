@@ -1,9 +1,17 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/model_preparation_conformance.exs", __DIR__)
 
 defmodule Loopex.ModelConfigurationPreparationTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
+
+  # Concept: a callback started by a spawned command is awaited on its own event.
+  # Technical depth: `:infinity` marks waits for the first message of a freshly
+  # scheduled caller, callback or model turn, which a fixed window would only
+  # race against scheduling. The runtime is linked to the case and ExUnit's
+  # per-test timeout is the outer bound.
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.Runtime.{SessionState, ProviderLifetime}
   alias Loopex.ModelPreparationConformance, as: Conformance
@@ -212,7 +220,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
                %{type: :prompt, command_id: "prompt", content: "hold"}
              )
 
-    assert_receive {:holding, model_worker}, 1_000
+    await_receive({:holding, model_worker})
 
     assert {:error, :configuration_not_settled} =
              Loopex.command(f.attachment, configure("active"))
@@ -232,7 +240,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   test "stalled preparation keeps status serviceable and abort joins before later admission" do
     f = fixture(mode: :hold)
     caller = Task.async(fn -> Loopex.command(f.attachment, configure("held")) end)
-    assert_receive {:preparing, worker, _, _, _, _, _}, 1_000
+    await_receive({:preparing, worker, _, _, _, _, _})
     monitor = Process.monitor(worker)
     assert {:ok, status} = Loopex.session_status(f.runtime, f.session)
     assert status.active_run_id == nil
@@ -265,7 +273,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     assert {:error, :no_active_run} = Loopex.command(f.attachment, abort)
     Agent.update(f.controller, &%{&1 | mode: :hold})
     caller = Task.async(fn -> Loopex.command(f.attachment, configure("held-after-abort")) end)
-    assert_receive {:preparing, worker, _, _, _, _, _}, 1_000
+    await_receive({:preparing, worker, _, _, _, _, _})
     assert {:error, :no_active_run} = Loopex.command(f.attachment, abort)
 
     assert {:error, :idempotency_conflict} =
@@ -286,8 +294,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   test "caller death retires callback and descendants without retaining a successful candidate" do
     f = fixture(mode: :hold_descendant)
     caller = spawn(fn -> Loopex.command(f.attachment, configure("lost")) end)
-    assert_receive {:preparing, worker, _, _, _, _, _}, 1_000
-    assert_receive {:preparation_child, child}, 1_000
+    await_receive({:preparing, worker, _, _, _, _, _})
+    await_receive({:preparation_child, child})
     monitor = Process.monitor(worker)
     child_monitor = Process.monitor(child)
     caller_monitor = Process.monitor(caller)
@@ -301,8 +309,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   test "runtime stop joins stalled preparation and descendants without model or executor dispatch" do
     f = fixture(mode: :hold_descendant)
     caller = Task.async(fn -> Loopex.command(f.attachment, configure("stop")) end)
-    assert_receive {:preparing, worker, _, _, _, _, _}, 1_000
-    assert_receive {:preparation_child, child}, 1_000
+    await_receive({:preparing, worker, _, _, _, _, _})
+    await_receive({:preparation_child, child})
     monitor = Process.monitor(worker)
     child_monitor = Process.monitor(child)
     assert :ok = Loopex.stop(f.runtime)
@@ -318,8 +326,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   test "quiesce retires pending preparation before returning its committed owner fence" do
     f = fixture(mode: :hold_descendant)
     caller = Task.async(fn -> Loopex.command(f.attachment, configure("quiesce")) end)
-    assert_receive {:preparing, worker, _, _, _, _, _}, 1_000
-    assert_receive {:preparation_child, child}, 1_000
+    await_receive({:preparing, worker, _, _, _, _, _})
+    await_receive({:preparation_child, child})
     monitors = Enum.map([worker, child], &{&1, Process.monitor(&1)})
     session = f.session
     assert {:ok, %{fences: %{^session => :committed}}} = Loopex.Runtime.quiesce(f.runtime)
@@ -418,7 +426,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       end)
 
     caller_monitor = Process.monitor(caller)
-    assert_receive {:preparing, callback, _, _, _, _, _}, 1_000
+    await_receive({:preparing, callback, _, _, _, _, _})
     assert_receive {:record_held_before_linearization, waiter, store, ^kind, transaction}, 5_000
     assert store == f.store
     refute Process.alive?(callback)
@@ -455,8 +463,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   test "owner loss joins callback and managed descendants before a successor can prepare" do
     f = fixture(mode: :hold_descendant)
     caller = Task.async(fn -> Loopex.command(f.attachment, configure("old-owner")) end)
-    assert_receive {:preparing, callback, _, _, _, _, _}, 1_000
-    assert_receive {:preparation_child, child}, 1_000
+    await_receive({:preparing, callback, _, _, _, _, _})
+    await_receive({:preparation_child, child})
     {:ok, children} = Loopex.Runtime.Supervisor.children(f.runtime.supervisor)
     [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
     owner_state = :sys.get_state(owner)
@@ -735,7 +743,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     assert_receive {:preparation_child, child}, 1_000
     monitor = Process.monitor(child)
     assert {:error, :provider_call_failed} = Task.await(caller, 10_000)
-    assert_receive {:DOWN, ^monitor, :process, ^child, :killed}, 1_000
+    await_receive({:DOWN, ^monitor, :process, ^child, :killed})
     assert configuration_records(f) == []
 
     assert {:error, :runtime_unavailable} =
@@ -752,7 +760,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   test "the actual captured 60000 millisecond preparation cutoff retires a stalled callback" do
     f = fixture(mode: :hold)
     caller = Task.async(fn -> Loopex.command(f.attachment, configure("deadline")) end)
-    assert_receive {:preparing, worker, _, _, _, context, _}, 1_000
+    await_receive({:preparing, worker, _, _, _, context, _})
     monitor = Process.monitor(worker)
     start = System.monotonic_time(:millisecond)
     Conformance.assert_context(context, 5_000)
@@ -1422,7 +1430,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
         Loopex.Runtime.create_session_with_genesis(f.runtime, "late-child", %{}, genesis)
       end)
 
-    assert_receive {:preparing, preparer, _, %{"model" => "scripted:v2"}, [], _, _}, 1_000
+    await_receive({:preparing, preparer, _, %{"model" => "scripted:v2"}, [], _, _})
     past = System.monotonic_time(:millisecond) - 1
     :sys.replace_state(control, &put_in(&1.creation.cutoff, past))
     send(preparer, :release)

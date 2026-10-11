@@ -86,12 +86,21 @@ defmodule Loopex.Executor.Local.AdmissionObservationWaitTest do
     try do
       {caller, monitor} = execute(local, request, grant)
 
-      assert_receive {:trace, ^local, :receive,
-                      {:"$gen_call", {^caller, _tag}, {:permit, ^request, ^grant, reservation}}},
-                     1_000
+      # The spawned caller's permit and the executor's held clock are their own
+      # events; the case's ExUnit timeout bounds them, not a window started here.
+      reservation =
+        receive do
+          {:trace, ^local, :receive,
+           {:"$gen_call", {^caller, _tag}, {:permit, ^request, ^grant, reservation}}} ->
+            reservation
+        end
 
       assert is_reference(reservation)
-      assert_receive {^correlation, :clock_held, ^local}, 1_000
+
+      receive do
+        {^correlation, :clock_held, ^local} -> :ok
+      end
+
       assert :erlang.trace(local, false, [:receive]) == 1
 
       assert :ok =

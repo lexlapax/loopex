@@ -84,7 +84,11 @@ defmodule Loopex.LLM.ReqLLM.M0ChildEnvironmentConformanceTest do
       assert Port.command(port, "stop:#{nonce}:#{stop}:2000\n")
       acknowledgement = "cleanup_complete:#{nonce}:#{stop}"
       assert_receive {^port, {:data, {:eol, ^acknowledgement}}}, 2_000
-      assert_receive {^port, {:exit_status, 0}}, 500
+      # The child VM's exit after its acknowledgement is its own port event; the
+      # case's ExUnit timeout bounds an exit that never comes.
+      assert {^port, {:exit_status, 0}} =
+               receive(do: ({^port, {:exit_status, _}} = exited -> exited))
+
       assert eventually(fn -> live_group(owned.carrier) == [] end)
       refute File.exists?(namespace.namespace)
       assert System.get_env("PATH") == controlled_path

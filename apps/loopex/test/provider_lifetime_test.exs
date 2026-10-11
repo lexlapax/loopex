@@ -52,15 +52,15 @@ defmodule Loopex.Runtime.ProviderLifetimeTest do
         child
       end)
 
-    assert_receive {:provider_child_started, ^child}
+    monitor = Process.monitor(child)
+    await_child({:provider_child_started, child}, child, monitor)
     assert child in Task.Supervisor.children(workers)
     assert :unmanaged = ProviderLifetime.starter()
     assert :unmanaged = ProviderLifetime.register(child, make_ref())
 
-    monitor = Process.monitor(child)
     send(child, :stop)
-    assert_receive {:DOWN, ^monitor, :process, ^child, :normal}
-    assert eventually(fn -> Task.Supervisor.children(workers) == [] end)
+    assert down(child, monitor) == :normal
+    eventually(fn -> Task.Supervisor.children(workers) == [] end)
   end
 
   test "owner worker supervisor loss reaps a bridge child" do
@@ -87,27 +87,38 @@ defmodule Loopex.Runtime.ProviderLifetimeTest do
         Process.sleep(:infinity)
       end)
 
-    assert_receive {:provider_child_started, ^child}
     monitor = Process.monitor(child)
+    await_child({:provider_child_started, child}, child, monitor)
     # Concept: Observe the child's actual termination reason after the fault.
     # Technical depth: The acknowledgement follows this caller's monitor signal;
     # a kill propagated by a different process cannot overtake monitor setup.
     send(child, :monitor_installed)
-    assert_receive {:provider_child_monitored, ^child}
+    await_child({:provider_child_monitored, child}, child, monitor)
     Process.exit(workers, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^child, :killed}
+    assert down(child, monitor) == :killed
   end
 
-  defp eventually(fun, attempts \\ 100)
-
-  defp eventually(fun, attempts) when attempts > 0 do
-    if fun.() do
-      true
-    else
-      Process.sleep(5)
-      eventually(fun, attempts - 1)
+  # Concept: each wait ends on the child's own next event, never on a test clock.
+  # Technical depth: the child is freshly started, so a fixed window measures only
+  # how soon a loaded scheduler runs it. Its DOWN ends a wait early, and ExUnit's
+  # per-test timeout is the outer bound.
+  defp await_child(message, child, monitor) do
+    receive do
+      ^message -> :ok
+      {:DOWN, ^monitor, :process, ^child, reason} -> flunk("child exited: #{inspect(reason)}")
     end
   end
 
-  defp eventually(_fun, 0), do: false
+  defp down(child, monitor) do
+    receive do
+      {:DOWN, ^monitor, :process, ^child, reason} -> reason
+    end
+  end
+
+  defp eventually(fun) do
+    unless fun.() do
+      Process.sleep(5)
+      eventually(fun)
+    end
+  end
 end

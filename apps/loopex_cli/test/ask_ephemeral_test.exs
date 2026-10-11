@@ -399,26 +399,30 @@ defmodule LoopexCli.AskEphemeralTest do
         end
       )
 
-    runner =
-      spawn(fn ->
+    {runner, runner_monitor} =
+      spawn_monitor(fn ->
         send(
           parent,
           {:runner_result, self(), Ask.run(["ask", "--policy", "allow-all", "hello"], options)}
         )
       end)
 
-    assert_receive {:handler_installed, ^runner, reference}, 1_000
-    assert_receive :worker_entered, 1_000
+    assert {:handler_installed, ^runner, reference} =
+             await_runner(runner, runner_monitor, :handler_installed)
+
+    assert :worker_entered = await_runner(runner, runner_monitor, :worker_entered)
     :atomics.put(phase, 1, 1)
     send(runner, {options[:signal_manager].(), reference, :interrupt})
-    assert_receive :session_stopped, 1_000
-    assert_receive {:runner_result, ^runner, %{status: 130, stdout: "", stderr: ""}}, 2_000
+    assert :session_stopped = await_runner(runner, runner_monitor, :session_stopped)
+
+    assert {:runner_result, ^runner, %{status: 130, stdout: "", stderr: ""}} =
+             await_runner(runner, runner_monitor, :runner_result)
   end
 
   test "copied notices cannot starve the provisional worker reap deadline" do
     parent = self()
 
-    options =
+    base =
       seams(
         worker_after_send: fn ->
           send(parent, {:worker_parked, self()})
@@ -434,7 +438,17 @@ defmodule LoopexCli.AskEphemeralTest do
         end
       )
 
-    {runner, _runner_monitor} =
+    install = base[:install_interrupt]
+
+    # The runner is traced before its worker exists, so the result receipt
+    # that starts the reap deadline carries the VM's own timestamp.
+    options =
+      Keyword.put(base, :install_interrupt, fn main, reference ->
+        1 = :erlang.trace(main, true, [:receive, :monotonic_timestamp, {:tracer, parent}])
+        install.(main, reference)
+      end)
+
+    {runner, runner_monitor} =
       spawn_monitor(fn ->
         send(
           parent,
@@ -442,9 +456,12 @@ defmodule LoopexCli.AskEphemeralTest do
         )
       end)
 
-    assert_receive {:handler_installed, ^runner, reference}, 1_000
-    assert_receive {:worker_parked, worker}, 1_000
+    assert {:handler_installed, ^runner, reference} =
+             await_runner(runner, runner_monitor, :handler_installed)
+
+    assert {:worker_parked, worker} = await_runner(runner, runner_monitor, :worker_parked)
     worker_monitor = Process.monitor(worker)
+    assert 1 = :erlang.trace(worker, true, [:procs, :monotonic_timestamp])
     manager = options[:signal_manager].()
 
     flood =
@@ -453,11 +470,57 @@ defmodule LoopexCli.AskEphemeralTest do
       end)
 
     try do
-      assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 1_500
+      # Concept: the reap deadline is proved against the runner's own receipt
+      # of the worker result, not against when this test next looked.
+      # Technical depth: the provisional deadline starts when the runner
+      # receives that result, which a loaded scheduler can delay past this
+      # test's own observation of the parked worker. The worker's DOWN is
+      # awaited as an event; the traced receipt and exit bound the reap.
+      receive do
+        {:DOWN, ^worker_monitor, :process, ^worker, reason} -> assert reason == :killed
+      end
+
+      received_at = traced_at(runner, &match?({:receive, {^worker, ^reference, _}}, &1))
+      killed_at = traced_at(worker, &match?({:exit, :killed}, &1))
+      assert killed_at - received_at <= 1_500
     after
       if Process.alive?(flood), do: Process.exit(flood, :kill)
       if Process.alive?(runner), do: Process.exit(runner, :kill)
     end
+  end
+
+  # Concept: a spawned runner's report waits on the runner's own progress.
+  # Technical depth: the runner installs a handler, starts a session and a
+  # worker before these reports, so a fixed window would measure host load.
+  # The wait ends on the first message with the tag or the runner's DOWN,
+  # under the ExUnit test timeout.
+  defp await_runner(runner, monitor, tag) do
+    receive do
+      message when message == tag or (is_tuple(message) and elem(message, 0) == tag) ->
+        message
+
+      {:DOWN, ^monitor, :process, ^runner, reason} ->
+        flunk("runner exited before #{inspect(tag)}: #{inspect(reason)}")
+    end
+  end
+
+  defp traced_at(pid, event?) do
+    ref = :erlang.trace_delivered(pid)
+
+    receive do
+      {:trace_delivered, ^pid, ^ref} -> :ok
+    end
+
+    {:messages, messages} = Process.info(self(), :messages)
+
+    assert [at | _] =
+             for(
+               {:trace_ts, ^pid, kind, payload, at} <- messages,
+               event?.({kind, payload}),
+               do: at
+             )
+
+    System.convert_time_unit(at, :native, :millisecond)
   end
 
   defp flood_notices(runner, manager, reference) do

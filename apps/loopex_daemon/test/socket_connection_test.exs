@@ -1,6 +1,8 @@
+Code.require_file("../../loopex/test/support/event_wait.exs", __DIR__)
 Code.require_file("support/daemon_socket_fixture.exs", __DIR__)
 
 defmodule LoopexDaemon.SocketConnectionTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
   @moduletag capture_log: true
 
@@ -56,7 +58,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
     eventually(fn -> message_queue_len(holder_pid) >= 1 end)
 
     Process.exit(lease_owner, :kill)
-    eventually(fn -> holder_close_pending?(daemon.owner) end, 500)
+    eventually(fn -> holder_close_pending?(daemon.owner) end)
 
     :ok = :sys.suspend(daemon.registry)
 
@@ -1011,33 +1013,25 @@ defmodule LoopexDaemon.SocketConnectionTest do
 
   # Concept: a fixture observes creation startup before its single native create.
   # Technical depth: the public snapshot retains the literal original startup
-  # identity and deadline under one finite observation cutoff; no create is probed.
+  # identity and deadline until the runtime itself leaves `:starting`, which
+  # its own startup deadline bounds; a test-clock cutoff here would only
+  # measure scheduling. No create is probed.
   defp await_creation_startup(runtime) do
-    cutoff = now_ms() + 1_000
     assert {:ok, snapshot} = Loopex.creation_startup_status(runtime, 1_000)
-    await_creation_startup(runtime, snapshot, min(cutoff, snapshot.startup_deadline_ms))
+    await_creation_startup(runtime, snapshot)
   end
 
-  defp await_creation_startup(runtime, snapshot, cutoff) do
-    remaining = cutoff - now_ms()
-    assert remaining > 0
-
+  defp await_creation_startup(runtime, snapshot) do
     case snapshot.state do
       :ready ->
         :ok
 
       :starting ->
-        receive do
-        after
-          min(10, remaining) -> :ok
-        end
-
-        remaining = cutoff - now_ms()
-        assert remaining > 0
-        assert {:ok, next} = Loopex.creation_startup_status(runtime, min(1_000, remaining))
+        Process.sleep(10)
+        assert {:ok, next} = Loopex.creation_startup_status(runtime, 1_000)
         assert next.startup_id == snapshot.startup_id
         assert next.startup_deadline_ms == snapshot.startup_deadline_ms
-        await_creation_startup(runtime, next, cutoff)
+        await_creation_startup(runtime, next)
 
       unavailable ->
         flunk("original creation startup unavailable: #{inspect(unavailable)}")
@@ -1421,9 +1415,9 @@ defmodule LoopexDaemon.SocketConnectionTest do
     Process.put(key, [timer | Process.get(key, [])])
   end
 
+  # Concept: each join ends on the joined process's own DOWN, never a test
+  # clock; ExUnit's case timeout is the outer bound.
   defp close_callback_routing(state) do
-    cutoff = now_ms() + 1_000
-
     try do
       for timer <- Process.delete({__MODULE__, :routing_timers}) || [] do
         Process.cancel_timer(timer)
@@ -1436,14 +1430,12 @@ defmodule LoopexDaemon.SocketConnectionTest do
       assert :ok = Loopex.ProgressSink.close(state.progress_sink)
       guardian = elem(state.progress_sink, 0)
       monitor = state.progress_guardian_monitor
-      assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, max(cutoff - now_ms(), 0)
-      assert now_ms() <= cutoff
+      await_receive({:DOWN, ^monitor, :process, ^guardian, :normal})
     after
       registry = state.registry
       monitor = state.registry_monitor
       send(registry, :stop)
-      assert_receive {:DOWN, ^monitor, :process, ^registry, :normal}, max(cutoff - now_ms(), 0)
-      assert now_ms() <= cutoff
+      await_receive({:DOWN, ^monitor, :process, ^registry, :normal})
       Process.demonitor(state.listener_monitor, [:flush])
     end
   end
@@ -1594,9 +1586,18 @@ defmodule LoopexDaemon.SocketConnectionTest do
          end, :waiting}
       )
 
+    # The probe ends on the socket's own answer or exit, never a test clock.
+    monitor = Process.monitor(socket)
     send(socket, {:probe_socket_request, gate})
-    assert_receive {:socket_request_probe, ^gate, result}, 1_000
-    result
+
+    receive do
+      {:socket_request_probe, ^gate, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^socket, reason} ->
+        flunk("socket connection exited before its probe: #{inspect(reason)}")
+    end
   end
 
   defp now_ms, do: System.monotonic_time(:millisecond)

@@ -154,13 +154,18 @@ defmodule Loopex.Store.MemoryTest do
               :load_records,
               :load_events
             ] do
-        assert_receive {:trace, ^caller, :call, {GenServer, :call, [^pid, request, 30_000]}},
-                       2_000
+        # Each call is the caller's own event: it must be scheduled and finish
+        # the previous store call first, so only the case's ExUnit timeout
+        # bounds the wait.
+        assert {:trace, ^caller, :call, {GenServer, :call, [^pid, request, 30_000]}} =
+                 receive(
+                   do: ({:trace, ^caller, :call, {GenServer, :call, [^pid | _]}} = call -> call)
+                 )
 
         assert elem(request, 0) == operation
       end
 
-      assert_receive {:callbacks_done, ^caller}
+      receive(do: ({:callbacks_done, ^caller} -> :ok))
       assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}
     after
       :erlang.trace_pattern({GenServer, :call, 3}, false, [:local])

@@ -144,7 +144,7 @@ defmodule LoopexCli.ChatInterruptTest do
     assert_receive {^manager, ^ref, :chat_driver_down}, 1000
     assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}, 1000
     assert {:error, :prepared_activation_not_installed} = Interrupt.activate_prepared(activation)
-    await_abandoned(activation, System.monotonic_time(:millisecond) + 1000)
+    await_abandoned(activation)
     assert Loopex.AgentLoopTestModel.dispatched(f.fixture.model) == []
     assert Agent.get(f.fixture.executor, & &1.jobs) == []
     assert {"one\n/wait\n/quit\n", ""} == StringIO.contents(f.input)
@@ -247,8 +247,8 @@ defmodule LoopexCli.ChatInterruptTest do
       end)
 
     on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
-    assert_receive {:installed, ^host, _driver, _ref, {:ok, manager}}, 1000
-    assert_receive {:blocked_admission, worker, _id}, 1000
+    assert {:installed, ^host, _driver, _ref, {:ok, manager}} = await_report(host, :installed)
+    assert {:blocked_admission, worker, _id} = await_report(host, :blocked_admission)
     monitor = Process.monitor(worker)
     assert self() in elem(Process.info(worker, :monitored_by), 1)
     assert :ok = :gen_event.sync_notify(manager, :sigterm)
@@ -317,7 +317,7 @@ defmodule LoopexCli.ChatInterruptTest do
         receive do: (:exit -> :ok)
       end)
 
-    assert_receive {:installed, ^host, driver, _ref, {:ok, manager}}, 1000
+    assert {:installed, ^host, driver, _ref, {:ok, manager}} = await_report(host, :installed)
     state = :sys.get_state(driver)
     pids = [driver, elem(state.output, 1) | Map.keys(state.workers)]
     monitors = Enum.map(pids, &{&1, Process.monitor(&1)})
@@ -391,12 +391,17 @@ defmodule LoopexCli.ChatInterruptTest do
       end)
 
     try do
-      assert_receive {:ask_install_observed, installer, manager, ^host, _ref}, 1000
+      assert {:ask_install_observed, installer, manager, ^host, _ref} =
+               await_report(host, :ask_install_observed)
+
       installer_monitor = Process.monitor(installer)
       assert :erlang.suspend_process(manager)
       send(installer, {:ask_install_continue, gate})
-      await_queued_swap(manager, System.monotonic_time(:millisecond) + 1000)
-      assert_receive {:late_result, ^host, {:error, :interrupt_handler_unavailable}}, 2000
+      await_queued_swap(manager)
+
+      assert {:late_result, ^host, {:error, :interrupt_handler_unavailable}} =
+               await_report(host, :late_result)
+
       assert :erlang.resume_process(manager)
       await_handlers(manager, [:erl_signal_handler])
       assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :normal}, 1000
@@ -423,36 +428,49 @@ defmodule LoopexCli.ChatInterruptTest do
         Keyword.put(options, :cleanup_grace_ms, 5000)
       )
 
-  defp await_handlers(manager, expected, cutoff \\ nil) do
-    cutoff = cutoff || System.monotonic_time(:millisecond) + 1000
-    actual = :gen_event.which_handlers(manager)
+  # Concept: every wait below ends on the awaited actor's own progress, never
+  # on a test clock.
+  # Technical depth: hosts, installers and holders start or react in their own
+  # processes, so a fixed window would measure host-load scheduling rather than
+  # the product. Reports end on the tagged message or the host's DOWN; polls
+  # end on the awaited state; the ExUnit test timeout bounds both.
+  defp await_report(host, tag) do
+    monitor = Process.monitor(host)
 
-    if actual != expected do
-      assert System.monotonic_time(:millisecond) < cutoff
-      Process.sleep(10)
-      await_handlers(manager, expected, cutoff)
+    receive do
+      message when is_tuple(message) and elem(message, 0) == tag ->
+        Process.demonitor(monitor, [:flush])
+        message
+
+      {:DOWN, ^monitor, :process, ^host, reason} ->
+        flunk("#{inspect(host)} exited before #{inspect(tag)}: #{inspect(reason)}")
     end
   end
 
-  defp await_queued_swap(manager, cutoff) do
+  defp await_handlers(manager, expected) do
+    if :gen_event.which_handlers(manager) != expected do
+      Process.sleep(10)
+      await_handlers(manager, expected)
+    end
+  end
+
+  defp await_queued_swap(manager) do
     {:messages, messages} = Process.info(manager, :messages)
 
     unless Enum.any?(messages, &match?({_, _, {:swap_handler, _, _, _, _}}, &1)) do
-      assert System.monotonic_time(:millisecond) < cutoff
       Process.sleep(10)
-      await_queued_swap(manager, cutoff)
+      await_queued_swap(manager)
     end
   end
 
-  defp await_abandoned(activation, cutoff) do
+  defp await_abandoned(activation) do
     case Loopex.prepared_session_configuration(activation) do
       {:error, :resume_activation_abandoned} ->
         :ok
 
       {:error, :resume_activation_holder_mismatch} ->
-        assert System.monotonic_time(:millisecond) < cutoff
         Process.sleep(10)
-        await_abandoned(activation, cutoff)
+        await_abandoned(activation)
 
       other ->
         flunk("prepared owner did not confirm abandonment: #{inspect(other)}")

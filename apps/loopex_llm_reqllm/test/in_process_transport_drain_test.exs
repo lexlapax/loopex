@@ -103,13 +103,21 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
           :normal ->
             pre_down = System.monotonic_time(:millisecond)
             send(server, :respond)
-            assert_receive {:loopex_one_shot_teardown, ^caller, teardown_ref, ^tag}, 2_000
+            # The caller's teardown request and result are its own events; a
+            # fixed window here would only measure this process's scheduling,
+            # while the drain bound below is measured from `pre_down`.
+            assert {:loopex_one_shot_teardown, ^caller, teardown_ref, ^tag} =
+                     receive(
+                       do: ({:loopex_one_shot_teardown, ^caller, _, _} = teardown ->
+                              teardown)
+                     )
+
             stop_pool(root)
             assert_pool_gone(root)
             send(caller, {:loopex_one_shot_torn_down, teardown_ref, tag})
 
-            assert_receive {:transport_result, ^caller, {^request, %Req.Response{status: 200}}},
-                           2_000
+            assert {:transport_result, ^caller, {^request, %Req.Response{status: 200}}} =
+                     receive(do: ({:transport_result, ^caller, _} = result -> result))
 
             assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 2_000
             {pre_down, :completed}
@@ -311,8 +319,11 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
 
       {:loopex_pool_unproved, ^pid, ^reference} ->
         flunk("the tagged pool could not prove setup")
-    after
-      2_000 -> flunk("tagged pool startup did not complete")
+
+      # The root's own setup deadline bounds its reports; its DOWN ends a wait
+      # it can no longer satisfy, and the case's ExUnit timeout is the outer bound.
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        flunk("tagged pool root exited during startup: #{inspect(reason)}")
     end
   end
 

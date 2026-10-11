@@ -413,8 +413,16 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
         send(parent, {tag, RestoreIO.run(operation, limits(), probe: parent, pause_at: pause)})
       end)
 
-    assert_receive {:restore_io, guardian, worker, reference, {:installed, admitted, cutoff}},
-                   1_000
+    # The caller's own installation event or its DOWN ends this wait; no test
+    # clock bounds the freshly spawned caller's first progress.
+    {guardian, worker, reference, admitted, cutoff} =
+      receive do
+        {:restore_io, guardian, worker, reference, {:installed, admitted, cutoff}} ->
+          {guardian, worker, reference, admitted, cutoff}
+
+        {:DOWN, ^caller_monitor, :process, ^caller, reason} ->
+          flunk("restore caller exited before installation: #{inspect(reason)}")
+      end
 
     guardian_monitor = Process.monitor(guardian)
     worker_monitor = Process.monitor(worker)

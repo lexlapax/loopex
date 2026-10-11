@@ -146,7 +146,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
              task =
                Task.Supervisor.async(ReqLLM.TaskSupervisor, fn -> IO.write("host-task-usable") end)
 
-             assert :ok = Task.await(task, 1_000)
+             assert :ok = Task.await(task, :infinity)
            end) == "host-task-usable"
   catch
     kind, reason ->
@@ -517,9 +517,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert Fixture.count(fixture) == if(phase in [:before_entry, :during_call], do: 0, else: 1)
 
     if phase != :after_result do
-      assert_receive {:completed, ^caller,
-                      {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                     1_000
+      assert {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}} =
+               await_completed(caller)
 
       caller_monitor = call.caller_monitor
       assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
@@ -564,15 +563,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       assert {_output, 0} = System.cmd("/bin/kill", ["-CONT", Integer.to_string(pid)])
     end
 
-    assert_receive {:trace, ^guardian, :receive,
-                    {_port, {:data, {:eol, "cleanup_complete:" <> _binding}}}},
-                   2_000
-
+    await_cleanup_complete(guardian)
     monitor = call.monitor
-    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
+    assert {:DOWN, ^monitor, :process, ^guardian, :normal} = await_down(monitor)
 
-    assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                   1_000
+    assert {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}} =
+             await_completed(caller)
 
     caller_monitor = call.caller_monitor
     assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
@@ -1129,6 +1125,25 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     {:messages, messages} = Process.info(guardian, :messages)
     Enum.find(messages, predicate)
   end
+
+  # Concept: once the guardian runs again, each later step is awaited as that
+  # step's own event.
+  # Technical depth: the resumed provider child, the guardian's exit and the
+  # caller's report each need the scheduler; a fixed window started by this
+  # process would measure only its own scheduling. Every step follows from the
+  # guardian's bounded cleanup, and the case's ExUnit timeout bounds one that
+  # never comes.
+  defp await_cleanup_complete(guardian) do
+    receive do
+      {:trace, ^guardian, :receive, {_port, {:data, {:eol, "cleanup_complete:" <> _}}}} -> :ok
+    end
+  end
+
+  defp await_down(monitor),
+    do: receive(do: ({:DOWN, ^monitor, :process, _pid, _reason} = down -> down))
+
+  defp await_completed(caller),
+    do: receive(do: ({:completed, ^caller, _result} = completed -> completed))
 
   defp parent_state do
     {

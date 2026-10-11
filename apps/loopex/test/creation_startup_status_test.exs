@@ -1,8 +1,10 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m5_query_fault_store.exs", __DIR__)
 
 defmodule Loopex.CreationStartupStatusTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
 
   alias Loopex.ConfiguredGenesisFixture
@@ -15,7 +17,7 @@ defmodule Loopex.CreationStartupStatusTest do
     {pid, store} = fixture()
     :ok = Fixture.hold_next_creation_recovery(pid, self())
     runtime = runtime(store)
-    assert_receive {:creation_read_held, waiter, reader, %{command_id: nil}}, 1_000
+    await_receive({:creation_read_held, waiter, reader, %{command_id: nil}})
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, children} = Runtime.children(runtime)
     original = :sys.get_state(children.control)
@@ -65,18 +67,20 @@ defmodule Loopex.CreationStartupStatusTest do
 
     runtime = runtime(store)
 
-    assert_receive {:record_held_before_linearization, claim_waiter, ^pid,
-                    :runtime_control_claim_creation_domain, _claim},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, claim_waiter, ^pid,
+       :runtime_control_claim_creation_domain, _claim}
+    )
 
     on_exit(fn -> Fixture.release(claim_waiter) end)
     assert {:ok, initial} = Runtime.creation_startup_status(runtime)
     assert initial.state == :starting
     Fixture.release(claim_waiter)
 
-    assert_receive {:record_held_before_linearization, close_waiter, ^pid,
-                    :runtime_control_close_creation_reservation, _close},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, close_waiter, ^pid,
+       :runtime_control_close_creation_reservation, _close}
+    )
 
     on_exit(fn -> Fixture.release(close_waiter) end)
     assert {:ok, ^initial} = Runtime.creation_startup_status(runtime, 100)
@@ -126,14 +130,14 @@ defmodule Loopex.CreationStartupStatusTest do
     end)
 
     delayed_monitor = Process.monitor(delayed)
-    assert_receive {:initialized, ^delayed, capture, before_init, after_init}, 1_000
+    await_receive({:initialized, ^delayed, capture, before_init, after_init})
     assert capture.startup_deadline_ms >= before_init + 60_000
     assert capture.startup_deadline_ms <= after_init + 60_000
     assert {:messages, [:creation_startup]} = Process.info(delayed, :messages)
     wait_until(after_init + 20)
     assert Fixture.inspect_state(pid).creation_queries == []
     send(delayed, :enter_loop)
-    assert_receive {:creation_read_held, waiter, _, _}, 1_000
+    await_receive({:creation_read_held, waiter, _, _})
     on_exit(fn -> Fixture.release(waiter) end)
     entry = :sys.get_state(delayed).creation
     assert entry.cutoff == capture.startup_deadline_ms
@@ -219,7 +223,7 @@ defmodule Loopex.CreationStartupStatusTest do
     {_pid_b, store_b} = fixture()
     :ok = Fixture.hold_next_creation_recovery(pid_a, self())
     a = runtime(store_a)
-    assert_receive {:creation_read_held, waiter, _, _}, 1_000
+    await_receive({:creation_read_held, waiter, _, _})
     on_exit(fn -> Fixture.release(waiter) end)
     b = runtime(store_b)
     ready = await_status(b, :ready)
@@ -270,7 +274,7 @@ defmodule Loopex.CreationStartupStatusTest do
       end)
 
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
-    assert_receive {:status_started, ^caller, started}, 1_000
+    assert {:status_started, ^caller, started} = from(caller, monitor)
 
     await(fn ->
       Enum.any?(elem(Process.info(runtime.supervisor, :messages), 1), fn
@@ -281,7 +285,10 @@ defmodule Loopex.CreationStartupStatusTest do
 
     wait_until(started + 250)
     resume(runtime.supervisor)
-    assert_receive {:bounded_status, ^caller, {:error, :runtime_unavailable}, elapsed}, 1_000
+
+    assert {:bounded_status, ^caller, {:error, :runtime_unavailable}, elapsed} =
+             from(caller, monitor)
+
     assert elapsed >= timeout_ms
     assert elapsed <= timeout_ms + observation_scheduling_grace_ms
     assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
@@ -323,7 +330,7 @@ defmodule Loopex.CreationStartupStatusTest do
 
     wait_until(System.monotonic_time(:millisecond) + 101)
     :erlang.resume_process(caller)
-    assert_receive {:late_status, ^caller, {:error, :runtime_unavailable}}, 1_000
+    assert {:late_status, ^caller, {:error, :runtime_unavailable}} = from(caller, caller_monitor)
     assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
     assert {:ok, ^original} = Runtime.creation_startup_status(runtime)
   end
@@ -366,7 +373,10 @@ defmodule Loopex.CreationStartupStatusTest do
     monitor = Process.monitor(control)
     Process.exit(control, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^control, :killed}, 1_000
-    assert_receive {:status_answer, ^observer, {:error, :runtime_unavailable}}, 1_000
+
+    assert {:status_answer, ^observer, {:error, :runtime_unavailable}} =
+             from(observer, observer_monitor)
+
     assert_receive {:DOWN, ^observer_monitor, :process, ^observer, :normal}, 1_000
     replacement = await_status(runtime, :ready)
     refute replacement.startup_id == initial.startup_id
@@ -397,9 +407,9 @@ defmodule Loopex.CreationStartupStatusTest do
 
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
 
-    assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_reserve_creation, _},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^pid, :runtime_control_reserve_creation, _}
+    )
 
     on_exit(fn -> Fixture.release(waiter) end)
     assert {:ok, ^original} = Runtime.creation_startup_status(runtime)
@@ -421,7 +431,7 @@ defmodule Loopex.CreationStartupStatusTest do
       {pid, store} = fixture()
       :ok = Fixture.hold_next_creation_recovery(pid, self())
       runtime = runtime(store)
-      assert_receive {:creation_read_held, waiter, _, _}, 1_000
+      await_receive({:creation_read_held, waiter, _, _})
       on_exit(fn -> Fixture.release(waiter) end)
       assert {:ok, initial} = Runtime.creation_startup_status(runtime)
       {:ok, %{control: control}} = Runtime.children(runtime)
@@ -447,7 +457,7 @@ defmodule Loopex.CreationStartupStatusTest do
     {pid, store} = fixture()
     :ok = Fixture.hold_next_creation_recovery(pid, self())
     runtime = runtime(store)
-    assert_receive {:creation_read_held, waiter, _, _}, 1_000
+    await_receive({:creation_read_held, waiter, _, _})
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, %{control: control}} = Runtime.children(runtime)
     entry = :sys.get_state(control).creation
@@ -491,7 +501,7 @@ defmodule Loopex.CreationStartupStatusTest do
     seed_reservation(store)
     :ok = Fixture.hold_next_creation_recovery(pid, self())
     runtime = runtime(store)
-    assert_receive {:creation_read_held, first_waiter, _, _}, 1_000
+    await_receive({:creation_read_held, first_waiter, _, _})
     assert {:ok, original} = Runtime.creation_startup_status(runtime)
 
     :ok =
@@ -503,9 +513,10 @@ defmodule Loopex.CreationStartupStatusTest do
 
     Fixture.release(first_waiter)
 
-    assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_close_creation_reservation, _},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^pid,
+       :runtime_control_close_creation_reservation, _}
+    )
 
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, %{control: control}} = Runtime.children(runtime)
@@ -540,7 +551,7 @@ defmodule Loopex.CreationStartupStatusTest do
 
     wait_until(original.startup_deadline_ms + 1)
     resume(control)
-    assert_receive {:expired_status, ^observer, {:ok, snapshot}}, 1_000
+    assert {:expired_status, ^observer, {:ok, snapshot}} = from(observer, observer_monitor)
     assert_receive {:DOWN, ^observer_monitor, :process, ^observer, :normal}, 1_000
     assert_snapshot(snapshot, :unavailable, original)
     assert_snapshot(await_status(runtime, :unavailable), :unavailable, original)
@@ -569,9 +580,10 @@ defmodule Loopex.CreationStartupStatusTest do
 
     runtime = runtime(store)
 
-    assert_receive {:record_held_before_linearization, close_waiter, ^pid,
-                    :runtime_control_close_creation_reservation, _close},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, close_waiter, ^pid,
+       :runtime_control_close_creation_reservation, _close}
+    )
 
     on_exit(fn -> Fixture.release(close_waiter) end)
     {:ok, %{control: control, sessions: sessions, workers: workers}} = Runtime.children(runtime)
@@ -587,7 +599,7 @@ defmodule Loopex.CreationStartupStatusTest do
     assert_receive {:DOWN, ^close_waiter_monitor, :process, ^close_waiter, :normal}, 1_000
     assert_startup_action_joins(close_joins)
 
-    assert_receive {:creation_read_held, read_waiter, reader, %{command_id: nil}}, 1_000
+    await_receive({:creation_read_held, read_waiter, reader, %{command_id: nil}})
     on_exit(fn -> Fixture.release(read_waiter) end)
     original_control = :sys.get_state(control)
     entry = original_control.creation
@@ -708,7 +720,25 @@ defmodule Loopex.CreationStartupStatusTest do
 
   defp assert_startup_action_joins(monitors) do
     for {actor, monitor} <- monitors do
-      assert_receive {:DOWN, ^monitor, :process, ^actor, _reason}, 1_000
+      receive do
+        {:DOWN, ^monitor, :process, ^actor, _reason} -> :ok
+      end
+    end
+  end
+
+  # Concept: every wait on runtime progress ends on that progress itself.
+  # Technical depth: held Store reads, startup actor joins and status callers
+  # all follow a freshly scheduled actor, so a fixed window would measure only
+  # scheduling. The runtime is linked to the case, a caller's DOWN ends its
+  # wait, and ExUnit's per-test timeout is the outer bound. Product deadlines
+  # stay asserted from the values the product reports.
+  defp from(caller, monitor) do
+    receive do
+      message when is_tuple(message) and tuple_size(message) > 1 and elem(message, 1) == caller ->
+        message
+
+      {:DOWN, ^monitor, :process, ^caller, reason} ->
+        flunk("caller exited: #{inspect(reason)}")
     end
   end
 
@@ -767,19 +797,12 @@ defmodule Loopex.CreationStartupStatusTest do
   end
 
   defp await(check), do: await_value(fn -> if check.(), do: true end)
-  defp await_value(check), do: await_value(check, System.monotonic_time(:millisecond) + 1_000)
-
-  defp await_value(check, cutoff) do
+  # Polls state the runtime reaches on its own; no test clock bounds it.
+  defp await_value(check) do
     case check.() do
       nil ->
-        assert System.monotonic_time(:millisecond) < cutoff
-
-        receive do
-        after
-          1 -> :ok
-        end
-
-        await_value(check, cutoff)
+        Process.sleep(1)
+        await_value(check)
 
       value ->
         value

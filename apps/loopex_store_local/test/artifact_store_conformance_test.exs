@@ -842,12 +842,14 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     do: {:captured_artifact_use, bytes, reference.use_digest}
 
   # Concept: actual decode entry is observed without retaining captured payloads.
-  # Technical depth: the exact worker's arity-only BIF trace and normal DOWN share
-  # one captured fixture cutoff. A barrier drains trace before its controlled stop.
+  # Technical depth: the exact worker's arity-only BIF trace, its report and its
+  # normal DOWN are each the worker's own event, so a fixed cutoff started here
+  # would measure only this process's scheduling. Its DOWN ends a wait it can no
+  # longer satisfy, the case's ExUnit timeout is the outer bound, and a barrier
+  # drains trace before its controlled stop.
   defp observed_use_decode(bytes, digest) do
     parent = self()
     tag = make_ref()
-    cutoff = System.monotonic_time(:millisecond) + 1_000
     pattern = {:erlang, :binary_to_term, 2}
 
     {worker, monitor} =
@@ -869,9 +871,9 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       assert :erlang.trace_pattern(pattern, true, []) == 1
       assert :erlang.trace(worker, true, [:call, :arity, {:tracer, parent}]) == 1
       send(worker, {tag, :decode})
-      {result, count} = collect_use_decode(worker, tag, cutoff, 0)
+      {result, count} = collect_use_decode(worker, monitor, tag, 0)
       delivery = :erlang.trace_delivered(worker)
-      count = finish_use_decode_trace(worker, delivery, cutoff, count)
+      count = finish_use_decode_trace(worker, delivery, count)
       {result, count}
     after
       :erlang.trace(worker, false, [:call])
@@ -884,37 +886,32 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
 
         {:DOWN, ^monitor, :process, ^worker, reason} ->
           flunk("decode observer worker failed: #{inspect(reason)}")
-      after
-        max(0, cutoff - System.monotonic_time(:millisecond)) ->
-          Process.exit(worker, :kill)
-          flunk("decode observer worker did not join before its captured cutoff")
       end
     end
   end
 
-  defp collect_use_decode(worker, tag, cutoff, count) do
+  defp collect_use_decode(worker, monitor, tag, count) do
     receive do
       {:trace, ^worker, :call, {:erlang, :binary_to_term, 2}} ->
-        collect_use_decode(worker, tag, cutoff, count + 1)
+        collect_use_decode(worker, monitor, tag, count + 1)
 
       {^tag, result} ->
         {result, count}
-    after
-      max(0, cutoff - System.monotonic_time(:millisecond)) ->
-        flunk("captured use decoder did not report before its cutoff")
+
+      {:DOWN, ^monitor, :process, ^worker, reason} = down ->
+        # Leave the DOWN for the join in `observed_use_decode/2`.
+        send(self(), down)
+        flunk("captured use decoder exited before reporting: #{inspect(reason)}")
     end
   end
 
-  defp finish_use_decode_trace(worker, delivery, cutoff, count) do
+  defp finish_use_decode_trace(worker, delivery, count) do
     receive do
       {:trace, ^worker, :call, {:erlang, :binary_to_term, 2}} ->
-        finish_use_decode_trace(worker, delivery, cutoff, count + 1)
+        finish_use_decode_trace(worker, delivery, count + 1)
 
       {:trace_delivered, ^worker, ^delivery} ->
         count
-    after
-      max(0, cutoff - System.monotonic_time(:millisecond)) ->
-        flunk("captured use decode trace did not drain before its cutoff")
     end
   end
 

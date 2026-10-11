@@ -179,8 +179,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
 
     send(candidate, :finish_candidate)
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 2_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     assert :ok = Ephemeral.stop_session(session)
   end
@@ -192,10 +192,10 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
 
     stop = Task.async(fn -> Ephemeral.stop_session(session) end)
 
-    assert {:ok, :ok} = Task.yield(stop, 4_000)
+    assert :ok = Task.await(stop, :infinity)
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 2_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     assert :atomics.get(cell, 1) > 0
     refute Process.alive?(candidate)
@@ -221,8 +221,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
         }}}
     )
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 4_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     assert :atomics.get(cell, 1) > 0
     refute Process.alive?(candidate)
@@ -250,8 +250,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
 
     refute_receive {:candidate_released, _, _, _}, 50
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 4_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     assert :atomics.get(cell, 1) > 0
     refute Process.alive?(candidate)
@@ -287,8 +287,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
 
       refute_receive {:candidate_released, _, _, _}, 25
 
-      assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-               Task.yield(question, 4_000)
+      assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+               Task.await(question, :infinity)
 
       assert :atomics.get(cell, 1) > 0
       refute Process.alive?(candidate)
@@ -308,8 +308,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     refute_receive {:settlement_status_requested, ^facade}, 25
     refute_receive {:candidate_released, _, _, _}, 25
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 4_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     assert :atomics.get(cell, 1) > 0
     refute Process.alive?(candidate)
@@ -343,8 +343,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     assert_receive {:candidate_released, _, _, _}, 2_000
     send(candidate, :finish_candidate)
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 2_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     assert :ok = Ephemeral.stop_session(session)
   end
@@ -354,8 +354,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     send(facade, :release_settlement_prompt)
     assert_receive {:settlement_status_requested, ^facade}, 2_000
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 4_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     assert :atomics.get(cell, 1) > 0
     refute Process.alive?(candidate)
@@ -373,8 +373,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     assert Process.alive?(candidate)
     assert nil == Task.yield(question, 25)
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 4_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     assert :atomics.get(cell, 1) > 0
     refute Process.alive?(candidate)
@@ -389,8 +389,8 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
 
     assert_receive {:candidate_released, _, _, _}, 2_000
 
-    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
-             Task.yield(question, 2_000)
+    assert {:ok, %{outcome: :completed, run_id: "settlement-run"}} =
+             Task.await(question, :infinity)
 
     refute Process.alive?(candidate)
     assert :atomics.get(cell, 2) == 0

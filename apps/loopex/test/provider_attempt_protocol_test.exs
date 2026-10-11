@@ -4167,8 +4167,19 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       )
 
     {session_id, _attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "recover")
-    assert_receive {:holding, provider_worker}, 5_000
-    assert_progress({:loopex_progress, %{kind: :text_delta} = predecessor_delta}, 5_000)
+
+    # Concept: the held model's own notice and its relayed delta end these
+    # waits, never a window started at prompt acceptance.
+    # Technical depth: the scripted model offers its delta before it announces
+    # the hold, and the relay routes that delta to the sink; both depend on how
+    # soon a loaded host schedules the model, Control, relay and sink, so the
+    # case's ExUnit timeout bounds them.
+    provider_worker =
+      receive do
+        {:holding, worker} -> worker
+      end
+
+    assert_progress({:loopex_progress, %{kind: :text_delta} = predecessor_delta}, :infinity)
 
     coordinator = coordinator_of(fixture.runtime)
     coordinator_ref = Process.monitor(coordinator)

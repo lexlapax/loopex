@@ -83,7 +83,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
       end)
 
     send(root, {:loopex_pool_start, self(), reference})
-    {worker, identity} = ready(root, reference)
+    {worker, identity} = ready(root, root_monitor, reference)
 
     messages = Keyword.get(options, :messages, [%{"role" => "user", "content" => "hello"}])
 
@@ -114,7 +114,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
     }
 
     {caller, monitor} = spawn_monitor(fn -> Caller.run(arguments) end)
-    assert_receive {:in_process_caller_ready, ^caller, ^call_ref}, 1_000
+    :ok = await_caller_ready(caller, monitor, call_ref)
 
     %{
       root: root,
@@ -210,16 +210,32 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
     refute_receive {:caller_wire, ^server, _wire}, 50
   end
 
-  defp ready(root, reference) do
+  # Concept: the pool root and the caller are awaited on their own events.
+  # Technical depth: each is a freshly spawned process doing real setup, so a
+  # fixed window started here would measure only this process's scheduling.
+  # The root's own setup deadline bounds its reports, a DOWN ends a wait the
+  # actor can no longer satisfy, and the case's ExUnit timeout is the outer bound.
+  defp ready(root, monitor, reference) do
     receive do
       {:loopex_pool_record, ^root, receipt, _entries} ->
         send(root, {:loopex_pool_recorded, receipt})
-        ready(root, reference)
+        ready(root, monitor, reference)
 
       {:loopex_pool_ready, ^root, ^reference, worker, identity} ->
         {worker, identity}
-    after
-      1_000 -> flunk("tagged pool fixture unavailable")
+
+      {:DOWN, ^monitor, :process, ^root, reason} ->
+        flunk("tagged pool fixture unavailable: #{inspect(reason)}")
+    end
+  end
+
+  defp await_caller_ready(caller, monitor, call_ref) do
+    receive do
+      {:in_process_caller_ready, ^caller, ^call_ref} ->
+        :ok
+
+      {:DOWN, ^monitor, :process, ^caller, reason} ->
+        flunk("in-process caller exited before ready: #{inspect(reason)}")
     end
   end
 

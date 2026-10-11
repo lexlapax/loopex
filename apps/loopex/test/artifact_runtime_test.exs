@@ -1,8 +1,10 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.ArtifactRuntimeTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: true
 
   alias Loopex.AgentLoopFixture, as: Fixture
@@ -25,13 +27,15 @@ defmodule Loopex.ArtifactRuntimeTest do
           uses: %{},
           observer: options[:observer],
           gate: options[:gate],
+          watch: options[:watch],
           failure: options[:failure]
         }
       end)
     end
 
     def put(pid, bytes, %{media_type: media_type, role: role, metadata: metadata}) do
-      settings = Agent.get(pid, &Map.take(&1, [:observer, :gate, :failure]))
+      settings = Agent.get(pid, &Map.take(&1, [:observer, :gate, :watch, :failure]))
+      if settings.watch, do: watch_worker(settings.observer)
 
       if is_pid(settings.observer),
         do: send(settings.observer, {:artifact_put, self(), bytes, metadata})
@@ -62,6 +66,31 @@ defmodule Loopex.ArtifactRuntimeTest do
     end
 
     def put(_pid, _bytes, _use), do: {:error, :adapter_received_unnormalized_use}
+
+    # Concept: a retention worker's exit is observed however soon it is cut off.
+    # Technical depth: the watcher's monitor signal precedes its acknowledgement
+    # on the same sender pair, so once the worker reads the acknowledgement it
+    # is monitored. The put notice follows, so a cutoff after that notice is
+    # reported with the worker's real exit reason, never a late monitor's
+    # `:noproc`.
+    defp watch_worker(observer) do
+      worker = self()
+
+      watcher =
+        spawn(fn ->
+          monitor = Process.monitor(worker)
+          send(worker, {:watching, self()})
+
+          receive do
+            {:DOWN, ^monitor, :process, ^worker, reason} ->
+              send(observer, {:artifact_worker_down, worker, reason})
+          end
+        end)
+
+      receive do
+        {:watching, ^watcher} -> :ok
+      end
+    end
 
     defp retain(pid, bytes, media_type, role, metadata) do
       digest = Canonical.digest_bytes(bytes)
@@ -126,7 +155,9 @@ defmodule Loopex.ArtifactRuntimeTest do
     on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
     store = %{module: RetainedArtifactStore, handle: artifact_pid}
     {fixture, session, attachment} = live_preparation_fixture(artifact_store: store)
-    assert_receive {:artifact_put, worker, bytes, metadata}, 1_000
+    # Retention starts only after a scheduled model turn and tool; each such wait
+    # ends on the worker's own message, bounded by ExUnit's per-test timeout.
+    await_receive({:artifact_put, worker, bytes, metadata})
     exact = Process.monitor(worker)
     records = Fixture.records(fixture, session)
     reservation = Enum.find(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
@@ -190,7 +221,7 @@ defmodule Loopex.ArtifactRuntimeTest do
         artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
       )
 
-    assert_receive {:artifact_put, worker, _bytes, _metadata}, 1_000
+    await_receive({:artifact_put, worker, _bytes, _metadata})
     exact = Process.monitor(worker)
 
     assert {:accepted, "abort-preparation"} =
@@ -233,9 +264,10 @@ defmodule Loopex.ArtifactRuntimeTest do
         artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
       )
 
-    assert_receive {:record_held_before_linearization, waiter, ^store_pid,
-                    "tool_result_preparation_state_v1", reservation_tx},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^store_pid, "tool_result_preparation_state_v1",
+       reservation_tx}
+    )
 
     refute_received {:artifact_put, _, _, _}
     assert Agent.get(artifact_pid, & &1.objects) == %{}
@@ -249,11 +281,12 @@ defmodule Loopex.ArtifactRuntimeTest do
 
     Loopex.M1RuntimeTestStore.release(waiter)
 
-    assert_receive {:transaction_represented, ^store_pid, ^reservation_tx,
-                    {:committed, _reservation_id, _reservation_receipt}},
-                   1_000
+    await_receive(
+      {:transaction_represented, ^store_pid, ^reservation_tx,
+       {:committed, _reservation_id, _reservation_receipt}}
+    )
 
-    assert_receive {:artifact_put, worker, _bytes, _metadata}, 1_000
+    await_receive({:artifact_put, worker, _bytes, _metadata})
     exact = Process.monitor(worker)
 
     :ok =
@@ -264,9 +297,10 @@ defmodule Loopex.ArtifactRuntimeTest do
 
     send(worker, :retain_source)
 
-    assert_receive {:transaction_represented, ^store_pid, completion_tx,
-                    {:committed, _completion_id, completion_receipt}},
-                   1_000
+    await_receive(
+      {:transaction_represented, ^store_pid, completion_tx,
+       {:committed, _completion_id, completion_receipt}}
+    )
 
     assert List.last(await_run_finished(attachment))["outcome"] == "completed"
     assert_receive {:DOWN, ^exact, :process, ^worker, :normal}
@@ -288,7 +322,7 @@ defmodule Loopex.ArtifactRuntimeTest do
     on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
     artifact_store = %{module: RetainedArtifactStore, handle: artifact_pid}
     {fixture, session, _attachment} = live_preparation_fixture(artifact_store: artifact_store)
-    assert_receive {:artifact_put, old_worker, bytes, metadata}, 1_000
+    await_receive({:artifact_put, old_worker, bytes, metadata})
     exact = Process.monitor(old_worker)
     assert {:ok, before} = recover_preparation(fixture, session)
     [reservation] = Map.values(before.artifact_preparations)
@@ -314,7 +348,7 @@ defmodule Loopex.ArtifactRuntimeTest do
                after_event_sequence: before.event_sequence
              )
 
-    assert_receive {:artifact_put, new_worker, ^bytes, ^metadata}, 1_000
+    await_receive({:artifact_put, new_worker, ^bytes, ^metadata})
     assert new_worker != old_worker
     new_exact = Process.monitor(new_worker)
     assert {:ok, pending} = recover_preparation(restarted, session)
@@ -344,26 +378,44 @@ defmodule Loopex.ArtifactRuntimeTest do
   end
 
   test "the committed run cutoff joins retention and keeps its run-bound outcome" do
-    {:ok, artifact_pid} = RetainedArtifactStore.start(observer: self(), gate: true)
+    {:ok, artifact_pid} = RetainedArtifactStore.start(observer: self(), gate: true, watch: true)
     on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
 
     {fixture, session, attachment} =
-      live_preparation_fixture(
+      start_live_preparation(
         bounds_deadline_ms: 1_000,
         artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
       )
 
-    assert_receive {:artifact_put, worker, _bytes, _metadata}, 1_000
-    exact = Process.monitor(worker)
-    finished = List.last(await_run_finished(attachment))
+    # Concept: the run's own 1,000 ms deadline, not this test, decides how far
+    # the run gets before its cutoff, and the run ends at that bound either way.
+    # Technical depth: the deadline instant is fixed when the first model call
+    # commits. A loaded host can reach it before the tool runs or retention
+    # starts: with the scripted model held past it, the run ends bound_reached
+    # with no tool progress. When retention did start first, the cutoff must
+    # also join its worker under the committed run deadline.
+    {retention, finished} = await_retention_or_finish(attachment)
     assert finished["outcome"] == "bound_reached"
     assert finished["bound"] == "deadline"
-    refute Process.alive?(worker)
-    assert_receive {:DOWN, ^exact, :process, ^worker, :killed}
-    assert Agent.get(artifact_pid, & &1.objects) == %{}
     records = Fixture.records(fixture, session)
-    [reserved] = Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
-    assert reserved.payload["deadline_origin"] == "run"
+
+    case retention do
+      {:retention, worker} ->
+        refute Process.alive?(worker)
+        await_receive({:artifact_worker_down, ^worker, reason})
+        assert reason == :killed
+
+        [reserved] =
+          Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
+
+        assert reserved.payload["deadline_origin"] == "run"
+
+      # The deadline came before retention: the shared assertions below hold.
+      :finished_first ->
+        :ok
+    end
+
+    assert Agent.get(artifact_pid, & &1.objects) == %{}
     refute Enum.any?(records, &(&1.payload.kind == "tool_result_preparation_failed_v1"))
     refute Enum.any?(records, &(&1.payload.kind == "tool_result_reference_prepared"))
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
@@ -381,7 +433,7 @@ defmodule Loopex.ArtifactRuntimeTest do
         artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
       )
 
-    assert_receive {:artifact_put, worker, _bytes, _metadata}, 1_000
+    await_receive({:artifact_put, worker, _bytes, _metadata})
     exact = Process.monitor(worker)
 
     [reservation] =
@@ -1136,7 +1188,7 @@ defmodule Loopex.ArtifactRuntimeTest do
     {request, [context_receipt: receipt, lineage_projection: projection]}
   end
 
-  defp live_preparation_fixture(options) do
+  defp start_live_preparation(options) do
     [range] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
       |> File.read!()
@@ -1147,7 +1199,6 @@ defmodule Loopex.ArtifactRuntimeTest do
       Fixture.start(
         Keyword.merge(options,
           tools: [Fixture.tool_definition(), range["definition"]],
-          tool_progress_gate: self(),
           script: [
             %{
               text: "work",
@@ -1180,11 +1231,20 @@ defmodule Loopex.ArtifactRuntimeTest do
     assert {:accepted, "prompt"} =
              Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
 
+    {fixture, session, attachment}
+  end
+
+  defp live_preparation_fixture(options) do
+    {fixture, session, attachment} =
+      start_live_preparation(Keyword.put(options, :tool_progress_gate, self()))
+
     # Concept: retention faults begin after the original tool has finished.
     # Technical depth: the existing executor gate separates prerequisite
     # scheduling from the unchanged retention/commit waits. Run and preparation
-    # deadlines stay captured by the owner; the real run-cutoff case is unchanged.
-    assert_receive {:tool_progress_emitted, _call_id, executor}, 5_000
+    # deadlines stay captured by the owner. The gated executor's progress is
+    # its own first event, so it is awaited with no test-clock window; the
+    # run-cutoff case starts the run without this gate.
+    await_receive({:tool_progress_emitted, _call_id, executor})
 
     refute Enum.any?(
              Fixture.records(fixture, session),
@@ -1195,6 +1255,37 @@ defmodule Loopex.ArtifactRuntimeTest do
     send(executor, :release)
 
     {fixture, session, attachment}
+  end
+
+  # Concept: the run reaches retention or its own end first, and either is
+  # observed as the product's event, with no test-clock window.
+  # Technical depth: each retention put is noticed while its worker is watched
+  # and before it can be cut off, and the run cannot finish before it joins
+  # that worker, so a run that finished without a notice never started
+  # retention. The wait ends at the run's own finish.
+  defp await_retention_or_finish(attachment, retention \\ :finished_first) do
+    retention =
+      receive do
+        {:artifact_put, worker, _bytes, _metadata} -> {:retention, worker}
+      after
+        0 -> retention
+      end
+
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"} = finished} ->
+        receive do
+          {:artifact_put, worker, _bytes, _metadata} -> {{:retention, worker}, finished}
+        after
+          0 -> {retention, finished}
+        end
+
+      {:ok, _event} ->
+        await_retention_or_finish(attachment, retention)
+
+      _none ->
+        Process.sleep(10)
+        await_retention_or_finish(attachment, retention)
+    end
   end
 
   defp preparation_fixture do

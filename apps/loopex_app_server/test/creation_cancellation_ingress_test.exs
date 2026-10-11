@@ -39,13 +39,22 @@ defmodule Loopex.AppServer.CreationCancellationIngressTest do
         self()
       )
 
-    caller =
-      spawn(fn -> Runtime.create_session(predecessor, "cancelled-create", %{"version" => 1}) end)
+    {caller, caller_monitor} =
+      spawn_monitor(fn ->
+        Runtime.create_session(predecessor, "cancelled-create", %{"version" => 1})
+      end)
 
-    assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_reserve_creation, _reserve},
-                   1_000
+    waiter =
+      receive do
+        {:record_held_before_linearization, waiter, ^pid, :runtime_control_reserve_creation,
+         _reserve} ->
+          waiter
 
+        {:DOWN, ^caller_monitor, :process, ^caller, reason} ->
+          flunk("creation caller exited before its reservation: #{inspect(reason)}")
+      end
+
+    Process.demonitor(caller_monitor, [:flush])
     Process.exit(caller, :kill)
     unavailable(control)
     StoreFixture.release(waiter)
@@ -128,15 +137,15 @@ defmodule Loopex.AppServer.CreationCancellationIngressTest do
         state.creation_status == :unavailable and is_nil(state.creation)
       end)
 
-  defp await(check), do: await(check, System.monotonic_time(:millisecond) + 1_000)
-
-  defp await(check, cutoff) do
-    if check.() do
-      :ok
-    else
-      assert System.monotonic_time(:millisecond) < cutoff
+  # Concept: readiness and capsule polls end on the runtime's own state, never
+  # on a test clock.
+  # Technical depth: control readiness and the released creation run in the
+  # runtime's processes and store, so a fixed window would measure host-load
+  # scheduling. The ExUnit test timeout bounds the poll.
+  defp await(check) do
+    unless check.() do
       Process.sleep(1)
-      await(check, cutoff)
+      await(check)
     end
   end
 end

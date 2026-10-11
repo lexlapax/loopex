@@ -1,8 +1,10 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.ToolEventIdentityTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
 
   alias Loopex.AgentLoopFixture, as: Fixture
@@ -138,9 +140,9 @@ defmodule Loopex.ToolEventIdentityTest do
 
     {session, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "first")
 
-    assert_receive {:record_held_before_linearization, waiter, ^store,
-                    "effect_intent_committed_v2", intent},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^store, "effect_intent_committed_v2", intent}
+    )
 
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
 
@@ -158,11 +160,12 @@ defmodule Loopex.ToolEventIdentityTest do
       )
 
     Loopex.M1RuntimeTestStore.release(waiter)
-    assert_receive {:transaction_represented, ^store, ^intent, {:committed, _, _}}, 1_000
+    await_receive({:transaction_represented, ^store, ^intent, {:committed, _, _}})
 
-    assert_receive {:record_held_before_linearization, waiter, ^store,
-                    "executor_receipt_committed_v2", receipt},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^store, "executor_receipt_committed_v2",
+       receipt}
+    )
 
     assert length(Loopex.AgentLoopTestExecutor.jobs(fixture.executor)) == 1
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
@@ -174,7 +177,7 @@ defmodule Loopex.ToolEventIdentityTest do
       )
 
     Loopex.M1RuntimeTestStore.release(waiter)
-    assert_receive {:transaction_represented, ^store, ^receipt, {:committed, _, _}}, 1_000
+    await_receive({:transaction_represented, ^store, ^receipt, {:committed, _, _}})
     assert await_finished(attachment)["outcome"] == "completed"
     jobs = Loopex.AgentLoopTestExecutor.jobs(fixture.executor)
     assert Enum.map(jobs, & &1.tool_call_id) == ["same", "same"]

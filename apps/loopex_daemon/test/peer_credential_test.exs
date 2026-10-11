@@ -1,4 +1,7 @@
+Code.require_file("../../loopex/test/support/event_wait.exs", __DIR__)
+
 defmodule LoopexDaemon.PeerCredentialTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: true
 
   alias LoopexDaemon.{ListenerSocket, PeerCredential}
@@ -29,7 +32,8 @@ defmodule LoopexDaemon.PeerCredentialTest do
         :ok = :socket.close(socket)
       end)
 
-    assert_receive {:client_connected, client_pid} when client_pid == client.pid
+    # The linked client task connects or takes this process down with it.
+    await_receive({:client_connected, client_pid} when client_pid == client.pid)
     assert {:ok, accepted} = :socket.accept(listener, 1_000)
 
     assert {:ok, ^daemon_uid} = PeerCredential.uid(accepted)

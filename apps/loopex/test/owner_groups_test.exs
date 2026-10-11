@@ -1,4 +1,7 @@
+Code.require_file("support/event_wait.exs", __DIR__)
+
 defmodule Loopex.Runtime.OwnerGroupsTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
 
   alias Loopex.Runtime.OwnerGroup
@@ -28,7 +31,7 @@ defmodule Loopex.Runtime.OwnerGroupsTest do
             end
           end)
 
-        assert_receive {:ready, ^task}, 1_000
+        await_receive({:ready, ^task})
         {group, workers, task}
       end
 
@@ -39,13 +42,13 @@ defmodule Loopex.Runtime.OwnerGroupsTest do
     stop = Task.async(fn -> Supervisor.stop(manager, :normal, :infinity) end)
 
     for {group, workers, task} <- children do
-      assert_receive {:stopping, ^task}, 1_000
+      await_receive({:stopping, ^task})
       assert Process.alive?(group)
       assert Process.alive?(workers)
     end
 
     for {_, _, task} <- children, do: send(task, :release)
-    assert Task.await(stop, 1_000) == :ok
+    assert Task.await(stop, :infinity) == :ok
 
     for {group, workers, task} <- children do
       refute Process.alive?(group)
@@ -83,22 +86,21 @@ defmodule Loopex.Runtime.OwnerGroupsTest do
         assert_receive {:DOWN, ^monitor, :process, ^group, {:owner_workers_stopped, :killed}},
                        1_000
 
-        await_empty(manager, System.monotonic_time(:millisecond) + 1_000)
+        await_empty(manager)
       end)
 
     assert log =~ "Child Loopex.Runtime.OwnerGroup of Supervisor"
     assert log =~ "owner_workers_stopped"
   end
 
-  defp await_empty(manager, deadline) do
-    case :supervisor.which_children(manager) do
-      [] ->
-        :ok
-
-      _ ->
-        assert System.monotonic_time(:millisecond) < deadline
-        Process.sleep(1)
-        await_empty(manager, deadline)
+  # Concept: every wait here ends on the supervised actors' own progress.
+  # Technical depth: tasks, groups and the manager are freshly scheduled, so a
+  # fixed window would race only scheduling; a sequential shutdown still never
+  # reaches the second `:stopping`, and ExUnit's per-test timeout is the bound.
+  defp await_empty(manager) do
+    unless :supervisor.which_children(manager) == [] do
+      Process.sleep(1)
+      await_empty(manager)
     end
   end
 end

@@ -1,7 +1,10 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.Runtime.SessionSupervisorTest do
+  import Loopex.EventWait
+
   @moduledoc """
   ## Concept
 
@@ -65,7 +68,7 @@ defmodule Loopex.Runtime.SessionSupervisorTest do
         :ok = await_root_shutdown_of(runtime.supervisor, children)
 
         Process.exit(coordinator, :shutdown)
-        assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :shutdown}, 1_000
+        await_receive({:DOWN, ^coordinator_monitor, :process, ^coordinator, :shutdown})
         true = :erlang.resume_process(children.sessions)
 
         assert Task.await(stop, 5_000) == :ok
@@ -82,28 +85,19 @@ defmodule Loopex.Runtime.SessionSupervisorTest do
   # Technical depth: the root stops children in reverse start order; once the
   # later dispatcher and tracer are gone and the root waits in its own child
   # shutdown, its signal to the suspended session supervisor is queued.
+  # The poll ends on the root's own progress; ExUnit's timeout is the bound.
   defp await_root_shutdown_of(root, children) do
-    deadline = System.monotonic_time(:millisecond) + 2_000
-    await_root_shutdown_of(root, children, deadline)
-  end
-
-  defp await_root_shutdown_of(root, children, deadline) do
     {:current_stacktrace, stack} = Process.info(root, :current_stacktrace)
 
     waiting? =
       not Process.alive?(children.dispatcher) and not Process.alive?(children.tracer) and
         Enum.any?(stack, &match?({:supervisor, :shutdown, 1, _}, &1))
 
-    cond do
-      waiting? ->
-        :ok
-
-      System.monotonic_time(:millisecond) < deadline ->
-        Process.sleep(1)
-        await_root_shutdown_of(root, children, deadline)
-
-      true ->
-        flunk("root did not begin session supervisor shutdown")
+    if waiting? do
+      :ok
+    else
+      Process.sleep(1)
+      await_root_shutdown_of(root, children)
     end
   end
 end

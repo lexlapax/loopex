@@ -138,7 +138,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
                  IO.write("parent-task-usable")
                end)
 
-             assert :ok = Task.await(task, 1_000)
+             assert :ok = Task.await(task, :infinity)
            end) == "parent-task-usable"
 
     for {pid, group_leader} <- supervisors,
@@ -356,8 +356,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     monitor = call.monitor
     assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 2_500
 
-    assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                   1_000
+    assert {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}} =
+             await_completed(caller)
 
     Fixture.assert_gone(fixture)
     assert Fixture.count(fixture) == 1
@@ -393,15 +393,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
       assert {_output, 0} = System.cmd("/bin/kill", ["-CONT", Integer.to_string(pid)])
     end
 
-    assert_receive {:trace, ^guardian, :receive,
-                    {_port, {:data, {:eol, "cleanup_complete:" <> _binding}}}},
-                   2_000
-
+    await_cleanup_complete(guardian)
     monitor = call.monitor
-    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
+    assert {:DOWN, ^monitor, :process, ^guardian, :normal} = await_down(monitor)
 
-    assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                   1_000
+    assert {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}} =
+             await_completed(caller)
 
     Fixture.assert_gone(fixture)
     assert Fixture.count(fixture) == 1
@@ -450,7 +447,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
                Keyword.fetch!(fixture.options, :cleanup_grace_ms)
 
       monitor = call.monitor
-      assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
+      assert {:DOWN, ^monitor, :process, ^guardian, :normal} = await_down(monitor)
       barrier = :erlang.trace_delivered(guardian)
       assert_receive {:trace_delivered, ^guardian, ^barrier}, 1_000
 
@@ -498,4 +495,23 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     send(guardian, barrier)
     assert_receive {:trace, ^guardian, :receive, ^barrier}, Fixture.until_settled(call)
   end
+
+  # Concept: once the guardian runs again, each later step is awaited as that
+  # step's own event.
+  # Technical depth: the resumed provider child, the guardian's exit and the
+  # caller's report each need the scheduler; a fixed window started by this
+  # process would measure only its own scheduling. Every step follows from the
+  # guardian's bounded cleanup, and the case's ExUnit timeout bounds one that
+  # never comes.
+  defp await_cleanup_complete(guardian) do
+    receive do
+      {:trace, ^guardian, :receive, {_port, {:data, {:eol, "cleanup_complete:" <> _}}}} -> :ok
+    end
+  end
+
+  defp await_down(monitor),
+    do: receive(do: ({:DOWN, ^monitor, :process, _pid, _reason} = down -> down))
+
+  defp await_completed(caller),
+    do: receive(do: ({:completed, ^caller, _result} = completed -> completed))
 end

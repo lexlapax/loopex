@@ -137,9 +137,20 @@ defmodule LoopexDaemon.CreationCancellationSocketTest do
     caller =
       spawn(fn -> Runtime.create_session(predecessor, "cancelled-create", %{"version" => 1}) end)
 
-    assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_reserve_creation, _reserve},
-                   1_000
+    # The caller's own create reaching the held store record, or the caller's
+    # exit, ends this wait; ExUnit's case timeout is the outer bound.
+    caller_monitor = Process.monitor(caller)
+
+    waiter =
+      receive do
+        {:record_held_before_linearization, waiter, ^pid, :runtime_control_reserve_creation,
+         _reserve} ->
+          Process.demonitor(caller_monitor, [:flush])
+          waiter
+
+        {:DOWN, ^caller_monitor, :process, ^caller, reason} ->
+          flunk("create caller exited before its held record: " <> inspect(reason))
+      end
 
     Process.exit(caller, :kill)
     unavailable(control)
@@ -188,15 +199,15 @@ defmodule LoopexDaemon.CreationCancellationSocketTest do
         state.creation_status == :unavailable and is_nil(state.creation)
       end)
 
-  defp await(check), do: await(check, System.monotonic_time(:millisecond) + 1_000)
-
-  defp await(check, cutoff) do
+  # Concept: the control's own state change ends the wait, never a test clock.
+  # Technical depth: `:sys.get_state/1` exits if the control is gone, and
+  # ExUnit's case timeout is the outer bound.
+  defp await(check) do
     if check.() do
       :ok
     else
-      assert System.monotonic_time(:millisecond) < cutoff
       Process.sleep(1)
-      await(check, cutoff)
+      await(check)
     end
   end
 end

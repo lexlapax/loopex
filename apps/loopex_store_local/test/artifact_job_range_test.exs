@@ -126,8 +126,8 @@ defmodule Loopex.Store.Local.ArtifactJobRangeTest do
     assert :ok = close_transfer(handle, first)
     parent = self()
 
-    holder =
-      spawn(fn ->
+    {holder, monitor} =
+      spawn_monitor(fn ->
         assert {:ok, placement} =
                  Transfers.reserve_job(
                    handle.transfers,
@@ -141,11 +141,19 @@ defmodule Loopex.Store.Local.ArtifactJobRangeTest do
         end
       end)
 
-    assert_receive {:reserved, ^holder}
+    # The holder's reservation and release are its own store calls; its report
+    # or DOWN ends each wait, and the case's ExUnit timeout is the outer bound.
+    receive do
+      {:reserved, ^holder} -> :ok
+      {:DOWN, ^monitor, :process, ^holder, reason} -> flunk("holder exited: #{inspect(reason)}")
+    end
+
     assert {:error, %{reason: :transfer_limit_reached, state: :not_reserved}} = open.()
-    monitor = Process.monitor(holder)
     send(holder, :release)
-    assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}
+
+    assert {:DOWN, ^monitor, :process, ^holder, :normal} =
+             receive(do: ({:DOWN, ^monitor, :process, _, _} = down -> down))
+
     assert {:ok, "capa"} = Artifacts.read_job_range(handle, job(reference, 0, 4))
     Enum.each(rest, &close_transfer(handle, &1))
   end

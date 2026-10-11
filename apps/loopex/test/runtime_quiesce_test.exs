@@ -787,8 +787,13 @@ defmodule Loopex.RuntimeQuiesceTest do
         end)
       end
 
-    assert_receive {:quiesce_ready, _first}
-    assert_receive {:quiesce_ready, _second}
+    # Each linked task's own readiness ends the wait; a fresh task may run late.
+    for %Task{pid: pid} <- calls do
+      receive do
+        {:quiesce_ready, ^pid} -> :ok
+      end
+    end
+
     Enum.each(calls, &send(&1.pid, {:release_quiesce, release}))
 
     results = calls |> Enum.map(&Task.await(&1, 5_000)) |> Enum.sort()

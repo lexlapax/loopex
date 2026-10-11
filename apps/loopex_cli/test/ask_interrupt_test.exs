@@ -128,7 +128,9 @@ defmodule LoopexCli.AskInterruptTest do
         end
       end)
 
-    assert_receive {:installed, ^main, _reference, {:ok, ^manager}}, 1_000
+    assert {:installed, ^main, _reference, {:ok, ^manager}} =
+             await_main(main, main_monitor, :installed)
+
     assert [Interrupt] = :gen_event.which_handlers(manager)
     send(main, :release)
     assert_receive {:DOWN, ^main_monitor, :process, ^main, :normal}, 1_000
@@ -187,15 +189,17 @@ defmodule LoopexCli.AskInterruptTest do
       end)
 
     try do
-      assert_receive {:ask_install_observed, installer, ^manager, ^main, _reference}, 1_000
+      assert {:ask_install_observed, installer, ^manager, ^main, _reference} =
+               await_main(main, main_monitor, :ask_install_observed)
+
       :erlang.trace_pattern({Interrupt, :init, 1}, true, [:global])
       :erlang.trace(manager, true, [:call])
       assert :erlang.suspend_process(manager)
       send(installer, {:ask_install_continue, gate})
       assert_queued_swap(manager)
 
-      assert_receive {:late_install_result, ^main, {:error, :interrupt_handler_unavailable}},
-                     2_000
+      assert {:late_install_result, ^main, {:error, :interrupt_handler_unavailable}} =
+               await_main(main, main_monitor, :late_install_result)
 
       assert :erlang.resume_process(manager)
       assert_receive {:trace, ^manager, :call, {Interrupt, :init, [_]}}, 1_000
@@ -225,7 +229,9 @@ defmodule LoopexCli.AskInterruptTest do
       end)
 
     try do
-      assert_receive {:ask_install_observed, installer, ^manager, ^main, _reference}, 1_000
+      assert {:ask_install_observed, installer, ^manager, ^main, _reference} =
+               await_main(main, main_monitor, :ask_install_observed)
+
       installer_monitor = Process.monitor(installer)
       assert :erlang.suspend_process(main)
       send(installer, {:ask_install_continue, gate})
@@ -242,41 +248,36 @@ defmodule LoopexCli.AskInterruptTest do
     end
   end
 
-  defp assert_handlers(manager, expected) do
-    deadline = System.monotonic_time(:millisecond) + 1_000
-    assert_handlers(manager, expected, deadline)
+  # Concept: every wait below ends on the awaited actor's own progress, never
+  # on a test clock.
+  # Technical depth: the main process, its installer and the signal manager
+  # run in their own processes, so a fixed window would measure host-load
+  # scheduling rather than the product. Reports end on the tagged message or
+  # the main process's DOWN; polls end on the awaited state; the ExUnit test
+  # timeout bounds both.
+  defp await_main(main, monitor, tag) do
+    receive do
+      message when is_tuple(message) and elem(message, 0) == tag ->
+        message
+
+      {:DOWN, ^monitor, :process, ^main, reason} ->
+        flunk("main exited before #{inspect(tag)}: #{inspect(reason)}")
+    end
   end
 
-  defp assert_handlers(manager, expected, deadline) do
-    if :gen_event.which_handlers(manager) == expected do
-      :ok
-    else
-      if System.monotonic_time(:millisecond) >= deadline do
-        flunk("signal handler did not settle to #{inspect(expected)}")
-      else
-        Process.sleep(10)
-        assert_handlers(manager, expected, deadline)
-      end
+  defp assert_handlers(manager, expected) do
+    if :gen_event.which_handlers(manager) != expected do
+      Process.sleep(10)
+      assert_handlers(manager, expected)
     end
   end
 
   defp assert_queued_swap(manager) do
-    deadline = System.monotonic_time(:millisecond) + 1_000
-    assert_queued_swap(manager, deadline)
-  end
-
-  defp assert_queued_swap(manager, deadline) do
     {:messages, messages} = Process.info(manager, :messages)
 
-    if Enum.any?(messages, &match?({_, _, {:swap_handler, _, _, _, _}}, &1)) do
-      :ok
-    else
-      if System.monotonic_time(:millisecond) >= deadline do
-        flunk("ask installation did not queue a manager swap")
-      else
-        Process.sleep(10)
-        assert_queued_swap(manager, deadline)
-      end
+    unless Enum.any?(messages, &match?({_, _, {:swap_handler, _, _, _, _}}, &1)) do
+      Process.sleep(10)
+      assert_queued_swap(manager)
     end
   end
 

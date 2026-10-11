@@ -638,7 +638,7 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     :ok = :socket.close(client)
 
-    eventually(fn -> ConnectionRegistry.status(daemon.registry).occupied == 0 end, 1_000)
+    eventually(fn -> ConnectionRegistry.status(daemon.registry).occupied == 0 end)
     refute Map.has_key?(:sys.get_state(dispatcher).holders, connection)
     assert %{attachments: 0} = ConnectionRegistry.status(daemon.registry)
     refute_received {:daemon_component_fatal, _registry, :runtime_lost}

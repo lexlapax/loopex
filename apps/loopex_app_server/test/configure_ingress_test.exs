@@ -1,9 +1,11 @@
+Code.require_file("../../loopex/test/support/event_wait.exs", __DIR__)
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/model_preparation_conformance.exs", __DIR__)
 
 defmodule Loopex.AppServer.ConfigureIngressTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: true
 
   alias Loopex.AppServer.Mapping, as: Adapter
@@ -292,7 +294,10 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
                content: "hold"
              })
 
-    assert_receive {:holding, worker}, 1_000
+    # The accepted run reaches its held model call in the session's own
+    # processes; that liveness is awaited as an event under the ExUnit timeout,
+    # since no single actor's DOWN would announce that it never will.
+    await_receive({:holding, worker})
     monitor = Process.monitor(worker)
     assert {:ok, reply} = Adapter.call(request, context)
 
@@ -375,7 +380,10 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
                )
 
       Loopex.M1RuntimeTestStore.release(waiter)
-      assert_receive {:DOWN, ^waiter_monitor, :process, ^waiter, :normal}, 1_000
+      # The released waiter finishes its held store record before exiting.
+      receive do: ({:DOWN, ^waiter_monitor, :process, ^waiter, reason} ->
+                     assert reason == :normal)
+
       assert_receive {:mapped_configure, ^caller, result}, 5_000
       assert {:error, unknown} = result
       assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
@@ -552,7 +560,7 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
                content: "hold"
              })
 
-    assert_receive {:holding, worker}, 1_000
+    await_receive({:holding, worker})
     monitor = Process.monitor(worker)
     assert {:error, :configuration_not_settled} = Loopex.command(fixture.attachment, command)
     assert [refusal] = configuration_records(fixture)

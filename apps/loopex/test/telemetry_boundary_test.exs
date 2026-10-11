@@ -573,8 +573,6 @@ defmodule Loopex.TelemetryBoundaryTest do
     Enum.map(senders, fn sender ->
       receive do
         {:admission_result, ^sender, result} -> result
-      after
-        2_000 -> flunk("a sender never reported its admission result")
       end
     end)
   end
@@ -688,13 +686,17 @@ defmodule Loopex.TelemetryBoundaryTest do
     end
   end
 
+  # Concept: senders, entries and dispatcher claims are awaited on their own
+  # progress.
+  # Technical depth: each follows a freshly spawned sender or a resumed
+  # dispatcher, so a fixed window would race only scheduling; a sender that
+  # never answers or a claim that never settles fails under ExUnit's per-test
+  # timeout. Quiet-mailbox drains are unchanged.
   defp sender_step(sender, step) do
     send(sender, {:step, step})
 
     receive do
       {:stepped, ^sender, result} -> result
-    after
-      2_000 -> flunk("the sender never completed #{inspect(step)}")
     end
   end
 
@@ -733,12 +735,10 @@ defmodule Loopex.TelemetryBoundaryTest do
     end
   end
 
-  defp await_entry(kind, deadline \\ 2_000) do
+  defp await_entry(kind) do
     receive do
       {:loopex_diagnostic, %{"kind" => ^kind} = entry} -> entry
-      {:loopex_diagnostic, _other} -> await_entry(kind, deadline)
-    after
-      deadline -> flunk("no #{kind} entry arrived within #{deadline}ms")
+      {:loopex_diagnostic, _other} -> await_entry(kind)
     end
   end
 
@@ -746,30 +746,12 @@ defmodule Loopex.TelemetryBoundaryTest do
   #
   # Technical depth: every cut waits for the same condition, so the wait is one
   # named helper rather than a closure repeated at each of them.
-  defp await_held(admission, expected, deadline \\ 2_000) do
-    cond do
-      Admission.held(admission) == expected ->
-        :ok
+  defp await_held(admission, expected), do: await(fn -> Admission.held(admission) == expected end)
 
-      deadline <= 0 ->
-        flunk("the dispatcher held #{Admission.held(admission)}, not #{expected}")
-
-      true ->
-        Process.sleep(20)
-        await_held(admission, expected, deadline - 20)
-    end
-  end
-
-  defp await(condition, deadline \\ 2_000) do
-    if condition.() do
-      :ok
-    else
-      if deadline <= 0 do
-        flunk("condition never held")
-      else
-        Process.sleep(20)
-        await(condition, deadline - 20)
-      end
+  defp await(condition) do
+    unless condition.() do
+      Process.sleep(20)
+      await(condition)
     end
   end
 

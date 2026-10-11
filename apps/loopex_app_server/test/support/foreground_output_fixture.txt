@@ -391,7 +391,7 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     fixture = Fixture.start([script: script(mode, observer),
       progress_sink: sink, artifact_store: %{module: artifacts, handle: artifact}] ++ tools(mode))
     try do
-      await_ready(fixture.runtime, now_ms() + 1_000)
+      await_ready(fixture.runtime)
       {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "bootstrap")
       {:ok, reference} = Loopex.ArtifactStore.put(%{module: artifacts, handle: artifact},
         :binary.copy("a", 1_048_576), %{"media_type" => "text/plain", "role" => "tool_output",
@@ -504,13 +504,15 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     :ok
   end
 
-  defp await_ready(runtime, cutoff) do
+  # Concept: creation readiness is awaited as the runtime's own status.
+  # Technical depth: creation startup runs in the runtime's control process in
+  # this child VM, so a fixed window would measure host-load scheduling; only
+  # an unavailable status fails here, and the parent case's timeout bounds it.
+  defp await_ready(runtime) do
     {:ok, %{control: control}} = Loopex.Runtime.Supervisor.children(runtime.supervisor)
-    case :sys.get_state(control, max(cutoff - now_ms(), 0)).creation_status do
+    case :sys.get_state(control, :infinity).creation_status do
       :ready -> :ok
-      :starting ->
-        if now_ms() < cutoff, do: (Process.sleep(1); await_ready(runtime, cutoff)),
-          else: exit(:creation_startup_unavailable)
+      :starting -> (Process.sleep(1); await_ready(runtime))
       _unavailable -> exit(:creation_startup_unavailable)
     end
   end

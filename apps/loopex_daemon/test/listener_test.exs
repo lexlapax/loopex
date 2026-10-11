@@ -340,10 +340,12 @@ defmodule LoopexDaemon.ListenerTest do
     assert {:reply, {:ok, ^cut_ref}} =
              fixture.registry
              |> ConnectionRegistry.transport_closing(cut_ref)
-             |> :gen_server.receive_response(500)
+             |> :gen_server.receive_response(:infinity)
 
     late_client = connect(fixture.path)
-    assert {:error, :closed} = :socket.recv(late_client, 1, 500)
+    # The listener closes the late peer on its own schedule; that close, not a
+    # test clock, ends the read.
+    assert {:error, :closed} = :socket.recv(late_client, 1, :infinity)
 
     Process.unlink(fixture.listener)
     listener_monitor = Process.monitor(fixture.listener)
@@ -353,7 +355,7 @@ defmodule LoopexDaemon.ListenerTest do
     assert {:reply, :ok} =
              fixture.registry
              |> ConnectionRegistry.reap_uninitialized(cut_ref)
-             |> :gen_server.receive_response(500)
+             |> :gen_server.receive_response(:infinity)
 
     assert_receive {:transport_uninitialized_empty, registry, ^cut_ref}, 500
     assert registry == fixture.registry
@@ -469,7 +471,8 @@ defmodule LoopexDaemon.ListenerTest do
         record
       end)
     else
-      {:ok, bytes} = :socket.recv(socket, 0, 1_000)
+      # The daemon's own write or close ends the read, never a test clock.
+      {:ok, bytes} = :socket.recv(socket, 0, :infinity)
       receive_records(socket, count, buffered <> bytes)
     end
   end
@@ -513,16 +516,12 @@ defmodule LoopexDaemon.ListenerTest do
     end
   end
 
-  defp eventually(predicate, attempts \\ 100)
-
-  defp eventually(predicate, 0), do: assert(predicate.())
-
-  defp eventually(predicate, attempts) do
+  defp eventually(predicate) do
     if predicate.() do
       :ok
     else
       Process.sleep(10)
-      eventually(predicate, attempts - 1)
+      eventually(predicate)
     end
   end
 end

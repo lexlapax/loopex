@@ -241,8 +241,8 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
     assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 1_000
 
     if mode == :waiting do
-      assert {:ok, {:ok, %{outcome: :completed, text: "first answer"}}} =
-               Task.yield(first, 2_000)
+      assert {:ok, %{outcome: :completed, text: "first answer"}} =
+               Task.await(first, :infinity)
     else
       await(owner, fn _state ->
         case Ephemeral.last_result(session) do
@@ -257,7 +257,7 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
       send(first.pid, :audit_borrower_mailbox)
 
       assert {{:error, {:timeout, %{run_id: ^timed_out_run_id}}}, messages} =
-               Task.await(first, 2_000)
+               Task.await(first, :infinity)
 
       refute Enum.any?(messages, &match?({^owner, _, _}, &1))
     end
@@ -283,8 +283,8 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
     assert second_pending.registries.worker != first_pending.registries.worker
     send(server, {:reply, 2})
 
-    assert {:ok, {:ok, %{outcome: :completed, text: "second answer"}}} =
-             Task.yield(second, 5_000)
+    assert {:ok, %{outcome: :completed, text: "second answer"}} =
+             Task.await(second, :infinity)
 
     assert :atomics.get(cell, 2) == 0
     assert :sys.get_state(owner).model_census.pending == nil
@@ -341,8 +341,8 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
     assert second_request =~ "second prompt"
     send(server, {:reply, 2})
 
-    assert {:ok, {:ok, %{outcome: :completed, text: "second answer"}}} =
-             Task.yield(second, 5_000)
+    assert {:ok, %{outcome: :completed, text: "second answer"}} =
+             Task.await(second, :infinity)
 
     assert :ok = Ephemeral.stop_session(session)
   end

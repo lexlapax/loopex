@@ -120,13 +120,15 @@ defmodule Loopex.EmbeddedApiTest do
 
     first_delivery = Task.async(fn -> Loopex.next_event(attachment) end)
 
-    assert {:ok, {:ok, first_event}} = Task.yield(first_delivery, 200)
+    # The buffered first event needs no Store read: a read would hold the task
+    # on the blocked Store and fail the case under ExUnit's timeout.
+    assert {:ok, first_event} = Task.await(first_delivery, :infinity)
     assert first_event == Enum.at(stored, 0)
     refute_receive {:event_history_read, _, _, ^session_id, _}, 20
 
     delivery = Task.async(fn -> Loopex.next_event(attachment) end)
 
-    assert_receive {:event_history_read, waiter, _store, ^session_id, committed_events}
+    {waiter, committed_events} = await_history_read(delivery, session_id)
     assert Enum.map(committed_events, & &1.event_sequence) == [2, 3]
 
     {:ok, %{dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
@@ -197,7 +199,7 @@ defmodule Loopex.EmbeddedApiTest do
         )
       end)
 
-    assert_receive {:event_history_read, waiter, _store, ^session_id, scanned_at_anchor}
+    {waiter, scanned_at_anchor} = await_history_read(attaching, session_id)
     assert Enum.map(scanned_at_anchor, & &1.event_sequence) == [1, 2, 3]
 
     assert {:accepted, "during-snapshot"} =
@@ -510,6 +512,17 @@ defmodule Loopex.EmbeddedApiTest do
 
   defp await_delivered(_attachment, count, accumulated, 0),
     do: flunk("expected #{count} delivered events, saw #{length(accumulated)}")
+
+  # Concept: the held Store read is awaited on the reading task's own events.
+  # Technical depth: the task is freshly spawned and must reach the Store
+  # before the read is reported, so a fixed window measures only scheduling.
+  # The task's DOWN ends the wait early; ExUnit's timeout is the outer bound.
+  defp await_history_read(%Task{pid: pid, ref: ref}, session_id) do
+    receive do
+      {:event_history_read, waiter, _store, ^session_id, events} -> {waiter, events}
+      {:DOWN, ^ref, :process, ^pid, reason} -> flunk("reader exited: #{inspect(reason)}")
+    end
+  end
 
   defp committed_event_count(fixture, session_id) do
     fixture.store_pid
