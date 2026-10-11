@@ -670,6 +670,20 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  # Concept: the long case runs in the documented small context the plan's
+  # V6.1 step names, with the session's model summarizing.
+  # Technical depth: `long_overflow_prompts/0` states the budget arithmetic
+  # the 4,000-token budget and 1,024-token reply bound rest on.
+  defp fixture_profile("m7.long", _trusted, _context) do
+    {:ok,
+     fn profile ->
+       profile
+       |> put_in(["session", "context_token_budget"], 4_000)
+       |> put_in(["session", "max_tokens"], 1_024)
+       |> Map.put("maintenance", %{"model" => profile["session"]["model"]})
+     end}
+  end
+
   defp fixture_profile(_case_id, _trusted, _context), do: {:ok, & &1}
 
   # Concept: the configuration change a case's conversations start from, with
@@ -1023,6 +1037,45 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end)
   end
 
+  # Concept: fixed harness text, not reply length, overflows the long case's
+  # small context: three reference blocks, each but the last followed by a
+  # one-word acknowledgement, between the explanation and the recall.
+  # Technical depth: automatic compaction keeps the newest complete exchange
+  # and must release more than its summary costs, or the run fails
+  # `compaction_no_progress`; the acknowledgements keep two blocks from being
+  # adjacent, so the kept exchange is small or the release is large. Estimated
+  # tokens as staged with the coding tools, measured through the real staging
+  # path: system class 980, the fact and explanation prompts with their
+  # replies at least 160 together, a block 1,091 (1,121 with its reply), an
+  # acknowledgement 29 (59 with its reply), the recall prompt 52, the
+  # explanation exchange at most about 1,600 under the pinned 1,024-token
+  # reply, and a summary at most about 1,540. Against the 4,000 budget:
+  # - the third block always overflows: 980 + 160 + 2 * (1,121 + 59) + 1,091
+  #   = 4,591;
+  # - the first block and acknowledgement never do: 980 + 100 + 1,600 + 1,121
+  #   + 29 = 3,830;
+  # - any later overflow releases more than 4,000 - 980 - 1,121 - 59 = 1,840,
+  #   less one acknowledgement the kept tail may grow by, so above 1,540;
+  # - the request then fits: 980 + 1,540 + 59 + 1,121 + 52 = 3,752 at most;
+  # - after the explicit checkpoint the outputs run starts at 980 + 1,540 + 120
+  #   and has about 1,360 left for its tool rounds (about 750 measured).
+  @doc false
+  def long_overflow_prompts do
+    [first, second, third] =
+      for block <- 1..3 do
+        rows =
+          Enum.map_join(1..50, " | ", fn row ->
+            "row #{block}.#{row}: shelf #{row} holds spare gaskets, hinges and fasteners"
+          end)
+
+        "Reference block #{block} of 3. Read these catalog rows and reply only with " <>
+          "the word noted. " <> rows
+      end
+
+    acknowledge = "Reply with the word ready."
+    [first, acknowledge, second, acknowledge, third]
+  end
+
   # Concept: each fixture case is a fixed list of conversations; a later one
   # reopens the session the first one recorded.
   # Technical depth: steps are `Conversation` steps; terminal dispatch hands
@@ -1040,7 +1093,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   def plan("m7.long", entry, _context) do
     [facts, explain, recall, outputs] = entry["prompts"]
-    first = barriers([facts, explain, recall])
+    first = barriers([facts, explain] ++ long_overflow_prompts() ++ [recall])
     compact = [{:line, "/compact"}, {:line, "/wait"}]
     {status, quit} = Enum.split(first.steps, -2)
 

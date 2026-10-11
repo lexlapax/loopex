@@ -633,8 +633,22 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert File.read!(preflight["reference"]) =~ "feature_answer_requires_operator"
   end
 
+  # A summary near its 4,094-byte limit: the largest checkpoint the long
+  # case's budget arithmetic has to absorb.
+  @long_summary %{
+    text:
+      JSON.encode!(%{
+        "summary" =>
+          "release_prefix=amber; batch_size=3. " <>
+            String.duplicate("Release notes carry forward unchanged. ", 100),
+        "carry_forward" => %{"files_read" => [], "files_changed" => []}
+      }),
+    usage: %{input_tokens: 37, output_tokens: 900},
+    reply_overrides: %{completion: "natural", continuation: nil}
+  }
+
   test "long joins automatic and explicit checkpoints, raw facts and the restart", f do
-    {context, script} = long_case(f, 3000)
+    {context, script} = long_case(f, @long_summary)
 
     result =
       passed!(
@@ -645,14 +659,39 @@ defmodule LoopexCli.M7CaseRunnerTest do
         )
       )
 
+    # The case pins its small budget, reply bound and summarizer over the
+    # operator's file.
+    prepared = JSON.decode!(File.read!(Path.join(result.root, "config.json")))
+    assert prepared["session"]["context_token_budget"] == 4_000
+    assert prepared["session"]["max_tokens"] == 1_024
+    assert prepared["maintenance"] == %{"model" => prepared["session"]["model"]}
+
+    # The overflow comes from the fixed prompts the plan puts between the
+    # explanation and the recall; every scripted reply is short.
+    [raw, explain, recall, _] = FixtureManifest.entry(context.manifest, "long")["prompts"]
+
+    {:ok, [first, _]} =
+      CaseRunner.plan("m7.long", %{"prompts" => [raw, explain, recall, ""]}, %{})
+
+    lines = for {:line, line} <- first.steps, line != "/wait", do: line
+    overflow = CaseRunner.long_overflow_prompts()
+    assert length(overflow) == 5
+
+    assert lines ==
+             [raw, explain] ++ overflow ++ [recall, "/compact", "/status", "/quit"]
+
     facts = JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+    assert facts["kinds"]["prompt_admitted_v3"] == 9
+    assert facts["kinds"]["run_terminal_committed"] == 9
     assert facts["kinds"]["compaction_checkpoint_committed_v1"] >= 1
     assert facts["kinds"]["standalone_compaction_checkpoint_committed_v1"] == 1
     assert File.read!(Path.join(result.root, "workspace/release.txt")) == "amber\n"
   end
 
   test "long without an automatic checkpoint is required_action_absent", f do
-    {context, script} = long_case(f, 10)
+    # The fixed prompts still overflow, but a summarizer reply that is not a
+    # summary leaves the overflow without a checkpoint.
+    {context, script} = long_case(f, %{text: "not a summary", calls: []})
 
     assert {:stopped, [{:ok, result}]} =
              CaseRunner.run_lane(
@@ -664,6 +703,8 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert result.mechanical_result == "required_action_absent"
     facts = JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
     assert facts["join"] =~ "automatic_checkpoint"
+    assert facts["kinds"]["maintenance_episode_admitted_v1"] >= 1
+    refute Map.has_key?(facts["kinds"], "compaction_checkpoint_committed_v1")
   end
 
   @read %{text: "read", calls: [%{id: "read", name: "read", arguments: %{"path" => "README.md"}}]}
@@ -1602,39 +1643,23 @@ defmodule LoopexCli.M7CaseRunnerTest do
     """
   end
 
-  # The long case's configuration and scripts. `explain_tokens` sets the second
-  # reply's reported output, which decides whether automatic compaction occurs.
-  defp long_case(f, explain_tokens) do
-    profile =
-      profile(f.root)
-      |> put_in(["session", "max_tokens"], 4096)
-      |> put_in(["session", "context_token_budget"], 4000)
-      |> put_in(["session", "system_class_tokens"], 3000)
-      |> Map.put("maintenance", %{"model" => "anthropic:claude-haiku-4-5"})
-
-    File.write!(f.config, :json.encode(profile))
-
-    summary = %{
-      text:
-        ~s({"summary":"release_prefix=amber; batch_size=3","carry_forward":{"files_read":[],"files_changed":[]}}),
-      usage: %{input_tokens: 37, output_tokens: 19},
-      reply_overrides: %{completion: "natural", continuation: nil}
-    }
+  # The long case's scripts under the operator's configuration, which leaves
+  # the context budget and summarizer to the case. Every reply is short;
+  # `summary` answers each maintenance request.
+  defp long_case(f, summary) do
+    File.write!(f.config, :json.encode(put_in(profile(f.root), ["session", "max_tokens"], 4096)))
 
     script = fn capture, call ->
       main =
         if call == 1 do
           [
             %{text: "release_prefix=amber; batch_size=3", calls: []},
-            %{
-              text:
-                String.duplicate(
-                  "Keep dependent release steps consistent. ",
-                  div(explain_tokens, 10)
-                ),
-              calls: [],
-              usage: %{input_tokens: 1500, output_tokens: explain_tokens}
-            },
+            %{text: "Keep dependent release steps consistent.", calls: []},
+            %{text: "noted", calls: []},
+            %{text: "ready", calls: []},
+            %{text: "noted", calls: []},
+            %{text: "ready", calls: []},
+            %{text: "noted", calls: []},
             %{text: "release_prefix=amber; batch_size=3", calls: []}
           ]
         else
