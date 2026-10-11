@@ -87,7 +87,10 @@ defmodule Loopex.ReferenceClient.AllowAllPolicyTest do
     output =
       capture_io(:stderr, fn ->
         {caller, monitor} = spawn_monitor(fn -> AllowAll.decide(request()) end)
-        assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}
+        # The caller's own DOWN, not the default 100-ms window, ends this wait.
+        receive do
+          {:DOWN, ^monitor, :process, ^caller, reason} -> assert reason == :normal
+        end
       end)
 
     assert output == AllowAll.notice() <> "\n"

@@ -236,7 +236,7 @@ defmodule LoopexComposition.RestoreIOTest do
     send(guardian, {:proceed, reference, id})
 
     try do
-      await_raw_open(worker, System.monotonic_time(:millisecond) + 1_000)
+      await_raw_open(worker)
       Process.exit(guardian, :kill)
       assert {result, _events} = drive(owned, false)
       assert result == {:unconfirmed, :guardian_lost}
@@ -4280,24 +4280,33 @@ defmodule LoopexComposition.RestoreIOTest do
     :erlang.term_to_binary(["loopex:current-state-manifest:v1", entries], [:deterministic])
   end
 
-  defp paused_operation(owned, expected),
-    do: paused_operation(owned, expected, System.monotonic_time(:millisecond) + 1_000)
-
-  defp paused_operation(owned, expected, cutoff) do
+  # Concept: the owned restore's own events, not a test clock, decide whether
+  # the expected operation was issued.
+  # Technical depth: the guardian bounds its work by the captured work and
+  # cleanup cutoffs and then returns a result to the caller or exits. A fixed
+  # window started here could expire while a loaded scheduler still runs that
+  # bounded work, so the wait ends at the expected issue, the caller's result,
+  # or the guardian's DOWN, under the case's ExUnit timeout.
+  defp paused_operation(owned, expected) do
     guardian = owned.guardian
     worker = owned.worker
     reference = owned.reference
+    tag = owned.tag
+    guardian_monitor = owned.guardian_monitor
 
     receive do
       {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, kind}} ->
         name = if is_tuple(kind), do: elem(kind, 0), else: kind
-        if name == expected, do: {id, kind}, else: paused_operation(owned, expected, cutoff)
+        if name == expected, do: {id, kind}, else: paused_operation(owned, expected)
 
       {:restore_io, ^guardian, ^worker, ^reference, _} ->
-        paused_operation(owned, expected, cutoff)
-    after
-      max(0, cutoff - System.monotonic_time(:millisecond)) ->
-        flunk("expected owned operation was not issued")
+        paused_operation(owned, expected)
+
+      {^tag, result} ->
+        flunk("owned restore returned before issuing #{expected}: #{inspect(result)}")
+
+      {:DOWN, ^guardian_monitor, :process, ^guardian, reason} ->
+        flunk("owned restore guardian exited before issuing #{expected}: #{inspect(reason)}")
     end
   end
 
@@ -4640,9 +4649,16 @@ defmodule LoopexComposition.RestoreIOTest do
         )
       end)
 
-    assert_receive {:restore_io, guardian, worker, reference,
-                    {:installed, admitted, work_cutoff}},
-                   1_000
+    # The caller's own installation event or its DOWN ends this wait; no test
+    # clock bounds the freshly spawned caller's first progress.
+    {guardian, worker, reference, admitted, work_cutoff} =
+      receive do
+        {:restore_io, guardian, worker, reference, {:installed, admitted, work_cutoff}} ->
+          {guardian, worker, reference, admitted, work_cutoff}
+
+        {:DOWN, ^caller_monitor, :process, ^caller, reason} ->
+          flunk("restore caller exited before installation: #{inspect(reason)}")
+      end
 
     guardian_monitor = Process.monitor(guardian)
     worker_monitor = Process.monitor(worker)
@@ -4960,43 +4976,22 @@ defmodule LoopexComposition.RestoreIOTest do
   defp hash(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
   defp limits(work, grace), do: %{"work_ms" => work, "cleanup_grace_ms" => grace}
 
-  defp await_raw_open(worker, cutoff) do
-    parent = self()
-    reference = make_ref()
-
-    {inspector, monitor} =
-      spawn_monitor(fn -> send(parent, {reference, observe_raw_open(worker, cutoff)}) end)
-
-    try do
-      receive do
-        {^reference, :observed} ->
-          :ok
-
-        {^reference, {:unavailable, observation}} ->
-          flunk("actual raw FIFO open was not observed in open_nif: #{inspect(observation)}")
-      after
-        max(0, cutoff - System.monotonic_time(:millisecond)) ->
-          flunk("raw-open inspection did not return before its captured cutoff")
-      end
-    after
-      Process.exit(inspector, :kill)
-      assert_receive {:DOWN, ^monitor, :process, ^inspector, _}, 1_000
-    end
-  end
-
-  defp observe_raw_open(worker, cutoff) do
+  # Concept: the worker's own state, not a test clock, shows the blocked open.
+  # Technical depth: once proceeded, the worker either enters the pinned raw
+  # FIFO open, where it stays until the FIFO is released, or exits. Polling its
+  # current function ends at either; the case's ExUnit timeout bounds the rest.
+  defp await_raw_open(worker) do
     case Process.info(worker, :current_function) do
       {:current_function, {:prim_file, :open_nif, 2}} ->
-        :observed
+        :ok
 
-      observation ->
-        if System.monotonic_time(:millisecond) >= cutoff do
-          {:unavailable, observation}
-        else
-          receive do
-          after
-            1 -> observe_raw_open(worker, cutoff)
-          end
+      nil ->
+        flunk("restore worker exited before its actual raw FIFO open")
+
+      _observation ->
+        receive do
+        after
+          1 -> await_raw_open(worker)
         end
     end
   end

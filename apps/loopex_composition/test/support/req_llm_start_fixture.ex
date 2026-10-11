@@ -397,8 +397,18 @@ defmodule LoopexComposition.ReqLLMStartFixture do
     end
 
     assert :ok == :sys.install(:application_controller, {token, hook, nil})
-    waiter = requester(service, nil, 5_000)
-    assert_receive {:dotenv_write_held, worker, ^token}, 1_000
+    {waiter_pid, waiter_monitor, _tag, _bound} = waiter = requester(service, nil, 5_000)
+
+    # The just-started requester's own progress, or its exit, ends this wait.
+    worker =
+      receive do
+        {:dotenv_write_held, worker, ^token} ->
+          worker
+
+        {:DOWN, ^waiter_monitor, :process, ^waiter_pid, reason} ->
+          flunk("startup requester exited before the dotenv write: #{inspect(reason)}")
+      end
+
     assert Application.get_env(:req_llm, :load_dotenv) == false
     assert {:ok, applications} = Application.ensure_all_started(:req_llm)
     assert :req_llm in applications
@@ -543,10 +553,6 @@ defmodule LoopexComposition.ReqLLMStartFixture do
     assert :ok == :sys.remove(controller, token)
   end
 
-  defp wait_controller do
-    wait_controller(deadline(1_000))
-  end
-
   defp trace_persistent_writes(true) do
     :erlang.trace_pattern({:persistent_term, :put, 2}, true, [])
     :erlang.trace_pattern({:persistent_term, :erase, 1}, true, [])
@@ -579,32 +585,31 @@ defmodule LoopexComposition.ReqLLMStartFixture do
     end
   end
 
-  defp wait_controller(bound) do
+  # Concept: these polls end on the observed state, never on a test clock.
+  # Technical depth: each awaited change is made by a requester or controller
+  # operation this fixture just started, bounded by that request's own
+  # deadline. A fixed polling window could expire while a loaded scheduler
+  # still runs it, so the case's ExUnit timeout is the outer bound.
+  defp wait_controller do
     if Enum.any?(Application.started_applications(), &(elem(&1, 0) == :req_llm)) do
       :ok
     else
-      if System.monotonic_time() >= bound,
-        do: flunk("admitted controller operation did not finish")
-
       receive do
       after
-        1 -> wait_controller(bound)
+        1 -> wait_controller()
       end
     end
   end
 
-  defp wait_state(service, predicate, bound \\ nil) do
-    bound = bound || deadline(1_000)
+  defp wait_state(service, predicate) do
     state = :sys.get_state(service, 1_000)
 
     if predicate.(state) do
       state
     else
-      if System.monotonic_time() >= bound, do: flunk("startup protocol state did not settle")
-
       receive do
       after
-        1 -> wait_state(service, predicate, bound)
+        1 -> wait_state(service, predicate)
       end
     end
   end

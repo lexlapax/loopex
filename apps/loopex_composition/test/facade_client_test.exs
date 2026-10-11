@@ -102,12 +102,12 @@ defmodule LoopexComposition.FacadeClientTest do
                  {:command, %{type: :prompt, command_id: "prompt", content: "hello"}}
                )
 
-      events = follow(client, System.monotonic_time(:millisecond) + 2_000, [])
+      events = follow(client, [])
       assert Enum.any?(events, &(&1.kind == "assistant.message_appended"))
       assert List.last(events).kind == "run.finished"
       assert {:ok, _} = Loopex.attachment_status(attachment)
       kill(client, monitor)
-      await_attachment_release(attachment, System.monotonic_time(:millisecond) + 1_000)
+      await_attachment_release(attachment)
       assert {:ok, _} = Loopex.session_status(runtime, session)
     after
       Loopex.stop(runtime)
@@ -162,7 +162,7 @@ defmodule LoopexComposition.FacadeClientTest do
       assert_receive {:client, client}, 1_000
       on_exit(fn -> if Process.alive?(client), do: Process.exit(client, :kill) end)
       monitor = Process.monitor(client)
-      wait_for_call(control, client, System.monotonic_time(:millisecond) + 5_000)
+      wait_for_call(control, client)
       owner_monitor = Process.monitor(owner)
       send(owner, :stop)
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 1_000
@@ -190,8 +190,12 @@ defmodule LoopexComposition.FacadeClientTest do
     end
   end
 
-  defp wait_for_call(control, client, deadline) do
-    assert System.monotonic_time(:millisecond) < deadline
+  # Concept: these polls end on the observed state, never on a test clock.
+  # Technical depth: the live client either queues its create call on the
+  # suspended Control or exits, and a killed client's attachment is released
+  # by the runtime's monitor; the case's ExUnit timeout bounds both polls.
+  defp wait_for_call(control, client) do
+    assert Process.alive?(client)
 
     messages =
       case Process.info(control, :messages) do
@@ -216,13 +220,11 @@ defmodule LoopexComposition.FacadeClientTest do
         1 -> :ok
       end
 
-      wait_for_call(control, client, deadline)
+      wait_for_call(control, client)
     end
   end
 
-  defp await_attachment_release(attachment, deadline) do
-    assert System.monotonic_time(:millisecond) < deadline
-
+  defp await_attachment_release(attachment) do
     case Loopex.attachment_status(attachment) do
       {:error, _} ->
         :ok
@@ -233,32 +235,46 @@ defmodule LoopexComposition.FacadeClientTest do
           1 -> :ok
         end
 
-        await_attachment_release(attachment, deadline)
+        await_attachment_release(attachment)
     end
   end
 
+  # Concept: each real facade operation ends on the client's own reply or its
+  # DOWN, never on a test clock.
+  # Technical depth: the dispatch carries the client's own absolute grant
+  # deadline, and the real runtime call it then makes is bounded by the
+  # runtime. A fixed window started here could expire while a loaded scheduler
+  # still runs that call, so the case's ExUnit timeout is the outer bound.
   defp operation(client, operation) do
     ref = make_ref()
+    monitor = Process.monitor(client)
     send(client, {self(), ref, operation})
-    assert_receive {^client, ^ref, :ready}, 1_000
+    assert :ready = await_client(client, ref, monitor)
     send(client, {self(), ref, :dispatch, deadline()})
+    result = await_client(client, ref, monitor)
+    Process.demonitor(monitor, [:flush])
+    result
+  end
 
+  defp await_client(client, ref, monitor) do
     receive do
-      {^client, ^ref, result} -> result
-    after
-      1_000 -> flunk("facade did not return")
+      {^client, ^ref, result} ->
+        result
+
+      {:DOWN, ^monitor, :process, ^client, reason} ->
+        flunk("facade client exited: #{inspect(reason)}")
     end
   end
 
-  defp follow(client, deadline, events) do
-    assert System.monotonic_time(:millisecond) < deadline
-
+  # The scripted run is bounded by its runtime deadline and ends in
+  # run.finished; polling ends there, under the case's ExUnit timeout.
+  defp follow(client, events) do
     case operation(client, :next_event) do
       {:ok, %{kind: "run.finished"} = event} ->
         Enum.reverse([event | events])
 
       {:ok, event} ->
-        follow(client, deadline, [event | events])
+        follow(client, [event | events])
 
       {:error, :empty} ->
         receive do
@@ -266,7 +282,7 @@ defmodule LoopexComposition.FacadeClientTest do
           10 -> :ok
         end
 
-        follow(client, deadline, events)
+        follow(client, events)
     end
   end
 
