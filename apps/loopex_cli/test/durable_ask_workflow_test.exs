@@ -363,7 +363,7 @@ defmodule LoopexCli.DurableAskWorkflowTest do
     composition = Agent.get(calls, & &1.composition)
 
     assert Keyword.keys(composition) ==
-             ~w(runtime_id state_root workspace policy active_tools resource_manifest provider_launch recover_stale_writer credential_plane model context_token_budget sampling)a
+             ~w(runtime_id state_root workspace policy active_tools resource_manifest provider_launch recover_stale_writer artifact_transfers credential_plane model context_token_budget sampling)a
 
     assert composition[:runtime_id] == "placement-1"
     assert composition[:state_root] == @root

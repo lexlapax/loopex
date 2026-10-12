@@ -230,6 +230,7 @@ defmodule LoopexCli.ChatWorkflowTest do
           release_placement: fn "bootstrap-placement", _ -> :ok end,
           placement_id: fn _ -> {:ok, "chat-workflow-runtime"} end,
           with_runtime: fn options, _ ->
+            assert options[:artifact_transfers] == true
             {driver, _writer} = chat_owner(options)
             state = :sys.get_state(driver)
             assert state.runtime == nil and state.workers == %{}

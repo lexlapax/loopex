@@ -216,6 +216,7 @@ defmodule LoopexCli.Chat do
       active_tools: Map.get(invocation, :active_tools, []),
       cleanup_grace_ms: grace(invocation),
       recover_stale_writer: true,
+      artifact_transfers: true,
       model: Map.get(configuration, "model", profile["session"]["model"]),
       maintenance_model: get_in(profile, ["maintenance", "model"]),
       maintenance_instructions: LoopexCli.MaintenanceInstructions.reference()

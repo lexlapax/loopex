@@ -281,6 +281,7 @@ defmodule LoopexCli.DurableAsk do
       resource_manifest: manifest,
       provider_launch: deps.provider_launch.(),
       recover_stale_writer: true,
+      artifact_transfers: true,
       credential_plane: plane
     ]
 

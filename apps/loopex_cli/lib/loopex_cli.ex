@@ -1690,6 +1690,7 @@ defmodule LoopexCli do
          project_decision: decision,
          provider_launch: LoopexCli.ProviderLaunch.options(),
          recover_stale_writer: true,
+         artifact_transfers: true,
          delegation: delegation
        ] ++
          resource_options ++

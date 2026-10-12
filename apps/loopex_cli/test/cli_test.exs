@@ -1387,6 +1387,8 @@ defmodule LoopexCliTest do
 
     assert_receive {:default_cleanup_options, default_options}
     assert Keyword.fetch!(default_options, :cleanup_grace_ms) == 8_000
+    # The read tool retains an oversized result, which needs the runtime's store.
+    assert %{module: _, handle: _} = Keyword.fetch!(default_options, :artifact_store)
   end
 
   test "tool progress from a running executor job reaches the operator's terminal before the tool finishes" do
