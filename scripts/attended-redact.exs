@@ -132,12 +132,26 @@ defmodule LoopexAttendedRedact do
         positions -> positions |> List.last() |> elem(0) |> Kernel.+(1)
       end
 
+    # Hold only a tail that can still begin a key, so a prompt without a
+    # newline reaches the operator while its process waits for an answer.
     safe =
       if final?,
         do: byte_size(content),
-        else: max(line_end, max(0, byte_size(content) - width + 1))
+        else: hold_start(content, keys, max(line_end, byte_size(content) - width + 1))
 
     scan(content, keys, safe, replacement, 0, [])
+  end
+
+  defp hold_start(content, keys, from) do
+    size = byte_size(content)
+
+    Enum.find(max(from, 0)..(size - 1)//1, size, fn position ->
+      tail = binary_part(content, position, size - position)
+
+      Enum.any?(keys, fn key ->
+        byte_size(key) > byte_size(tail) and binary_part(key, 0, byte_size(tail)) == tail
+      end)
+    end)
   end
 
   defp scan(content, _keys, safe, _replacement, cursor, reversed) when cursor >= safe do

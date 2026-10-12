@@ -57,7 +57,10 @@ built the provider companion inside ExUnit's 60-second budget, which the
 fresh extraction's build had taken 45 to 56 seconds of in every earlier
 matrix. Like lane 5's test, it now builds in `setup_all`, and the session
 lane's deterministic case moved to its own module so ordinary runs build
-nothing
+nothing. The seventh, on `c6925ffc`, reached `m7.question-restart` and
+waited there: both attended redactors held the last key-width bytes of an
+unfinished line, so the `answer>` prompt never reached the operator. They
+now hold only a tail that can still begin a key
 ([disposition](../developer/agent-context-map.md#disposition-m7-t17-rehearsed-candidate-2026-10-12)).
 
 The Darwin run of `f85d7952` failed 34 of 942 `loopex_cli` tests. Under macOS's

@@ -75,7 +75,7 @@ def extract_authority(context_path, anchor):
 
 
 class Redactor:
-    """Keep enough trailing bytes to cover a key split between PTY reads."""
+    """Hold a trailing key prefix so a key split between PTY reads still matches."""
 
     def __init__(self, keys):
         self.keys = sorted((key for key in keys if key), key=len, reverse=True)
@@ -85,7 +85,7 @@ class Redactor:
 
     def feed(self, data, final=False):
         content = self.pending + data
-        safe = len(content) if final else max(0, len(content) - self.width + 1)
+        safe = len(content) if final else self.hold_start(content)
         cursor = 0
         output = bytearray()
         while cursor < safe:
@@ -105,6 +105,15 @@ class Redactor:
             cursor = position + len(key)
         self.pending = content[cursor:]
         return bytes(output)
+
+    def hold_start(self, content):
+        # Hold only a tail that can still begin a key, so a prompt without a
+        # newline reaches the operator while its process waits for an answer.
+        for position in range(max(0, len(content) - self.width + 1), len(content)):
+            tail = content[position:]
+            if any(len(key) > len(tail) and key.startswith(tail) for key in self.keys):
+                return position
+        return len(content)
 
 
 class Notices:

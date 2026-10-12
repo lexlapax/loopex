@@ -588,6 +588,26 @@ printf 'yes?\n[REDACTED]\n' >"$work/redact-stream-expected"
 cmp -s "$work/redact-stream-expected" "$work/redact-stream-actual" ||
   fail 'redactor changed the streamed prompt or split credential'
 
+# A prompt without a newline waits for the operator's answer, so it must reach
+# the reader while the producer is still blocked behind it.
+prompt_gate="$work/redact-prompt-release"
+(
+  printf 'answer> '
+  while [ ! -e "$prompt_gate" ]; do sleep 0.05; done
+  printf '1\n'
+) | elixir_redact '' 'a-very-long-credential-value' '' '' \
+  >"$work/redact-prompt-actual" &
+prompt_pid=$!
+prompt_seen=0
+for _ in $(seq 1 200); do
+  if [ "$(cat "$work/redact-prompt-actual")" = 'answer> ' ]; then prompt_seen=1; break; fi
+  kill -0 "$prompt_pid" 2>/dev/null || break
+  sleep 0.05
+done
+touch "$prompt_gate"
+wait "$prompt_pid" || fail 'redactor failed after an unterminated prompt'
+[ "$prompt_seen" -eq 1 ] || fail 'redactor withheld an unterminated prompt'
+
 # Descriptor/setup errors must stop before any unredacted transcript is sent.
 status=0
 env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
@@ -687,6 +707,11 @@ for key, input_bytes in ((b"RED", b"REDRED"), (b"a[R", b"aa[R")):
         assert published == b"!!"
     else:
         assert published == b"a<REDACTED>"
+# A prompt without a newline is published at once; only a key prefix waits.
+redactor = Redactor([b"secret-key"])
+assert redactor.feed(b"answer> ") == b"answer> "
+assert redactor.feed(b"1\nsec") == b"1\n"
+assert redactor.feed(b"ret-key!", final=True) == b"[REDACTED]!"
 PY
 
 printf '<a id="edge"></a>\nMilestone: M6\nTested SHA: %s\nAutomatic attended answers: authorized' \
