@@ -782,6 +782,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          },
          {:ok, conversations} <- plan(case_id, entry, context),
          {:ok, transform} <- case_transform(case_id, trusted, context),
+         {:ok, appendix} <- harness_appendix(trusted, workspace, runner),
+         transform =
+           &update_in(transform.(&1), ["session", "instructions"], fn options ->
+             Map.merge(options || %{}, appendix)
+           end),
          {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root, transform),
          {:ok, prepared} <-
            M7FixtureChat.prepare(
@@ -907,6 +912,34 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       {:error, reason} -> {:error, reason}
       _ -> {:error, :held_preparation_unavailable}
     end
+  end
+
+  # Concept: the harness supplies what a fixture prompt says it supplies: the
+  # approved test invocation and, for a small fixture, the workspace's files.
+  # Technical depth: the text is the session's instruction appendix, read from
+  # the trusted root outside the workspace; it grants nothing, since the fixture
+  # policy still decides each call.
+  defp harness_appendix(trusted, workspace, runner) do
+    files =
+      Path.wildcard(Path.join(workspace, "**/*"), match_dot: false)
+      |> Enum.filter(&File.regular?/1)
+      |> Enum.map(&Path.relative_to(&1, workspace))
+      |> Enum.sort()
+
+    inventory =
+      if length(files) in 1..40,
+        do: "The workspace contains exactly these files: " <> Enum.join(files, ", ") <> ". ",
+        else: ""
+
+    path = Path.join(trusted, "harness.md")
+
+    text =
+      inventory <>
+        "The approved test invocation is the bash tool with argv " <>
+        ~s(["/bin/sh", "#{runner}"]; run it exactly when a prompt asks for it.)
+
+    with :ok <- File.write(path, text, [:exclusive]),
+         do: {:ok, %{"append_file" => path}}
   end
 
   defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"

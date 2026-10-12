@@ -671,6 +671,10 @@ defmodule LoopexCli.M7CaseRunnerTest do
              "credential" => %{"env" => provider_b["credential_variable"]}
            }
 
+    # The harness supplies the approved invocation its prompts refer to.
+    appendix = File.read!(prepared["session"]["instructions"]["append_file"])
+    assert appendix =~ ~s(["/bin/sh", "#{Path.join(result.root, "trusted/run.sh")}"])
+
     # The overflow comes from the fixed prompts the plan puts between the
     # explanation and the recall; every scripted reply is short.
     [raw, explain, recall, _] = FixtureManifest.entry(context.manifest, "long")["prompts"]
