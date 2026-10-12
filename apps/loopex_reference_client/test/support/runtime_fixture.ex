@@ -232,10 +232,11 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
     {capabilities, mapping} = configuration_facts(model, max_tokens)
 
+    # Like a host, configure the exact model the captured catalog names.
     {:ok, configuration} =
       SessionConfiguration.resolve(
         %{
-          "model" => model.model,
+          "model" => capabilities["model"],
           "reasoning" => "default",
           "configuration_version" => 1,
           "instructions" => instructions,
