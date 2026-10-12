@@ -1359,6 +1359,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   defp dispatch(%{conversations: [%{ephemeral: line}]} = staged, context) do
     ["chat", "--config", path | _] = staged.config_argv
     {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
+    # An earlier case's conversation consumed the route's credential variable.
+    restore_credentials(context)
     record = Path.join(Path.dirname(staged.fixture.workspace), "ephemeral.json")
     {:ok, output} = StringIO.open("")
     terminal? = line == :terminal
