@@ -1513,9 +1513,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     # Concept: the conversation is chat's input device and its owned output
     # target (ADR 0068); the terminal case acquires the process's own stdio
     # (a test supplies its own input and owned target per conversation).
+    tee =
+      if mode == :terminal and not Map.has_key?(context, :terminal_io),
+        do: start_tee(Process.group_leader())
+
     {input, output, chat_mode} =
       if mode == :terminal do
-        {input, output} = Map.get(context, :terminal_io, fn -> {:stdio, :stdio} end).()
+        {input, output} =
+          Map.get(context, :terminal_io, fn -> {:stdio, {:owned, tee}} end).()
+
         {input, output, :interactive}
       else
         {device, {:owned, device}, :pipe}
@@ -1536,16 +1542,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     options = if observed or gate, do: observer_runtime(options, self()), else: options
     restore_credentials(context)
 
-    tee =
-      if mode == :terminal and not Map.has_key?(context, :terminal_io),
-        do: start_tee(Process.group_leader())
-
     exit =
       host(
-        fn ->
-          if tee, do: Process.group_leader(self(), tee)
-          Chat.run(staged.config_argv ++ extra, options)
-        end,
+        fn -> Chat.run(staged.config_argv ++ extra, options) end,
         device,
         gate,
         Map.get(context, :operator_device, :stdio)
@@ -1583,10 +1582,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   # Concept: a terminal conversation is shown to the operator and retained for
   # the joins, as a piped one is.
-  # Technical depth: chat's group leader becomes this relay. It forwards every
-  # request to the operator's terminal and keeps a copy of written characters;
-  # reads relay through their own process so output is never held behind a
-  # pending line of operator input.
+  # Technical depth: chat writes to this relay as its owned output target. It
+  # forwards every request to the operator's terminal and keeps a copy of the
+  # written characters; other requests relay through their own process.
   defp start_tee(leader), do: spawn_link(fn -> tee_loop(leader, []) end)
 
   defp tee_loop(leader, written) do
