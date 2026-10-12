@@ -1189,12 +1189,11 @@ defmodule LoopexCli.M7CaseRunnerTest do
   defp rounds_replies(cells, paths \\ ~w(a.txt b.txt c.txt)) do
     alias LoopexCli.M7NativeReplies, as: R
 
-    # Each later cell first compacts; the thinking-off summarizer answers it.
+    # Each later cell first compacts; provider B's summarizer answers it.
     summary =
-      R.reply("anthropic:claude-haiku-4-5-20251001", [
-        {:text,
-         ~s({"summary":"cedar seven amber","carry_forward":{"files_read":["a.txt","b.txt","c.txt"],"files_changed":[]}})}
-      ])
+      R.responses(
+        ~s({"summary":"cedar seven amber","carry_forward":{"files_read":["a.txt","b.txt","c.txt"],"files_changed":[]}})
+      )
 
     Enum.flat_map(Enum.with_index(cells), fn {{model, _}, cell} ->
       think = fn n -> {:thinking, "private step #{cell}.#{n}", "sig-#{cell}-#{n}+/="} end
@@ -1288,10 +1287,9 @@ defmodule LoopexCli.M7CaseRunnerTest do
     alias LoopexCli.M7NativeReplies, as: R
 
     summary =
-      R.reply("anthropic:claude-haiku-4-5-20251001", [
-        {:text,
-         ~s({"summary":"cedar","carry_forward":{"files_read":["a.txt"],"files_changed":[]}})}
-      ])
+      R.responses(
+        ~s({"summary":"cedar","carry_forward":{"files_read":["a.txt"],"files_changed":[]}})
+      )
 
     Enum.flat_map(Enum.with_index(cells), fn {{model, reasoning}, cell} ->
       {:ok, mapping} = Loopex.LLM.ReqLLM.ModelCapabilities.mapping(model, reasoning, 8_192)

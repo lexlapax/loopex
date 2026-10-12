@@ -391,11 +391,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     %{
       seed: %{"README.md" => @readme},
       allowed: [],
-      profile: fn profile ->
+      profile: fn profile, context ->
         profile
         |> put_in(["session", "context_token_budget"], 6_000)
         |> put_in(["session", "max_tokens"], 1_024)
-        |> Map.put("maintenance", %{"model" => profile["session"]["model"]})
+        |> Map.put("maintenance", %{"model" => provider_b(context)["model"]})
       end,
       plan: fn _context ->
         {:ok,
@@ -515,12 +515,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     %{
       seed: @rounds_files,
       allowed: [],
-      profile: fn profile ->
+      profile: fn profile, context ->
         profile
         |> put_in(["session", "model"], @dated)
         |> put_in(["session", "max_tokens"], 8_192)
         |> put_in(["session", "tools"], "read-only")
-        |> Map.put("maintenance", %{"model" => @dated})
+        |> Map.put("maintenance", %{"model" => provider_b(context)["model"]})
       end,
       plan: fn _context ->
         # Each later cell first checkpoints the earlier cells' native history,
@@ -557,13 +557,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     %{
       seed: @rounds_files,
       allowed: [],
-      profile: fn profile ->
+      profile: fn profile, context ->
         profile
         |> put_in(["session", "model"], @dated)
         |> put_in(["session", "max_tokens"], 8_192)
         |> put_in(["session", "tools"], "read-only")
         |> put_in(["session", "bounds", "max_turns"], 1)
-        |> Map.put("maintenance", %{"model" => @dated})
+        |> Map.put("maintenance", %{"model" => provider_b(context)["model"]})
       end,
       plan: fn _context ->
         {:ok, [%{resume: false, cut: true, steps: cut_steps(@bound_cells)}]}
