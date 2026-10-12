@@ -1711,11 +1711,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     |> Enum.each(&LoopexComposition.Placement.release/1)
   end
 
+  # A line longer than a terminal's canonical line buffer cannot be typed, so
+  # its conversation stays piped as the other harness-driven steps do.
   defp harness_driven?(steps),
     do:
       Enum.any?(steps, fn step ->
         step in [:lose, :interrupt, :observe, :await_gate, :release] or
-          match?({:hold, _, _}, step) or step == {:answer, :operator}
+          match?({:hold, _, _}, step) or step == {:answer, :operator} or
+          match?({:line, text} when byte_size(text) >= 4_096, step)
       end)
 
   # Concept: an attended answer comes from the operator, never the harness.
