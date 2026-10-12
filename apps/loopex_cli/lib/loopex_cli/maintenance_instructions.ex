@@ -21,7 +21,9 @@ defmodule LoopexCli.MaintenanceInstructions do
       "Summarize the conversation so far so work can continue from the summary alone. " <>
         "Keep every user requirement and decision, exact file paths, commands, identifiers, " <>
         "numbers and quoted values, the results of tool calls later work depends on, and " <>
-        "open questions. Do not invent facts or add advice. Your entire reply is one compact " <>
+        "open questions. When the conversation starts from an earlier summary, carry forward " <>
+        "every fact it states, copying exact names, values and paths verbatim. Do not invent " <>
+        "facts or add advice. Your entire reply is one compact " <>
         "JSON object under 3,000 bytes. Its first character is { and its last is }. Never wrap " <>
         "it in ``` backticks or add any other text. Use exactly this shape: " <>
         ~s({"summary": "<the summary>", "carry_forward": {"files_read": ["<path>"], ) <>
