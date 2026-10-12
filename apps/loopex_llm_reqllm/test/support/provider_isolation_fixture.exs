@@ -571,6 +571,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       :exit, :shutdown -> :ok
       :exit, {:noproc, _} -> :ok
       :exit, {:shutdown, _} -> :ok
+      # The linked shutdown can land while the stop is inside `:sys.terminate`.
+      :exit, {{:shutdown, {:sys, :terminate, _}}, {GenServer, :stop, _}} -> :ok
     end
 
     assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 1_000
