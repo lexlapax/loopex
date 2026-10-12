@@ -734,8 +734,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
           resurrected?(Map.get(requests, r2, []), r1, settled) ->
             {:failed, :resurrected_native_state}
 
-          required and not thinking_literal?(continuation) ->
+          # Manual thinking always answers with a thinking block; adaptive and
+          # omitted modes let the model decide, so only their native
+          # continuation is required.
+          required and manual_thinking?(model, reasoning) and
+              not thinking_literal?(continuation) ->
             {:missing, :native_thinking}
+
+          required and is_nil(continuation) ->
+            {:missing, :native_continuation}
 
           not required and not is_nil(continuation) ->
             {:failed, :unexpected_continuation}
@@ -762,6 +769,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
 
   defp continuation_required?(model, reasoning),
     do: LoopexComposition.ProviderBindings.continuation_required?(model, reasoning, 8_192)
+
+  defp manual_thinking?(model, reasoning) do
+    case LoopexComposition.ProviderBindings.mapping(model, reasoning, 8_192) do
+      {:ok, %{"thinking" => %{"mode" => "manual"}}} -> true
+      _ -> false
+    end
+  end
 
   # A later request may replay only its own run's replies, never the cut run's.
   defp resurrected?(requests, cut_run, settled) do
