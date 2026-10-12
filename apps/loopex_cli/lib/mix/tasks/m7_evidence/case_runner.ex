@@ -782,7 +782,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          },
          {:ok, conversations} <- plan(case_id, entry, context),
          {:ok, transform} <- case_transform(case_id, trusted, context),
-         {:ok, appendix} <- harness_appendix(trusted, workspace, runner, policy_case),
+         # The ephemeral case runs its own host session, which asks for no run.
+         {:ok, appendix} <-
+           if(case_id == "m7.ephemeral-question",
+             do: {:ok, %{}},
+             else: harness_appendix(trusted, workspace, runner, policy_case)
+           ),
          transform =
            &update_in(transform.(&1), ["session", "instructions"], fn options ->
              Map.merge(options || %{}, appendix)
