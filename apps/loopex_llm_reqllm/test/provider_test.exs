@@ -26,22 +26,28 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
 
   @prompt "Reply with exactly one word: loopex"
 
-  @tag :real_provider
-  Elixir.ExUnit.Case.test "one real model call completes through the model boundary" do
-    model_spec = Adapter.default_model()
-
+  # Concept: the companion build is the lane's setup, not the call it proves.
+  # Technical depth: setup_all runs outside the per-test timeout, so a fresh
+  # extraction's slower build cannot spend the call's 60-second budget. ExUnit
+  # skips it when the tagged test is excluded.
+  setup_all do
     root =
       Path.join(System.tmp_dir!(), "loopex-real-provider-#{System.unique_integer([:positive])}")
 
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
+    %{build_options: ProviderBuildFixture.options!(root)}
+  end
+
+  @tag :real_provider
+  Elixir.ExUnit.Case.test "one real model call completes through the model boundary",
+                          %{build_options: build_options} do
+    model_spec = Adapter.default_model()
     # The adapter resolves its credential per invocation from host custody
     # (ADR 0034), so the lane composes that custody from its own credential,
     # reading and deleting the variable as a host does.
     credential_options = ProviderBuildFixture.consume_custody_options()
-
-    options =
-      ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000] ++ credential_options
+    options = build_options ++ [cleanup_grace_ms: 2_000] ++ credential_options
 
     Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic.capture(fn ->
       case Adapter.complete_prompt(model_spec, @prompt, options) do
