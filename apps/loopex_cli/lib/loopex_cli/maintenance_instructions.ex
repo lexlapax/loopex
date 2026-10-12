@@ -22,7 +22,8 @@ defmodule LoopexCli.MaintenanceInstructions do
         "Keep every user requirement and decision, exact file paths, commands, identifiers, " <>
         "numbers and quoted values, the results of tool calls later work depends on, and " <>
         "open questions. When the conversation starts from an earlier summary, carry forward " <>
-        "every fact it states, copying exact names, values and paths verbatim. Do not invent " <>
+        "every fact it states, copying exact names, values and paths verbatim. Make the summary " <>
+        "as short as those facts allow; omit pleasantries and restated instructions. Do not invent " <>
         "facts or add advice. Your entire reply is one compact " <>
         "JSON object under 3,000 bytes. Its first character is { and its last is }. Never wrap " <>
         "it in ``` backticks or add any other text. Use exactly this shape: " <>

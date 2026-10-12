@@ -478,9 +478,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
         a = @fable
         configure = ~s(/configure {"model":"#{a}","reasoning":"medium"})
 
+        # The reference rows give the compaction history clearly larger than
+        # any complete summary, so its progress does not hinge on reply length.
+        rows =
+          Enum.map_join(1..30, " | ", &"row #{&1}: shelf #{&1} holds spare gaskets and hinges")
+
         session =
           conversation([
-            "Remember this release fact exactly: release_prefix=amber, batch_size=3.",
+            "Remember this release fact exactly: release_prefix=amber, batch_size=3. " <>
+              "Also read these reference rows and do not repeat them: " <> rows,
             "Reply with the word ready.",
             "/compact",
             "Without any tool, state the release fact you were given."
