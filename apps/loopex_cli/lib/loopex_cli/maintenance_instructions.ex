@@ -16,7 +16,7 @@ defmodule LoopexCli.MaintenanceInstructions do
   # ADR 0043 admits only the closed summary/carry-forward JSON object and has the
   # reference instruction ask for a compact envelope below 3,072 encoded bytes.
   @block %{
-    "version" => "loopex.reference.maintenance.v2",
+    "version" => "loopex.reference.maintenance.v3",
     "body" =>
       "Summarize the conversation so far so work can continue from the summary alone. " <>
         "Keep every user requirement and decision, exact file paths, commands, identifiers, " <>
@@ -28,7 +28,8 @@ defmodule LoopexCli.MaintenanceInstructions do
         "JSON object under 3,000 bytes. Its first character is { and its last is }. Never wrap " <>
         "it in ``` backticks or add any other text. Use exactly this shape: " <>
         ~s({"summary": "<the summary>", "carry_forward": {"files_read": ["<path>"], ) <>
-        ~s("files_changed": ["<path>"]}}. List each workspace path at most once.)
+        ~s("files_changed": ["<path>"]}}. Always include both lists, empty as [] when there ) <>
+        "are no paths, and list each workspace path at most once."
   }
 
   @doc """
