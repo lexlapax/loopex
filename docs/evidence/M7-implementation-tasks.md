@@ -52,7 +52,12 @@ on `a5cc21ab`, passed every lane before `m7-operator`, then refused
 fixture directory was 0700 where the catalog pins 0755, and files the write
 tool creates would be 0600 where it pins 0644. The M7 conversation lanes now
 run under scoped umask 022, as the floor lane's checks do, inside a 0700 run
-root
+root. The sixth, on `bbabe3ec`, timed out in real-provider lane 7: its test
+built the provider companion inside ExUnit's 60-second budget, which the
+fresh extraction's build had taken 45 to 56 seconds of in every earlier
+matrix. Like lane 5's test, it now builds in `setup_all`, and the session
+lane's deterministic case moved to its own module so ordinary runs build
+nothing
 ([disposition](../developer/agent-context-map.md#disposition-m7-t17-rehearsed-candidate-2026-10-12)).
 
 The Darwin run of `f85d7952` failed 34 of 942 `loopex_cli` tests. Under macOS's
