@@ -1106,6 +1106,45 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert result.mechanical_result == "required_action_absent"
   end
 
+  test "feature lets the model read before asking but not change anything before the answer" do
+    question = %{
+      "question" => "Which default should nil_mode use?",
+      "choices" => ~w(empty literal_null)
+    }
+
+    entry = %{
+      "required_model_actions" => [%{"arguments" => question}],
+      "objective_results" => %{"choice-1" => "empty"}
+    }
+
+    row = fn kind, version, fields ->
+      %{journal_version: version, payload: Map.put(fields, :kind, kind)}
+    end
+
+    rows = fn tool, version ->
+      [
+        row.("effect_intent_committed_v2", version, %{"job" => %{"tool_id" => tool}}),
+        row.("model_question_requested_v1", 2, %{
+          "interaction_id" => "i-1",
+          "interaction_request" => %{
+            "prompt" => question["question"],
+            "choices" => Enum.map(question["choices"], &%{"label" => &1})
+          }
+        }),
+        row.("model_question_response_admitted_v2", 3, %{
+          "interaction_id" => "i-1",
+          "answer" => %{"choice_id" => "choice-1"}
+        })
+      ]
+    end
+
+    assert CaseRunner.joins("m7.feature", rows.("loopex.read", 1), entry, nil) ==
+             {:ok, %{"M7_NIL_DEFAULT" => "empty"}}
+
+    assert CaseRunner.joins("m7.feature", rows.("loopex.edit", 1), entry, nil) ==
+             {:failed, :effect_before_answer}
+  end
+
   test "review fails when a helper ran on the parent's provider or its parent is unknown" do
     usage = %{
       "child" => %{"reported_input_tokens" => 9, "reported_output_tokens" => 2},

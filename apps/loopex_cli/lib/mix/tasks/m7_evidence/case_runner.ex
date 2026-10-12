@@ -782,7 +782,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          },
          {:ok, conversations} <- plan(case_id, entry, context),
          {:ok, transform} <- case_transform(case_id, trusted, context),
-         {:ok, appendix} <- harness_appendix(trusted, workspace, runner),
+         {:ok, appendix} <- harness_appendix(trusted, workspace, runner, policy_case),
          transform =
            &update_in(transform.(&1), ["session", "instructions"], fn options ->
              Map.merge(options || %{}, appendix)
@@ -919,7 +919,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # Technical depth: the text is the session's instruction appendix, read from
   # the trusted root outside the workspace; it grants nothing, since the fixture
   # policy still decides each call.
-  defp harness_appendix(trusted, workspace, runner) do
+  defp harness_appendix(trusted, workspace, runner, policy_case) do
     files =
       Path.wildcard(Path.join(workspace, "**/*"), match_dot: false)
       |> Enum.filter(&File.regular?/1)
@@ -933,10 +933,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
     path = Path.join(trusted, "harness.md")
 
+    # The feature runner's one approved argument is the operator's chosen default.
+    argv =
+      if policy_case == "m7.feature",
+        do:
+          ~s(["/bin/sh", "#{runner}", DEFAULT], where DEFAULT is the chosen default, ) <>
+            ~s("empty" or "literal_null"),
+        else: ~s(["/bin/sh", "#{runner}"])
+
     text =
       inventory <>
         "The approved test invocation is the bash tool with argv " <>
-        ~s(["/bin/sh", "#{runner}"]; run it exactly when a prompt asks for it.)
+        argv <> "; run it exactly when a prompt asks for it."
 
     with :ok <- File.write(path, text, [:exclusive]),
          do: {:ok, %{"append_file" => path}}
@@ -1832,7 +1840,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     [%{"arguments" => question}] = entry["required_model_actions"]
     asked = Enum.find(rows, &(kind(&1) == "model_question_requested_v1"))
     answer = Enum.find(rows, &(kind(&1) == "model_question_response_admitted_v2"))
-    effect = Enum.find(rows, &(kind(&1) == "effect_intent_committed_v2"))
+    # The prompt asks before editing; reading the code first is not an effect
+    # the answer has to precede.
+    effect =
+      Enum.find(
+        rows,
+        &(kind(&1) == "effect_intent_committed_v2" and
+            &1.payload["job"]["tool_id"] in ~w(loopex.write loopex.edit loopex.bash))
+      )
 
     cond do
       is_nil(asked) or is_nil(answer) ->
