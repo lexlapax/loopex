@@ -1536,9 +1536,16 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     options = if observed or gate, do: observer_runtime(options, self()), else: options
     restore_credentials(context)
 
+    tee =
+      if mode == :terminal and not Map.has_key?(context, :terminal_io),
+        do: start_tee(Process.group_leader())
+
     exit =
       host(
-        fn -> Chat.run(staged.config_argv ++ extra, options) end,
+        fn ->
+          if tee, do: Process.group_leader(self(), tee)
+          Chat.run(staged.config_argv ++ extra, options)
+        end,
         device,
         gate,
         Map.get(context, :operator_device, :stdio)
@@ -1553,7 +1560,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         Conversation.stop(device)
         {transcript.output, transcript.events}
       else
-        {"", [:operator_terminal]}
+        {if(tee, do: tee_contents(tee), else: ""), [:operator_terminal]}
       end
 
     inputs = Enum.map_join(events, &(inspect(&1) <> "\n"))
@@ -1573,6 +1580,53 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   defp step_deadline(context), do: Map.get(context, :step_deadline_ms, 600_000)
+
+  # Concept: a terminal conversation is shown to the operator and retained for
+  # the joins, as a piped one is.
+  # Technical depth: chat's group leader becomes this relay. It forwards every
+  # request to the operator's terminal and keeps a copy of written characters;
+  # reads relay through their own process so output is never held behind a
+  # pending line of operator input.
+  defp start_tee(leader), do: spawn_link(fn -> tee_loop(leader, []) end)
+
+  defp tee_loop(leader, written) do
+    receive do
+      {:io_request, from, ref, request} ->
+        written = [put_chars(request) | written]
+
+        case request do
+          {:put_chars, _, _} -> relay(leader, from, ref, request)
+          {:put_chars, _} -> relay(leader, from, ref, request)
+          _ -> spawn_link(fn -> relay(leader, from, ref, request) end)
+        end
+
+        tee_loop(leader, written)
+
+      {:tee_contents, caller} ->
+        send(caller, {:tee_contents, self(), IO.chardata_to_string(Enum.reverse(written))})
+    end
+  end
+
+  defp relay(leader, from, ref, request) do
+    send(leader, {:io_request, self(), ref, request})
+
+    receive do
+      {:io_reply, ^ref, reply} -> send(from, {:io_reply, ref, reply})
+    end
+  end
+
+  defp put_chars({:put_chars, :unicode, chars}), do: chars
+  defp put_chars({:put_chars, :latin1, chars}), do: :unicode.characters_to_binary(chars, :latin1)
+  defp put_chars({:put_chars, chars}), do: chars
+  defp put_chars(_request), do: []
+
+  defp tee_contents(tee) do
+    send(tee, {:tee_contents, self()})
+
+    receive do
+      {:tee_contents, ^tee, contents} -> contents
+    end
+  end
 
   # Concept: the conversation host runs in its own process so a prescribed
   # loss can end it abruptly, as an operator's kill would.
