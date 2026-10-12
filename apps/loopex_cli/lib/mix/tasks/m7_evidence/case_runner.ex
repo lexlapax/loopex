@@ -1205,8 +1205,33 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     %{resume: false, steps: steps ++ [{:line, "/status"}, {:line, "/quit"}]}
   end
 
+  # Concept: the one-shot ask runs on the operator's configured session model
+  # and reads that provider's own credential variable, as release lane 11
+  # supplies it.
+  # Technical depth: the ask names the model the profiles measured. Provider
+  # A's captured key is exposed as ANTHROPIC_API_KEY for this run only; the
+  # ask discards the durable name in this VM, so the captured credentials are
+  # restored when it returns.
   defp dispatch(%{scenario: %{ask: argv}} = staged, context) do
-    result = LoopexCli.Ask.run(argv.(staged.fixture.workspace), Map.get(context, :ask_seams, []))
+    ["chat", "--config", path | _] = staged.config_argv
+    {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
+    {prompt, flags} = List.pop_at(argv.(staged.fixture.workspace), -1)
+
+    case List.keyfind(Map.get(context, :credentials, []), "LOOPEX_PROVIDER_API_KEY", 0) do
+      {_name, key} -> System.put_env("ANTHROPIC_API_KEY", key)
+      nil -> :ok
+    end
+
+    result =
+      try do
+        LoopexCli.Ask.run(
+          flags ++ ["--model", profile["session"]["model"], prompt],
+          Map.get(context, :ask_seams, [])
+        )
+      after
+        System.delete_env("ANTHROPIC_API_KEY")
+        restore_credentials(context)
+      end
 
     %{
       exit: result.status,

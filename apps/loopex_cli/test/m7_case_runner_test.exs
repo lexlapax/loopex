@@ -885,6 +885,27 @@ defmodule LoopexCli.M7CaseRunnerTest do
     end
   end
 
+  test "a one-shot ask runs on the configured model with provider A's key for its run only", f do
+    System.put_env("LOOPEX_PROVIDER_API_KEY", "release-fixture-key")
+    on_exit(fn -> System.delete_env("LOOPEX_PROVIDER_API_KEY") end)
+    test = self()
+
+    seams =
+      Keyword.merge(ask_seams(:completed),
+        discard_credential: fn -> System.delete_env("LOOPEX_PROVIDER_API_KEY") end,
+        start_session: fn options ->
+          send(test, {:ask_key, System.get_env("ANTHROPIC_API_KEY"), options[:model]})
+          {:ok, :fixture_session}
+        end
+      )
+
+    passed!(scenario!(f, "m7.baseline.ask", fn _ -> [] end, %{ask_seams: seams}))
+    model = profile(f.root)["session"]["model"]
+    assert_received {:ask_key, "release-fixture-key", ^model}
+    assert System.get_env("ANTHROPIC_API_KEY") == nil
+    assert System.get_env("LOOPEX_PROVIDER_API_KEY") == "release-fixture-key"
+  end
+
   test "a cancelled one-shot ask is assertion_failed", f do
     assert {:stopped, [{:ok, result}]} =
              scenario!(f, "m7.baseline.ask", fn _ -> [] end, %{ask_seams: ask_seams(:cancelled)})
