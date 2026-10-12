@@ -2337,9 +2337,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
-  # A committed finding becomes a trusted file the oracle reads by path.
+  # A committed finding becomes a trusted file the oracle reads by path; its
+  # last line ends with a newline as a TSV file's does, and nothing else changes.
   defp materialize(staged, %{"M7_FINDING" => {:text, text}} = environment) do
     path = Path.join(staged.trusted, "finding.tsv")
+    text = if String.ends_with?(text, "\n"), do: text, else: text <> "\n"
 
     case File.write(path, text, [:exclusive]) do
       :ok -> %{environment | "M7_FINDING" => path}
