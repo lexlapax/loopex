@@ -193,7 +193,7 @@ defmodule Loopex.LLM.ReqLLM do
   @spec identity(String.t()) ::
           {:ok, identity()} | {:error, {:unresolved_model, String.t(), term()}}
   def identity(model_spec) when is_binary(model_spec) do
-    case ReqLLM.model(model_spec) do
+    case ReqLLM.model(Loopex.LLM.ReqLLM.ModelCapabilities.exact(model_spec)) do
       {:ok, model} ->
         {:ok,
          %{

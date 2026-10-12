@@ -54,6 +54,12 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
     "thinking" => %{"mode" => "omitted"}
   }
 
+  # Concept: the reference default's Haiku alias names one dated model in every VM.
+  # Technical depth: catalog alias resolution depends on what a VM has loaded,
+  # so identity and capture apply this fixed table first.
+  @doc false
+  def exact(model), do: Map.get(@alias, model, model)
+
   @doc """
   ## Concept
 
@@ -71,7 +77,7 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
   @spec capture(term()) :: {:ok, map()} | {:error, atom()}
   def capture(model) do
     with {:ok, _} <- Guards.model(model),
-         exact <- Map.get(@alias, model, model),
+         exact <- exact(model),
          {:ok, snapshot} <- packaged(),
          {:ok, limits} <- limits(snapshot, exact) do
       metadata = %{
