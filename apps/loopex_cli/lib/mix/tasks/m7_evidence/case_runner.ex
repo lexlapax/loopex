@@ -715,7 +715,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          profile =
            profile
            |> transform.()
-           |> put_in(["session", "system_class_tokens"], Enum.max(ceilings))
+           |> system_ceiling(case_id, Enum.max(ceilings))
            |> summarizer_route(context)
 
          if is_map(profile["delegation"]),
@@ -724,6 +724,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
        end}
     end
   end
+
+  # Concept: the ephemeral case's ceiling bounds its own host session, which
+  # `EphemeralDemo.session_options/1` selects and the profiles measure; the
+  # staged chat configuration only validates staging and names its model,
+  # routes and reply bound, so it keeps the operator's chat ceiling.
+  defp system_ceiling(profile, "m7.ephemeral-question", _ceiling), do: profile
+
+  defp system_ceiling(profile, _case_id, ceiling),
+    do: put_in(profile, ["session", "system_class_tokens"], ceiling)
 
   # Concept: a summarizer on provider B needs B's route in the attempt's
   # configuration, whichever case it summarizes for.
