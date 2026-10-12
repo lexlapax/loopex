@@ -452,7 +452,10 @@ for m7_lane in m7-operator m7-provider; do
   [ -z "${LOOPEX_M7_EXTERNAL_REPOSITORY:-}" ] ||
     m7_wrapper+=(--external-repository "$LOOPEX_M7_EXTERNAL_REPOSITORY")
   printf 'check-release: %s\n' "$m7_lane"
-  (cd "$tree" && with_m7_credentials mix run --no-start scripts/m7-fixture-chat.exs -- \
+  # The conversations dispatch through the paired provider the fresh build
+  # embedded; a default-environment compile carries no launch configuration.
+  (cd "$tree" && MIX_ENV=prod LOOPEX_BUILD_PROVIDER_CONFIG="$tree/_build/prod/loopex_provider.launch" \
+    with_m7_credentials mix run --no-start scripts/m7-fixture-chat.exs -- \
     "${m7_wrapper[@]}" chat --config "$release_m7_config") ||
     { printf 'check-release: %s RED\n' "$m7_lane" >&2; exit 1; }
 done
