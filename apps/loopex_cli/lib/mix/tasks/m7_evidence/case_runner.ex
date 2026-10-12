@@ -1428,6 +1428,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
         session = session || result.session
 
+        if result.exit == :lost, do: release_lost_placement(staged)
+
         if result.exit == 0 or (result.exit == :lost and :lose in conversation.steps) or
              result.interrupted,
            do: converse(rest, staged, context, mode, session, [result | done], n + 1),
@@ -1625,6 +1627,21 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       {:DOWN, ^ref, :process, ^pid, _} ->
         1
     end
+  end
+
+  # Concept: the prescribed loss ends the conversation's host the way an
+  # operating system ends a killed process, including its placement lease.
+  # Technical depth: the lease names the OS process, which this harness VM
+  # keeps alive, so the kernel's release on death is done here by releasing
+  # the lost owner's handles; the next conversation then opens the root.
+  defp release_lost_placement(staged) do
+    ["chat", "--config", path | _] = staged.config_argv
+    {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
+
+    profile["paths"]["state_root"]
+    |> Path.join("placement.lock.owner-*")
+    |> Path.wildcard()
+    |> Enum.each(&LoopexComposition.Placement.release/1)
   end
 
   defp harness_driven?(steps),
