@@ -191,7 +191,9 @@ defmodule LoopexCli.CodingTaskTest do
     end
 
     # Disposable means it goes away with the case that made it, leaving nothing
-    # for the next run to inherit.
+    # for the next run to inherit. The stack stops first: its live Store owns a
+    # directory under the root and exits when that directory disappears.
+    Demonstration.stop(stack)
     File.rm_rf!(stack.root)
     refute File.exists?(stack.workspace)
   end
