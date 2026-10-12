@@ -2067,11 +2067,24 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         {:missing, :finding}
 
       true ->
-        {:ok, %{"M7_FINDING" => {:text, finding}}}
+        {:ok, %{"M7_FINDING" => {:text, tsv_finding(finding)}}}
     end
   end
 
   def joins(_case_id, _rows, _entry, _outcome), do: {:ok, nil}
+
+  # Concept: the finding is the reply's TSV, not prose around it.
+  # Technical depth: from the exact header line, the header and its next line
+  # are kept byte for byte; a reply with no such header is passed whole, so the
+  # oracle still decides.
+  @tsv_header "file\tfunction\tdefect_code\tcall_chain"
+  @doc false
+  def tsv_finding(text) do
+    case String.split(text, "\n") |> Enum.drop_while(&(&1 != @tsv_header)) do
+      [header, row | _] -> header <> "\n" <> row <> "\n"
+      _ -> text
+    end
+  end
 
   defp task_usage(output) when is_binary(output) do
     with {:ok, %{"usage" => %{"child" => child, "parent" => parent} = usage}} <-

@@ -1106,6 +1106,15 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert result.mechanical_result == "required_action_absent"
   end
 
+  test "the review finding is the reply's TSV header and row, byte for byte" do
+    tsv =
+      "file\tfunction\tdefect_code\tcall_chain\nlib/fees.ex\ttotal/2\tduplicate_fee\tA/1>B/2\n"
+
+    assert CaseRunner.tsv_finding("Here is the finding:\n\n" <> tsv <> "Done.") == tsv
+    assert CaseRunner.tsv_finding(String.trim_trailing(tsv)) == tsv
+    assert CaseRunner.tsv_finding("no table here") == "no table here"
+  end
+
   test "feature lets the model read before asking but not change anything before the answer" do
     question = %{
       "question" => "Which default should nil_mode use?",

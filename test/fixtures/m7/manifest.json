@@ -1430,7 +1430,7 @@
         "sha256": "539514431689f903876af59012c5ccc05dea7a5ea1c0a5e234b12e8298a6430f"
       },
       "prompts": [
-        "Use the investigate helper role to trace Checkout.quote/2 through this repository without edits. Then use the separately instructed review helper role to review that chain without edits. Return only a TSV finding: the header line file, function, defect_code, call_chain, then one row, with no other text and no code fence. Write the exact source path, the function as name/arity, defect_code as one of duplicate_fee, missing_fee, wrong_rounding or negative_total, and the complete >-separated call chain of Module.name/arity entries. No workspace changes are allowed."
+        "Use the investigate helper role to trace Checkout.quote/2 through this repository without edits. Then use the separately instructed review helper role to review that chain without edits. Return only a TSV finding: the header line file, function, defect_code, call_chain, then one row, with no other text and no code fence. Write the exact source path, the function as name/arity without its module (for example total/2), defect_code as one of duplicate_fee, missing_fee, wrong_rounding or negative_total, and the complete >-separated call chain of Module.name/arity entries. No workspace changes are allowed."
       ],
       "required_model_actions": [
         {
