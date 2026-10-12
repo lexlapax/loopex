@@ -198,7 +198,7 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
 
     assert first.phase == 1
     assert first.dispatches == 1
-    assert first.child_environment_names == ["PATH"]
+    assert first.child_environment_names == []
     refute first.provider_credential_present
     assert_external_effect(root, first.job_id)
 
@@ -224,7 +224,7 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
     assert second.tool_started >= 1
     assert second.tool_finished >= 1
     assert second.terminal_outcome == "completed"
-    assert second.child_environment_names == ["PATH"]
+    assert second.child_environment_names == []
     refute second.provider_credential_present
 
     assert Enum.take(second.event_ids, length(first.acknowledged_event_ids)) ==
@@ -336,7 +336,7 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
       |> :erlang.binary_to_term([:safe])
 
     assert receipt.outcome == :completed
-    assert receipt.child_environment_names == ["PATH"]
+    assert receipt.child_environment_names == []
     refute receipt.provider_credential_present
 
     assert File.read!(Path.join([root, "workspace", "real-recovery.txt"])) ==

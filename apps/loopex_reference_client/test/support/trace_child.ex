@@ -81,7 +81,8 @@ defmodule Loopex.ReferenceClientTraceChild do
         true = List.first(tool_calls)["name"] == "write"
         true = Local.stats(fixture.executor).dispatches == %{receipt.job_id => 1}
         :completed = receipt.outcome
-        true = receipt.child_environment_names == ["PATH"]
+        # The registered coding write tool runs with no child environment.
+        true = receipt.child_environment_names == []
         false = receipt.provider_credential_present
 
         emit(%{
@@ -182,7 +183,7 @@ defmodule Loopex.ReferenceClientTraceChild do
     )
 
     true = File.read!(Path.join(fixture.workspace, "real-recovery.txt")) == "loopex-real-recovery"
-    true = receipt.child_environment_names == ["PATH"]
+    true = receipt.child_environment_names == []
     false = receipt.provider_credential_present
 
     evidence = %{
