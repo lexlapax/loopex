@@ -232,11 +232,10 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
     {capabilities, mapping} = configuration_facts(model, max_tokens)
 
-    # Like a host, configure the exact model the captured catalog names.
     {:ok, configuration} =
       SessionConfiguration.resolve(
         %{
-          "model" => capabilities["model"],
+          "model" => model.model,
           "reasoning" => "default",
           "configuration_version" => 1,
           "instructions" => instructions,
@@ -452,7 +451,9 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
     end
   end
 
-  defp model_spec(Loopex.LLM.ReqLLM), do: Loopex.LLM.ReqLLM.default_model()
+  # Like a host, run the exact model the default alias names.
+  defp model_spec(Loopex.LLM.ReqLLM),
+    do: Loopex.LLM.ReqLLM.ModelCapabilities.exact(Loopex.LLM.ReqLLM.default_model())
   defp model_spec(_module), do: "deterministic:test"
 
   # Concept: real calls use the trusted companion, with sampling owned by Core.
