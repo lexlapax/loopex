@@ -7477,3 +7477,22 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
 - **Fix.** The native stream and buffered content admit those members only
   when null and drop only a direct caller; any other value or member is still
   refused.
+
+<a id="disposition-m7-t17-rehearsed-candidate-2026-10-12"></a>
+### M7 closure matrix runs on a rehearsed candidate, 2026-10-12
+
+- **Decision.** The maintainer chose `openai:gpt-4.1-mini` as the M7
+  conversation configuration's maintenance (summarizer) model, because the
+  Anthropic Haiku model wraps the closed JSON summary in code fences, which
+  ADR 0043's envelope refuses. The maintainer reused the `d00e06eb` Darwin run
+  for the Darwin lane and the `124ded8e` candidate checks for `d999373a`; later
+  candidates run their own checks. The override above continues: each failed
+  matrix is archived under `t17-release/attemptN/` and the index recreated
+  byte-identical, and the coding agent operates the attended lane.
+- **Cause.** Matrices on `124ded8e` and `d999373a` ended in their first lanes
+  on harness defects the earlier credential-free tests could not reach.
+- **Fix.** Both M7 lanes are rehearsed end to end on the paired provider build
+  before the matrix, and every harness defect found was fixed at its cause
+  ([ledger](../evidence/M7-implementation-tasks.md#final-integration-before-the-closure-matrix-2026-10-11)).
+  No assertion was weakened; the thinking join's literal requirement now
+  applies to the manual-thinking cell that forces it.

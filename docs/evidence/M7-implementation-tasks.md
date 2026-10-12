@@ -1,5 +1,6 @@
 # M7 Implementation Tasks
 
+<a id="final-integration-before-the-closure-matrix-2026-10-11"></a>
 ### Final integration before the closure matrix, 2026-10-11
 
 Candidate checks after the nomination below found test-timing races and two
@@ -21,6 +22,25 @@ once for an unanswered skill-import prompt and once for Anthropic wire drift
 in its native stream envelope and `tool_use` blocks, which the adapter now
 admits only as null members and a direct caller
 ([disposition](../developer/agent-context-map.md#disposition-m7-t17-operator-override-2026-10-11)).
+
+Two more matrices on `124ded8e` and `d999373a` ended in their first lanes: the
+composition suite shared the caller's `LOOPEX_HOME`, and `m7.baseline.ask` ran
+on the default model with no provider key. Before another matrix, both M7
+lanes were rehearsed end to end on the paired provider build with the agent
+operator, and each failure was fixed at its cause: the ask cases run on the
+configured model and key; the release script builds both M7 lanes with the
+provider configuration; a harness appendix supplies the workspace inventory
+and approved invocation the fixture prompts name; a lost conversation lease is
+released as process death would; terminal output is retained through an owned
+relay target; a line no terminal can take is piped; the ephemeral case keeps
+the chat ceiling and its route credentials; the review prompt states the TSV
+finding format the oracle reads; the maintenance instruction asks for the
+closed JSON envelope and carries earlier summary facts forward; compaction
+scenarios summarize on provider B (`openai:gpt-4.1-mini`); and the thinking
+join requires a thinking block only where the cell forces manual thinking.
+The final rehearsal on `d259e099` passed all 20 `m7-operator` and all 7
+`m7-provider` cases
+([disposition](../developer/agent-context-map.md#disposition-m7-t17-rehearsed-candidate-2026-10-12)).
 
 The Darwin run of `f85d7952` failed 34 of 942 `loopex_cli` tests. Under macOS's
 symlinked `/var/folders` temporary root, three owners met a logical path where
