@@ -1582,41 +1582,40 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   # Concept: a terminal conversation is shown to the operator and retained for
   # the joins, as a piped one is.
-  # Technical depth: chat writes to this relay as its owned output target. It
-  # forwards every request to the operator's terminal and keeps a copy of the
-  # written characters; other requests relay through their own process.
-  defp start_tee(leader), do: spawn_link(fn -> tee_loop(leader, []) end)
+  # Technical depth: this relay is chat's owned ADR 0068 output target, like a
+  # piped conversation's device. Each write is shown on the operator's
+  # terminal, then acknowledged; standard output is also kept for the joins.
+  defp start_tee(terminal), do: spawn_link(fn -> tee_loop(terminal, nil, "") end)
 
-  defp tee_loop(leader, written) do
+  defp tee_loop(terminal, target, written) do
     receive do
-      {:io_request, from, ref, request} ->
-        written = [put_chars(request) | written]
+      {:loopex_cli_output_target, :acquire, owner, id} when is_nil(target) ->
+        incarnation = make_ref()
+        send(owner, {:loopex_cli_output_target, :acquired, self(), id, incarnation})
+        tee_loop(terminal, {owner, incarnation}, written)
 
-        case request do
-          {:put_chars, _, _} -> relay(leader, from, ref, request)
-          {:put_chars, _} -> relay(leader, from, ref, request)
-          _ -> spawn_link(fn -> relay(leader, from, ref, request) end)
-        end
+      {:loopex_cli_output_target, :acquire, owner, id} ->
+        send(owner, {:loopex_cli_output_target, :refused, self(), id})
+        tee_loop(terminal, target, written)
 
-        tee_loop(leader, written)
+      {:loopex_cli_output_target, :write, owner, incarnation, nonce, destination, bytes}
+      when target == {owner, incarnation} and destination in [:stdout, :stderr] ->
+        IO.binwrite(terminal, bytes)
+        send(owner, {:loopex_cli_output_target, :written, self(), incarnation, nonce})
+
+        if destination == :stdout,
+          do: tee_loop(terminal, target, written <> bytes),
+          else: tee_loop(terminal, target, written)
+
+      {:loopex_cli_output_target, :retire, owner, incarnation, nonce}
+      when target == {owner, incarnation} ->
+        send(owner, {:loopex_cli_output_target, :retired, self(), incarnation, nonce})
+        tee_loop(terminal, :retired, written)
 
       {:tee_contents, caller} ->
-        send(caller, {:tee_contents, self(), IO.chardata_to_string(Enum.reverse(written))})
+        send(caller, {:tee_contents, self(), written})
     end
   end
-
-  defp relay(leader, from, ref, request) do
-    send(leader, {:io_request, self(), ref, request})
-
-    receive do
-      {:io_reply, ^ref, reply} -> send(from, {:io_reply, ref, reply})
-    end
-  end
-
-  defp put_chars({:put_chars, :unicode, chars}), do: chars
-  defp put_chars({:put_chars, :latin1, chars}), do: :unicode.characters_to_binary(chars, :latin1)
-  defp put_chars({:put_chars, chars}), do: chars
-  defp put_chars(_request), do: []
 
   defp tee_contents(tee) do
     send(tee, {:tee_contents, self()})
