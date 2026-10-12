@@ -7495,4 +7495,6 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   before the matrix, and every harness defect found was fixed at its cause
   ([ledger](../evidence/M7-implementation-tasks.md#final-integration-before-the-closure-matrix-2026-10-11)).
   No assertion was weakened; the thinking join's literal requirement now
-  applies to the manual-thinking cell that forces it.
+  applies to the manual-thinking cell that forces it. The one product defect
+  found, CLI runtimes without the artifact store the read tool's oversized
+  results need, is fixed in the CLI host.

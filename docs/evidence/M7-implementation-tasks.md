@@ -35,11 +35,18 @@ released as process death would; terminal output is retained through an owned
 relay target; a line no terminal can take is piped; the ephemeral case keeps
 the chat ceiling and its route credentials; the review prompt states the TSV
 finding format the oracle reads; the maintenance instruction asks for the
-closed JSON envelope and carries earlier summary facts forward; compaction
-scenarios summarize on provider B (`openai:gpt-4.1-mini`); and the thinking
-join requires a thinking block only where the cell forces manual thinking.
-The final rehearsal on `d259e099` passed all 20 `m7-operator` and all 7
-`m7-provider` cases
+closed JSON envelope, keeps both carry-forward lists even when empty, and
+has the summary restate the input's `prior_checkpoint` first (in replays of
+one recorded request, the earlier wording kept its facts 4 times in 8 and
+this one 32 in 32); compaction scenarios summarize on provider B
+(`openai:gpt-4.1-mini`); and the thinking join requires a thinking block only
+where the cell forces manual thinking. Rehearsal also found a product defect:
+the reference CLI selected the read tool, whose oversized results the runtime
+retains as artifacts, without handing the runtime an artifact store, so the
+first tool result over 2,048 encoded bytes failed its run with
+`artifact_preparation_failed`. The CLI's three runtime compositions now
+enable the store, as the app server does. The final rehearsal on `cb1b6454`
+passed all 20 `m7-operator` and all 7 `m7-provider` cases
 ([disposition](../developer/agent-context-map.md#disposition-m7-t17-rehearsed-candidate-2026-10-12)).
 
 The Darwin run of `f85d7952` failed 34 of 942 `loopex_cli` tests. Under macOS's
