@@ -12,6 +12,13 @@ File.mkdir_p!(tmp)
 System.put_env("TMPDIR", tmp)
 System.at_exit(fn _status -> File.rm_rf(tmp) end)
 
+# Concept: these tests never touch an operator's state, however they are invoked.
+# Technical depth: the release lanes run without LOOPEX_HOME, which Core's shared
+# runtime helper requires, so this VM always owns one under its own root.
+home = Path.join(tmp, "loopex-home")
+File.mkdir_p!(home)
+System.put_env("LOOPEX_HOME", home)
+
 # Concept: one-time VM warm-up happens before cases start, not inside their waits.
 # Technical depth: the test VM loads modules lazily through the one code server,
 # and capture verifies the packaged catalog once per VM. Left to the first forty
