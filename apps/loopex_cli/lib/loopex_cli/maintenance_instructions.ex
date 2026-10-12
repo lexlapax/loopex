@@ -16,15 +16,15 @@ defmodule LoopexCli.MaintenanceInstructions do
   # ADR 0043 admits only the closed summary/carry-forward JSON object and has the
   # reference instruction ask for a compact envelope below 3,072 encoded bytes.
   @block %{
-    "version" => "loopex.reference.maintenance.v3",
+    "version" => "loopex.reference.maintenance.v4",
     "body" =>
       "Summarize the conversation so far so work can continue from the summary alone. " <>
         "Keep every user requirement and decision, exact file paths, commands, identifiers, " <>
         "numbers and quoted values, the results of tool calls later work depends on, and " <>
-        "open questions. When the conversation starts from an earlier summary, carry forward " <>
-        "every fact it states, copying exact names, values and paths verbatim. Make the summary " <>
-        "as short as those facts allow; omit pleasantries and restated instructions. Do not invent " <>
-        "facts or add advice. Your entire reply is one compact " <>
+        "open questions. The input's prior_checkpoint, when not null, summarizes everything " <>
+        "earlier: begin your summary by restating every fact it states, copying exact names, " <>
+        "values and paths verbatim, then add the facts from the new messages. Omit pleasantries " <>
+        "and restated instructions. Do not invent facts or add advice. Your entire reply is one compact " <>
         "JSON object under 3,000 bytes. Its first character is { and its last is }. Never wrap " <>
         "it in ``` backticks or add any other text. Use exactly this shape: " <>
         ~s({"summary": "<the summary>", "carry_forward": {"files_read": ["<path>"], ) <>
