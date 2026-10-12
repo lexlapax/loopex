@@ -454,6 +454,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   # Like a host, run the exact model the default alias names.
   defp model_spec(Loopex.LLM.ReqLLM),
     do: Loopex.LLM.ReqLLM.ModelCapabilities.exact(Loopex.LLM.ReqLLM.default_model())
+
   defp model_spec(_module), do: "deterministic:test"
 
   # Concept: real calls use the trusted companion, with sampling owned by Core.
