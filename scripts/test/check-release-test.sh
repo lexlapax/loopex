@@ -276,6 +276,17 @@ EOF
 definition=$(release_definition_lines "$tree/apps/fixture/test/cases.exs" 'case 1')
 IFS=$'\t' read -r module line <<<"$definition"
 [ "$module" = Elixir.ManifestFixture ] && [ "$line" = 5 ] || fail 'source case identity changed'
+cat >"$work/context-cases.exs" <<'EOF'
+defmodule ContextFixture do
+  use ExUnit.Case
+
+  Elixir.ExUnit.Case.test "case 1", %{value: _} do
+    assert true
+  end
+end
+EOF
+[ "$(release_definition_lines "$work/context-cases.exs" 'case 1')" = "$(printf 'Elixir.ContextFixture\t4')" ] ||
+  fail 'a direct test with a context argument was not its own witness'
 release_case_lane witness-positive fixture test/cases.exs 'case 1' "$module" "$line" without_credential \
   >"$work/witness-positive-output" 2>&1 ||
   { cat "$work/witness-positive-output" >&2; cat "$retain/witness-positive.identity" >&2; fail 'real ExUnit case identity was refused'; }

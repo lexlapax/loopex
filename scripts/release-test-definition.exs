@@ -7,8 +7,8 @@ defmodule ReleaseTestDefinition do
 
   ## Technical depth
 
-  Only direct top-level `Elixir.ExUnit.Case.test` forms count. `describe`
-  scopes are deliberately unsupported. The caller requires exactly one
+  Only direct top-level `Elixir.ExUnit.Case.test` forms count, with or without
+  a context argument. `describe` scopes are deliberately unsupported. The caller requires exactly one
   module/line definition, then independently checks the executed ExUnit event.
   This script parses source but never evaluates it.
   """
@@ -49,6 +49,14 @@ defmodule ReleaseTestDefinition do
   end
 
   defp module_lines(_, _), do: []
+
+  defp test_lines(
+         {{:., _, [{:__aliases__, _, [:"Elixir", :ExUnit, :Case]}, :test]} = call, metadata,
+          [literal, _context, [do: _] = body]},
+         name,
+         module
+       ),
+       do: test_lines({call, metadata, [literal, body]}, name, module)
 
   defp test_lines(
          {{:., _, [{:__aliases__, _, [:"Elixir", :ExUnit, :Case]}, :test]}, metadata,
