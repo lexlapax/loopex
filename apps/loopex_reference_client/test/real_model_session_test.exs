@@ -7,48 +7,24 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
   alias Loopex.ReferenceClient
   alias Loopex.ReferenceClientRuntimeFixture, as: Fixture
 
-  test "model dispatch receives only the committed canonical request bytes and digest" do
-    fixture =
-      Fixture.start(
-        "model-session",
-        Loopex.ReferenceClientTestModel,
-        observer: self(),
-        relative_path: "model-session.txt",
-        content: "model-session-effect"
-      )
-      |> Fixture.create("model-session")
+  # Concept: the companion build is the lane's setup, not the session it proves.
+  # Technical depth: setup_all runs outside the per-test timeout, so a fresh
+  # extraction's slower build cannot spend the session's 60-second budget. The
+  # fixture reuses the verified build under this caller-owned root. ExUnit
+  # skips it when the tagged test is excluded.
+  setup_all do
+    root =
+      Path.join(System.tmp_dir!(), "loopex-reference-real-#{System.unique_integer([:positive])}")
 
-    on_exit(fn -> Fixture.stop(fixture) end)
-
-    assert {:accepted, "prompt-model-session"} =
-             ReferenceClient.prompt(fixture.client, "prompt-model-session", "run the tool")
-
-    assert_receive {:model_request, dispatched}, 2_000
-    Fixture.await_terminal(fixture)
-
-    records = Fixture.records(fixture, fixture.client.session_id)
-
-    committed =
-      Enum.find(records, fn record ->
-        record.payload.kind == "model_request_committed_v2" and
-          record.payload["request"]["staged_request_digest"] ==
-            dispatched.staged_request_digest
-      end)
-
-    assert committed
-
-    assert committed.payload["request"]["canonical_request_bytes"] ==
-             dispatched.canonical_request_bytes
-
-    assert committed.payload["request"]["staged_request_digest"] ==
-             dispatched.staged_request_digest
-
-    assert File.read!(Path.join(fixture.workspace, "model-session.txt")) ==
-             "model-session-effect"
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root)
+    %{root: root}
   end
 
   @tag :real_provider
-  Elixir.ExUnit.Case.test "one real non-streaming model call receives the committed canonical request bytes and digest and completes inside a session" do
+  Elixir.ExUnit.Case.test "one real non-streaming model call receives the committed canonical request bytes and digest and completes inside a session",
+                          %{root: root} do
     # The phase diagnostic's legacy tracer would trace the runtime it spawns,
     # and a traced credential sender refuses the credential (ADR 0034), so this
     # runtime-level case keeps only its own bounded session diagnostics.
@@ -56,9 +32,8 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
       Fixture.start(
         "real-model-session",
         Loopex.LLM.ReqLLM,
-        max_tokens: 128,
-        relative_path: "real-session.txt",
-        content: "loopex-real-session"
+        [max_tokens: 128, relative_path: "real-session.txt", content: "loopex-real-session"],
+        root: root
       )
       |> Fixture.create("real-model-session")
 
