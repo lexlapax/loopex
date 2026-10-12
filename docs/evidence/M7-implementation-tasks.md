@@ -46,7 +46,13 @@ retains as artifacts, without handing the runtime an artifact store, so the
 first tool result over 2,048 encoded bytes failed its run with
 `artifact_preparation_failed`. The CLI's three runtime compositions now
 enable the store, as the app server does. The final rehearsal on `cb1b6454`
-passed all 20 `m7-operator` and all 7 `m7-provider` cases
+passed all 20 `m7-operator` and all 7 `m7-provider` cases. The fifth matrix,
+on `a5cc21ab`, passed every lane before `m7-operator`, then refused
+`m7.repair` before dispatch: the release runs under umask 077, so the seeded
+fixture directory was 0700 where the catalog pins 0755, and files the write
+tool creates would be 0600 where it pins 0644. The M7 conversation lanes now
+run under scoped umask 022, as the floor lane's checks do, inside a 0700 run
+root
 ([disposition](../developer/agent-context-map.md#disposition-m7-t17-rehearsed-candidate-2026-10-12)).
 
 The Darwin run of `f85d7952` failed 34 of 942 `loopex_cli` tests. Under macOS's

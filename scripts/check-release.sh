@@ -441,6 +441,12 @@ release_matrix_close || { echo 'check-release: attempts index recorder failed' >
 
 # M7 conversation lanes run through the trusted fixture wrapper inside the
 # extraction; each case is recorded before dispatch under the same matrix.
+# Concept: fixture workspaces see ordinary source modes.
+# Technical depth: the catalog pins 0755 directories and 0644 seeded and
+# created files, and the copy and the write tool keep the process umask. The
+# lanes run under scoped umask 022; their records stay private inside the
+# 0700 run root created here under the caller's 077.
+(umask 077 && mkdir -p "$retain/m7-runs") || exit 2
 for m7_lane in m7-operator m7-provider; do
   release_selected "$m7_lane" || continue
   m7_wrapper=(--lane "$m7_lane" --attempts-index "$release_attempts_index" --writer "$release_writer"
@@ -454,7 +460,7 @@ for m7_lane in m7-operator m7-provider; do
   printf 'check-release: %s\n' "$m7_lane"
   # The conversations dispatch through the paired provider the fresh build
   # embedded; a default-environment compile carries no launch configuration.
-  (cd "$tree" && MIX_ENV=prod LOOPEX_BUILD_PROVIDER_CONFIG="$tree/_build/prod/loopex_provider.launch" \
+  (cd "$tree" && umask 022 && MIX_ENV=prod LOOPEX_BUILD_PROVIDER_CONFIG="$tree/_build/prod/loopex_provider.launch" \
     with_m7_credentials mix run --no-start scripts/m7-fixture-chat.exs -- \
     "${m7_wrapper[@]}" chat --config "$release_m7_config") ||
     { printf 'check-release: %s RED\n' "$m7_lane" >&2; exit 1; }
