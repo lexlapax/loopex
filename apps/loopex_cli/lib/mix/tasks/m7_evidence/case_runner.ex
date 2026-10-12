@@ -671,16 +671,16 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   # Concept: the long case runs in the documented small context the plan's
-  # V6.1 step names, with the session's model summarizing.
+  # V6.1 step names, with provider B's registered summarizer.
   # Technical depth: `long_overflow_prompts/0` states the budget arithmetic
   # the 4,000-token budget and 1,024-token reply bound rest on.
-  defp fixture_profile("m7.long", _trusted, _context) do
+  defp fixture_profile("m7.long", _trusted, context) do
     {:ok,
      fn profile ->
        profile
        |> put_in(["session", "context_token_budget"], 4_000)
        |> put_in(["session", "max_tokens"], 1_024)
-       |> Map.put("maintenance", %{"model" => profile["session"]["model"]})
+       |> Map.put("maintenance", %{"model" => Scenarios.provider_b(context)["model"]})
      end}
   end
 
@@ -716,12 +716,21 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            profile
            |> transform.()
            |> put_in(["session", "system_class_tokens"], Enum.max(ceilings))
+           |> summarizer_route(context)
 
          if is_map(profile["delegation"]),
            do: put_in(profile, ["delegation", "system_class_tokens"], Enum.min(ceilings)),
            else: profile
        end}
     end
+  end
+
+  # Concept: a summarizer on provider B needs B's route in the attempt's
+  # configuration, whichever case it summarizes for.
+  defp summarizer_route(profile, context) do
+    if get_in(profile, ["maintenance", "model"]) == Scenarios.provider_b(context)["model"],
+      do: Scenarios.with_provider_b(profile, context),
+      else: profile
   end
 
   defp execution_policy(%{capture: nil}), do: "ordinary"

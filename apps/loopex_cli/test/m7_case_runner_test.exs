@@ -664,7 +664,12 @@ defmodule LoopexCli.M7CaseRunnerTest do
     prepared = JSON.decode!(File.read!(Path.join(result.root, "config.json")))
     assert prepared["session"]["context_token_budget"] == 4_000
     assert prepared["session"]["max_tokens"] == 1_024
-    assert prepared["maintenance"] == %{"model" => prepared["session"]["model"]}
+    provider_b = context.manifest["execution_manifest"]["providers"]["b"]
+    assert prepared["maintenance"] == %{"model" => provider_b["model"]}
+
+    assert prepared["providers"]["openai"] == %{
+             "credential" => %{"env" => provider_b["credential_variable"]}
+           }
 
     # The overflow comes from the fixed prompts the plan puts between the
     # explanation and the recall; every scripted reply is short.
