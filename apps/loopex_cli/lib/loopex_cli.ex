@@ -23,7 +23,7 @@ defmodule LoopexCli do
 
   Argument parsing and terminal output use the standard library only. A
   dependency here would land in the operator's install for the sake of flag
-  parsing, which is not a trade this milestone makes.
+  parsing, which is not a trade the command makes.
 
   Steering and follow-up have separate flags rather than one input the command
   interprets. The runtime never guesses which of the two an input is, so the

@@ -2,7 +2,7 @@
 
 Future milestone pairs, not registered or accepted. A draft authorizes no
 implementation or release. The [milestone register](../plans/README.md) owns
-status; [M7 coding-agent proof](../plans/M7.md#concept) is Accepted for implementation.
+status; [M7 coding-agent proof](../plans/M7.md#concept) is closed.
 
 | Draft | Concept | Technical depth |
 | --- | --- | --- |

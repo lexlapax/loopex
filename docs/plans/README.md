@@ -37,10 +37,10 @@ The maintainer accepted M7, ADRs 0041–0049, the
 binds every historical pair's digests and records the integration instruction.
 The founding prerequisites are accepted and implementation may begin. The maintainer
 accepted ADRs 0065, 0067 and 0068 on 2026-10-09 in the
-[disposition](../developer/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09). M7's outcome rows
-now read Proved and name their proof obligations; the closure matrix,
-attended block and independent review of the exact candidate remain Pending in
-the [closure scaffold](../evidence/M7-closure-runs.md).
+[disposition](../developer/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09). M7 closed on
+2026-10-13 and is the source release `v0.4.0`; its
+[closure runs](../evidence/M7-closure-runs.md) record the matrix and the
+independent reviews.
 No partially accepted subset authorizes dependent implementation.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the

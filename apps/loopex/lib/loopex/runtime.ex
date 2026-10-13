@@ -1423,7 +1423,8 @@ defmodule Loopex.Runtime do
   # with no default here. Omission is refused by the same name as an invalid
   # value, so a later change to a composition default can never silently
   # re-decide a ceiling an embedder did not choose; the reference composition
-  # is the one place that supplies 8,192 on the embedder's behalf.
+  # is the one place that supplies a budget on the embedder's behalf, derived
+  # from the model's context window, or 8,192 when the window is unknown.
   defp validate_context_token_budget(value)
        when is_integer(value) and value > 0 and value <= @uint64_max,
        do: {:ok, value}
