@@ -39,27 +39,31 @@ OpenSSL and termcap, and record the OpenSSL version they embed in the
 manifest. `scripts/release/assert-linkage.sh` runs `otool -L` or `ldd` over
 every shared object and every executable in the archive and refuses any
 resolution outside the archive or the allowed base set; it runs at build time
-and as the smoke lane's first step. Recommended minimum bases, to be fixed
-from the retained build at acceptance: the macOS version the Mac's SDK
-targets, and glibc 2.35 from an Ubuntu 22.04 container.
+and as the smoke lane's first step. The Linux minimum base is glibc 2.35 from
+an Ubuntu 22.04 container, selected by the maintainer on 2026-10-13. The macOS
+minimum is the version the Mac's SDK targets, fixed from the retained build at
+acceptance.
 
 **macOS distribution.** A downloaded archive carries the quarantine
 attribute, and Gatekeeper refuses an unsigned or un-notarized `beam.smp`
-extracted from it. Ad hoc signing does not clear a download. The decision
-open before acceptance is whether `<installed-version>` is signed and notarized under a
-developer account, or whether the operator guide documents removing the
-attribute after verification; the smoke lane simulates the quarantined
-download either way and proves the documented path.
+extracted from it. Ad hoc signing does not clear a download. The maintainer
+chose on 2026-10-13 that `0.5.0` is neither signed nor notarized. The operator
+guide verifies the downloaded archive against its external checksum with
+the system's own `shasum`, extracts it, removes the attribute recursively with
+`xattr -dr com.apple.quarantine` on the extracted directory, and then runs
+`bin/loopex version --verify` against the manifest before any other command.
+The smoke lane simulates the quarantined download and proves that documented
+path. The exact command sequence is fixed with the recipe at acceptance.
 
 **Layout of the extracted archive.**
 
 ```text
-loopex-<installed-version>-<platform>/
+loopex-0.5.0-<platform>/
   bin/loopex                 the promoted launcher (POSIX sh)
   bin/loopex-release         the mix release start script the launcher invokes
   erts-<version>/            the bundled runtime system
   lib/<app>-<version>/       every included application
-  releases/<installed-version>/            the release's boot and configuration files
+  releases/0.5.0/            the release's boot and configuration files
   companion/                 the protected provider companion and its launch file
   MANIFEST.json              see below
   SOURCE_IDENTITY            the M5-defined source identity of the tree it was built from
@@ -85,7 +89,7 @@ same code serves both.
 
 ```json
 {
-  "release": "<installed-version>",
+  "release": "0.5.0",
   "source_commit": "<40-hex>",
   "source_identity_sha256": "<64-hex>",
   "toolchain": {"elixir": "1.20.3", "otp": "29.0.5", "openssl": "<embedded version>"},
@@ -98,7 +102,7 @@ same code serves both.
 `files` lists every file in the archive except `MANIFEST.json` itself, sorted
 by raw path bytes, one entry per regular file with symbolic links recorded as
 `{"path": "...", "link": "<target>"}`. The archive SHA-256 appears only in
-the external `loopex-<installed-version>-<platform>.tar.gz.sha256` checksum or
+the external `loopex-0.5.0-<platform>.tar.gz.sha256` checksum or
 attestation, never inside the archive whose digest it names.
 `loopex version --verify` recomputes every file digest against the manifest
 and reports the first mismatch.
@@ -122,18 +126,19 @@ empty temporary home:
    schema. Configure two admitted provider env references and exact model
    choices; validate, inspect origins and run `doctor`. No file credential or
    unaccepted provider-selection grammar is assumed.
-3. Run `loopex run --daemon` with no daemon running: it starts the daemon on
-   demand and completes one real provider session; detach, attach as
-   observer, take over, `daemon stop`; every step is the M5 workflow through
+3. Run `loopex run` through the home's socket with no daemon running: it
+   starts the daemon on demand under ADR 0037 and completes one real provider
+   session; detach, attach as observer with `attach --observe`, take control,
+   and stop the service with ADR 0037's lifecycle command; every step uses
    the installed command.
-4. Start again on demand; list and resume the session; complete it;
-   `daemon logs` prints a bounded redacted log.
-5. Retain a pre-upgrade closed-root backup and an actually available prior
-   artifact. Restore into an empty root using a verified restoration tool that
-   supports that backup, then start the matching prior binary and validate its
-   sessions. The first binary distribution may use the prior source release;
-   do not assume it had an installed layout or a `store restore` command.
-   Separately prove same-version backup/restore of the candidate's newer root.
+4. Start again on demand; list and resume the session; complete it; ADR
+   0037's status and diagnostic commands report readiness without resolving a
+   credential.
+5. Stop the service, take a backup with `loopex store backup`, restore it into
+   an empty root with `loopex store restore`, point the home at the restored
+   root, start the service and validate its sessions. Point the installed
+   command at a copy of an unmarked root written by the M7 source build and
+   prove the named refusal and an unchanged root.
 6. Delete the directory; the home is intact; `ls` proves nothing was written
    outside the home, the workspace and the lane's temporary directory, which
    the lane proves by a before-and-after inventory of the filesystem roots
@@ -164,10 +169,12 @@ the Port and OS guard; the credential still crosses the private channel; the
 composition-bound token resolved through host custody is unchanged. Only the
 path resolution changes, and the digest verification before launch is kept.
 
-**Rollback.** Follow step 5 of the installed smoke above: retain a pre-upgrade
-backup and available prior artifact, restore with a compatible tool, then start
-the matching prior binary. Do not assume the old artifact contains a restore
-command or an installed directory layout.
+**Recovery.** Follow step 5 of the installed smoke above. Before 1.0 there is
+no binary rollback or older-root upgrade, under the maintainer's pre-1.0
+current-contract rule. An unsupported root is refused before any write, and
+recovery restores a backup under the build whose format the root is in. No
+earlier build is assumed to contain a restore command, an installed layout or
+the marker check.
 
 **Rejected alternatives.**
 
@@ -178,7 +185,7 @@ command or an installed directory layout.
   versions; no consumer justifies it.
 - *Service-manager installation* is host policy and a later milestone.
 - *Homebrew or distribution packaging* depends on publication and on name
-  clearance; it is not `<installed-version>` scope.
+  clearance; it is not `0.5.0` scope.
 - *A release without ERTS* would require an installed Erlang of the exact
   version and could not claim "no toolchain required".
 - *Building the release from the development toolchain* was the first draft
@@ -187,8 +194,13 @@ command or an installed directory layout.
 - *A curl-piped install script*, which pi, Hermes Agent and OpenClaw all
   lead with, is a publication-time convenience and follows name clearance.
 
-**Open before acceptance.** The exact `platform` identifiers and each
-platform's minimum base, fixed from the retained recipe builds; the allowed
-base-library set per platform, including whether `libstdc++` is in it; the
-macOS signing and notarization decision; the public-name clearance status,
-which gates publication rather than this decision.
+**Decided on 2026-10-13 by the maintainer.** The release label `0.5.0`, the
+two platforms `darwin-arm64` and `linux-x86_64`, the Linux base of glibc 2.35
+from Ubuntu 22.04, and the macOS quarantine-removal path without signing or
+notarization.
+
+**Open before acceptance.** The macOS minimum version, fixed from the retained
+recipe build; the allowed base-library set per platform, including whether
+`libstdc++` is in it; the exact verification and quarantine-removal command
+sequence; the public-name clearance status, which gates publication rather
+than this decision.

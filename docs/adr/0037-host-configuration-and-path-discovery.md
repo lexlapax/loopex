@@ -4,10 +4,10 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host
-- **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), conditional on its acceptance and delivered M7 baseline
+- **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
 - **Prerequisite for:** M8 outcomes 2 and 4: installed discovery, configuration management, service lifecycle and readiness; not an M7 prerequisite
 
 <a id="concept-adr-0037-decision"></a>
@@ -15,8 +15,9 @@ Technical depth: [Installed host configuration and path discovery](0037-host-con
 
 Technical depth: [Contract](0037-host-configuration-and-path-discovery-technical.md#technical-adr-0037-decision).
 
-M7 proposes explicit configuration, named roles and provider routing. The
-installed successor reuses that reader and schema, then adds a documented
+M7 delivered explicit configuration, named roles and provider routing under
+ADR 0049, with `config show` and value origins. The installed successor reuses
+that reader and schema, then adds a documented
 `~/.loopex` default home, automatic loading of that home's `config.json`,
 configuration writers and lifecycle diagnostics. Core and reusable composition
 still receive explicit values and never discover home directories.
@@ -48,10 +49,10 @@ custody and explicit configuration. Only named environment references are
 currently proposed. File/keychain/command credentials require a separate future
 decision; the sender never gains ambient file/environment reads.
 
-Installed discovery and management are M8 work, conditional on closed M7.
-No installed release version is selected here. Exact command compatibility and
-any schema additions must be reconciled with the delivered M7 contract before
-this pair can be accepted.
+Installed discovery and management are M8 work on the closed M7 baseline.
+This record selects no release version; the M8 plan records the maintainer's
+`0.5.0` label. Exact command grammar and any schema additions are fixed
+against the delivered CLI and daemon before this pair can be accepted.
 
 <a id="concept-adr-0037-consequences"></a>
 ### Observable Consequences
@@ -70,8 +71,10 @@ Technical depth: [Compatibility mechanics](0037-host-configuration-and-path-disc
 
 The existing explicit-file path remains supported. Automatic discovery is a
 new host trust choice, not project-context admission. Unsupported schemas refuse
-before startup. Configuration deletion is not a rollback procedure; use a
-matching prior binary and retained root/configuration backup where compatible.
+before startup. Configuration deletion is not a recovery procedure. Before 1.0
+there is no rollback to an earlier build; recovery restores a backup under the
+matching build with ADR 0072's commands, with the configuration file kept
+beside it.
 
 ## Governance Record
 

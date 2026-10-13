@@ -20,7 +20,8 @@ Technical depth: [Prerequisites](m9-store-engine-successor-technical.md#technica
 
 The `0.2` local store is a full-replay log. It stops at 256 MiB and asks the
 operator to retire the root. The Open [M8 plan](../plans/M8.md#concept) adds a
-format marker, a reader boundary, and backup and restore under
+current-format root marker and operator backup and restore commands over
+accepted ADR 0051's restore, under
 [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept).
 M9 takes the engine decision from a retained measured experiment under
 [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept)

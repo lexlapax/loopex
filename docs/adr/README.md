@@ -79,7 +79,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0069 | Helper run evidence and route guard | Accepted | [Decision](0069-helper-run-evidence-and-route-guard.md#concept) | [Technical depth](0069-helper-run-evidence-and-route-guard-technical.md#technical-depth) |
 | 0070 | Pre-1.0 superseded surface retirement | Accepted | [Decision](0070-pre-1-superseded-surface-retirement.md#concept) | [Technical depth](0070-pre-1-superseded-surface-retirement-technical.md#technical-depth) |
 | 0071 | Daemon-attached conversation | Proposed | [Decision](0071-daemon-attached-conversation.md#concept) | [Technical depth](0071-daemon-attached-conversation-technical.md#technical-depth) |
-| 0072 | Store readiness: marker, reader boundary, backup and restore | Proposed | [Decision](0072-store-readiness-marker-backup-and-restore.md#concept) | [Technical depth](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth) |
+| 0072 | Store readiness: current-format marker and operator backup and restore | Proposed | [Decision](0072-store-readiness-marker-backup-and-restore.md#concept) | [Technical depth](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -229,23 +229,24 @@ runs inside M5.
 sequence places their work in M8 installation/readiness and M9 store migration,
 after M7 coding-agent proof. ADR 0037 extends M7's explicit configuration with
 installed discovery, writers and lifecycle commands; it introduces no separate
-role/provider schema. All three remain Proposed. Exact installed/engine
-versions and retained rollback artifacts must be selected before their
-successor acceptance.
+role/provider schema. All three remain Proposed. On 2026-10-13 the maintainer
+selected M8's `0.5.0` label, its two hosts and the macOS quarantine-removal
+path, which ADR 0038 now records; before 1.0 no retained rollback artifact is
+required. The engine version remains M9's to select.
 
 0071 and 0072 were proposed on 2026-09-30 with the
 [M8 plan](../plans/M8.md#concept), numbered 0050 and 0051 on its planning
 branch and renumbered when that branch was rebased onto the closed M7 baseline.
 0071 lets the conversation command attach to the running service and makes the
-service read ADR 0049's configuration file at startup. 0072 takes the format
-marker, reader boundary, backup and restore out of 0036, so the installed
-release's readiness work does not wait on the engine experiment; 0036 keeps the
-engine selection, migration and capacity refusal for the M9 draft. That split
-is the M8 plan's proposal P2, an author proposal until the maintainer selects
-it. As proposed, M8's prerequisites are 0037, 0038, 0071 and 0072; each is
-reconciled with the delivered M7 contracts, including accepted ADR 0051's
-current-format restore and ADR 0070's retirement of cross-version rollback,
-before it is dispositioned.
+service read ADR 0049's configuration file at startup. 0072 takes the operator
+backup and restore work out of 0036, so the installed release does not wait on
+the engine experiment; 0036 keeps the engine selection, migration and capacity
+refusal for the M9 draft. That split is the M8 plan's proposal P2, an author
+proposal until the maintainer selects it. On 2026-10-13 the four M8
+prerequisites 0037, 0038, 0071 and 0072 were reconciled with the delivered M7
+contracts. 0072 now amends accepted ADR 0051 only by adding the operator
+commands in front of its restore, and adds the current-format root marker;
+ADR 0051, ADR 0070 and the pre-1.0 rule settle the rest.
 
 0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on
 2026-09-27. It adds an ephemeral composition profile beside the durable one,

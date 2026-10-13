@@ -47,7 +47,10 @@ The maintainer opened `M8` for planning on 2026-09-30 on branch `m8`; the
 holds the instruction. On 2026-10-13 the branch was rebased onto the closed M7
 baseline and `M8` became the Open milestone; the
 [rebase record](../process/agent-context-map.md#disposition-m8-rebase-2026-10-13)
-lists what changed. Open `M8` carries no implementation authority.
+lists what changed. The same day the maintainer rescoped `M8` to the delivered
+M7 baseline and selected its `0.5.0` label and two hosts; the
+[scope record](../process/agent-context-map.md#disposition-m8-scope-2026-10-13)
+lists the decisions. Open `M8` carries no implementation authority.
 No partially accepted subset authorizes dependent implementation.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the

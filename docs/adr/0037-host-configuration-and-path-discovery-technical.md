@@ -20,11 +20,14 @@ M5 daemon directory and bounded diagnostics. Any final layout must respect the
 then-current store format and socket placement rules; no new core global state.
 Reuse role snapshots, immutable run configuration and env-only provider custody.
 `config show` and `paths` inspect references without resolving credentials;
-`doctor` reports reference availability only, never values.
+`doctor` reports reference availability only, never values. It also reports
+ADR 0072's root marker, whether the root is held and the backup format this
+build writes.
 
 Candidate commands extend the M7 parser: `init`, `config set`, `paths`, `doctor`
 and installed daemon lifecycle commands. Before M8 acceptance, freeze exact
-syntax, defaults and supported previous artifacts against its delivered baseline.
+syntax and defaults against the delivered CLI and daemon. No previous artifact
+is supported before 1.0.
 `init` refuses an existing config, validates before writing and writes no secret.
 A configuration update validates the whole resulting document. Write an exclusive
 temporary in the same directory, fsync, rename and fsync the directory. Use a
@@ -33,8 +36,9 @@ proof against PID reuse. A failed update leaves prior bytes unchanged.
 
 **Lifecycle and readiness.** The installed lifecycle commands pass the
 selected file to `loopex daemon --config` under ADR 0071; they add no second
-reader. Trace controls stay daemon startup inputs under ADR 0049, from flags
-or the file, and no attached client supplies them. Concurrent starts converge
+reader. The delivered daemon has no trace flags. Any service trace control
+comes from its startup inputs under ADR 0071, and no attached client supplies
+one. Concurrent starts converge
 on one daemon through the existing placement lock. On-demand start applies to
 `chat`, `run` and `resume` when they use the home's socket, and never to
 `attach` or `sessions`; an explicitly named socket outside the home starts
@@ -74,8 +78,8 @@ must also prove concurrent-start convergence, the absent-reference refusal
 before any spawn, each of the four readiness states, the commands that do and
 do not start a service, and a start on demand that leaves project resources
 unadmitted without prompting. Its
-operator demonstration uses the actual installed artifact and matching rollback
-artifact. M7 does not claim these outcomes.
+operator demonstration uses the actual installed artifact, including backup
+and restore under it. M7 does not claim these outcomes.
 
 <a id="technical-adr-0037-compatibility"></a>
 ### Compatibility Mechanics and Alternatives
@@ -85,5 +89,6 @@ Concept: [Compatibility and rollback](0037-host-configuration-and-path-discovery
 One JSON schema and resolver is preferred to a second installed configuration
 system. Installation, default home and management do not alter committed session
 settings. Provider file credentials and live rotation remain separately scoped.
-Do not promise a released old reader recognizes future records or new error
-classes; prove the exact binary/record combinations in the successor plan.
+Before 1.0 only the current schema and root format are read. An unsupported
+root is refused before any write under ADR 0072, and no earlier build is
+claimed to recognize a later file or root.

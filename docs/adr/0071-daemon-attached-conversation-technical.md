@@ -27,8 +27,8 @@ the service as their owner. Session overrides are limited to the members the
 daemon generation's `session.create` options and `session.configure` update
 already accept from a remote client.
 
-**Action mapping.** Each conversation action uses a member of the delivered
-M7 daemon generation, under ADR 0033's controller checks:
+**Action mapping.** Each conversation action uses a member of
+`loopex.experimental/4`, under ADR 0033's controller checks:
 
 | Conversation action | Daemon member | Authority |
 | --- | --- | --- |
@@ -43,9 +43,10 @@ M7 daemon generation, under ADR 0033's controller checks:
 | Status | `session.inspect` and the attachment snapshot's committed configuration record | No lease |
 | Detach | `session.release_control`, then close | Holder only; a failed release leaves the lease to expire |
 
-Before acceptance, check each row against the delivered generation's method,
-record and error inventories, including the authority `session.inspect`
-requires. A row with no delivered member is a named protocol addition with
+Every method named above is in the delivered `/4` method inventory, checked on
+2026-10-13 against `loopex-experimental-4.json`. Before acceptance, check
+each row against its record and error inventories, including the authority
+`session.inspect` requires. A row with no delivered member is a named protocol addition with
 schemas, vectors and both Node clients updated in the same change.
 
 **Bounds and defaults.** The attached command sends authored bounds only where
@@ -74,14 +75,15 @@ registry modules and derived tool bindings.
 
 The daemon today gives each input one source: a flag, else its environment
 variable (`LOOPEX_HOME`, `LOOPEX_WORKSPACE`, `LOOPEX_PROVIDER_LAUNCH`,
-`LOOPEX_POLICY`), with one credential from `LOOPEX_PROVIDER_API_KEY`. ADR 0049
-admits `LOOPEX_HOME` as the only configuration environment alias, its file has
-no provider-launch member, and ADR 0048 makes startup reject a legacy
-credential together with provider bindings. Before acceptance this record
+`LOOPEX_POLICY`), with one credential from `LOOPEX_PROVIDER_API_KEY` that ADR
+0070 places in a one-route version-2 plane. ADR 0049 admits `LOOPEX_HOME` as
+the only configuration environment alias, its file has no provider-launch
+member, and ADR 0048 makes startup reject that single credential together with
+provider bindings. Before acceptance this record
 fixes, for a daemon given `--config`: which existing flags remain and their
 precedence over file members; whether the three other environment inputs are
 honored, refused or ignored; where the provider launch path comes from; and
-that the legacy credential is refused when the file declares bindings. Each
+that the single credential is refused when the file declares bindings. Each
 conflict has a named refusal.
 
 A daemon started without `--config` keeps M7's delivered behavior. Whether
@@ -101,7 +103,7 @@ attachment; it keeps no second conversation state.
 | `/abort` | `session.abort` for the active run; the conversation continues |
 | `/quit`, end of input, `SIGINT`, `SIGTERM`, `SIGHUP`, `SIGQUIT`, idle or active | Stop reading, release control waiting at most the existing five seconds, print the detach line and the session identifier, exit `0`; the run continues |
 | `SIGKILL` or host loss | Nothing is sent; the lease lapses at the end of its term; the run continues |
-| Service stops | `daemon.stopping` when delivered, otherwise the socket closes; exit nonzero and name reconnection |
+| Service stops | The `daemon.stopping` record when delivered, otherwise the socket closes; exit nonzero and name reconnection |
 | Slow reader | The existing bounded attachment rules apply; the command reattaches from its last cursor |
 | Pipe syntax or state refusal | Stop further input, detach, exit nonzero |
 
@@ -128,8 +130,8 @@ one. The refusal is shown as the service returns it.
 
 - The exact flag spelling and its interaction with ADR 0037's discovered
   socket.
-- The method-mapping check above against the delivered generation.
-- The daemon's flag, environment and legacy-credential rules under `--config`.
+- The record, error and authority check of the mapping above.
+- The daemon's flag, environment and single-credential rules under `--config`.
 - The source of `session.compact` bounds.
 - Whether the client is shown the service's workspace, and the record that
   carries it.
@@ -156,7 +158,7 @@ M8 must prove, against a real daemon process and socket:
   `attach --observe` watching the same session;
 - `cursor_expired` and slow-reader recovery;
 - service startup with a valid file, an invalid file, no file, and each named
-  flag, environment and legacy-credential conflict;
+  flag, environment and single-credential conflict;
 - the activation-ceiling refusal shown to the operator;
 - the foreground conversation's refusal of a root the service holds;
 - an attended reconnect in the installed demonstration.

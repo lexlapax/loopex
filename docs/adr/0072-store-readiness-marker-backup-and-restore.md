@@ -1,72 +1,74 @@
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Marker, reader boundary, archive and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
+Technical depth: [Marker, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing; it takes the format marker, reader boundary, backup and restore out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. The split is an author proposal, M8's P2, until the maintainer selects it
-- **Depends on:** [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the diagnostic command; and the delivered M7 record inventory
-- **Prerequisite for:** M8 outcomes 3 and 7, accepted before any marker, reader-boundary, backup or restore code is written
+- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in one clause only: its statement that no backup CLI is added. It adds operator commands in front of ADR 0051's unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2 until the maintainer selects it
+- **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the diagnostic command and readiness report
+- **Prerequisite for:** M8 outcomes 3 and 7, accepted before any marker, backup or restore command code is written
 
 <a id="concept-adr-0072-decision"></a>
 ### Context and Decision
 
 Technical depth: [Contract](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-decision).
 
-ADR 0036 proposed two things in one record: which store engine replaces the
-local log, and the readiness work an installed release needs whichever engine
-wins. It may be accepted only with the engine chosen from a measured
-experiment, and no marker or backup code may be written before it is accepted.
-That ties the installed release to an experiment whose result it does not use.
+This record was first proposed before M7 was built, as a container marker, a
+reader inventory and a backup archive with its own restore. M7 then settled
+most of that.
 
-M7 also made backup and restore load-bearing. Under accepted ADR 0046, one
-unreadable session history keeps the durable host closed until the root is
-restored from backup, and M7 ships no backup command. Its fixtures copy quiet
-directories by hand.
+- **Restore exists.** Accepted ADR 0051 delivers
+  `LoopexComposition.Restore.restore/2` and `lookup/3`. They restore a
+  complete, unexcluded, idle backup of a current-format root into an empty
+  root on the same machine. The original source is retired, and the
+  operation never redispatches an uncertain effect. The host owns backup
+  creation, the capture record, plan construction and the latestness and
+  exclusion attestation. There is no command an operator can run.
+- **Unknown records are refused.** Session replay refuses a record kind outside
+  the current inventory as `invalid_private_history`. ADR 0070 refuses a root
+  that has only the retired session catalogue and deletes the index-preparation
+  step. Before 1.0 no older root, reader or client is supported.
 
-This record decides the readiness work alone, on the existing local adapter.
-ADR 0036 continues to decide the engine and the migration, for the store
-successor milestone.
+Two gaps remain for an installed operator. Backup and restore need a host
+program. And an unsupported root is refused only after the Store has written
+to it: the Store takes its writer marker, and may repair a torn tail, before
+replay can refuse anything.
+
+This record now decides only those gaps. ADR 0051 decides the restore and
+ADR 0070 decides the retirements. Older readers, cross-version rollback and a
+separate record inventory are no longer part of it.
 
 **The decision.**
 
-1. **A root carries a container-format marker.** The installed candidate
-   writes it into a supported local root without rewriting any record. A root
-   without a marker is a legacy container and says nothing about which records
-   it holds.
-2. **The reader checks record support before serving a root.** The candidate
-   holds a closed inventory of the durable-record kinds and versions it reads.
-   An unknown container format, or a record outside that inventory, is refused
-   by name before any write.
-3. **Released readers are tested as they are.** No older build is claimed to
-   honor a marker or emit a refusal it never implemented. Where an older build
-   cannot safely refuse a newer root, the procedure prevents the reopening.
-4. **Backup is an operator command on a closed root.** It produces one archive
-   with a manifest of every file, size and digest. It refuses a root that a
-   daemon or an offline command holds, and says what it will do before doing it.
-5. **Restore is an operator command into an empty target.** It verifies every
-   digest before publishing the root, refuses a nonempty or live target, and
-   leaves an ordinary root layout that the matching build opens.
-6. **A backup is the whole state root.** It archives every file under the
-   root except a short named list of process-lifetime files: the socket, the
-   lock and writer-marker files, and temporary files. Sessions, runtime control, artifacts, executor
-   receipts, private continuation and recovery state, resource packs, the
-   daemon's session index and M7's host ledger with its derived entries are
-   all inside it, at their root-relative paths. Nothing is rebuilt after a
-   restore that was not rebuilt before the backup. The configuration file is
-   not part of the root and is not archived.
-7. **Restore is the rollback and the recovery procedure.** A previous build is
-   not a rollback plan once newer records exist. Rolling back means restoring
-   the pre-upgrade backup for the matching build, and it discards later facts.
-   The same command is the exit ADR 0046 names for a root that cannot be
-   served.
-8. **The diagnostic command reports the root's readiness facts.** It shows
-   the marker, the archive-format version this build writes and whether the
-   root is held. When a running service has closed durable admission, the
-   service's own readiness report names the session whose history could not
-   be read, or the reason when no session is named.
+1. **A root carries a current-format marker.** The installed build writes one
+   small marker naming the root format and its version into a new root before
+   any other write. Every command that opens a root checks it first. A
+   missing or unknown marker is refused by name before any write, including
+   the placement lock, the Store's writer marker and any torn-tail repair. A
+   root without a marker, such as one an M6 or M7 source build wrote, is never
+   marked in place, because marking it would be an upgrade.
+2. **Backup is an operator command on a stopped root.**
+   `loopex store backup` carries out ADR 0051's capture steps for a root no
+   process holds. It says what it will do before doing it. It writes a backup
+   that ADR 0051's restore accepts, holding the complete copy and the capture
+   record. It refuses a held root, and a root whose writer marker shows an
+   unclean stop.
+3. **Restore is an operator command into an empty target.**
+   `loopex store restore` builds ADR 0051's plan from the capture record and
+   the operator's explicit statements. It calls the delivered restore and
+   reports its outcome. An uncertain result is resolved by presenting the same
+   transaction again. The command adds no copy, audit or transition of its own.
+4. **Restore is the recovery procedure.** It is the exit ADR 0046 names for a
+   root that cannot be served. It is also the only way back from a root this
+   build refuses: restore a backup under the build whose format it is. Work
+   done after the backup is lost.
+5. **The installed host reports readiness facts.** ADR 0037's diagnostic
+   command shows the marker, whether the root is held and the backup format
+   this build writes. When a running service has closed durable admission, its
+   readiness report names the session whose history could not be read, or the
+   reason when no session is named.
 
 <a id="concept-adr-0072-consequences"></a>
 ### Observable Consequences
@@ -74,34 +76,32 @@ successor milestone.
 Technical depth: [Evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-evidence).
 
 `loopex store backup` and `loopex store restore` exist in the installed
-candidate. An operator takes a backup before an upgrade, and can return to
-exactly that state. An operator whose service reports a closed root learns
-which session is unreadable and restores the most recent good backup; work
-since that backup is lost, and the documentation says so plainly.
+release. An operator stops the service, takes a backup, and can later restore
+it into a new root on the same machine. The original workspace must still be
+at its recorded physical identity. Restore leaves workspace contents and
+external effects alone, and the documentation says so plainly.
 
-A restored root starts as the backed-up root would have. Derived entries in
-the archive are revalidated by their existing rules, so a stale one costs a
-rescan and is never trusted.
-
-Opening a supported M6 or M7 root with the candidate needs no migration. The
-marker appears and no record changes. The 256 MiB log ceiling and its
-retirement procedure are unchanged.
+An operator whose service reports a closed root learns which session is
+unreadable and restores the most recent good backup. An operator who points
+the installed release at a root it does not support gets a named refusal and
+an unchanged root, never a partial upgrade.
 
 <a id="concept-adr-0072-compatibility"></a>
 ### Compatibility and Rollback
 
 Technical depth: [Compatibility mechanics](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-compatibility).
 
-Container format, durable-record capability and binary version are three
-separate facts, and each supported combination is proved by a fixture rather
-than inferred. The private Store ports, session and command identity, public
-event schemas and the daemon's placement rules do not change. The archive is
-an experimental operator format with a version of its own. A later engine
-migration reads its source root through this reader boundary; how its retired
-source relates to this archive format is ADR 0036's to state.
+The private Store ports, session and command identity, public event schemas,
+the daemon's placement rules and ADR 0051's inputs, records and outcomes do not
+change. The marker and the backup layout are experimental current-format
+contracts with versions of their own. Before 1.0 only the current version of
+each is kept. A later engine migration reads its source root through the
+marker check; how its retired source relates to these backups is ADR 0036's to
+state.
 
 This decision is removed by not shipping the two commands and the marker
-writer. A root that already carries a marker stays readable by the candidate.
+writer. A root that already carries a marker stays readable by the build that
+wrote it.
 
 ## Governance Record
 

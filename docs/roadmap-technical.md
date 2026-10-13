@@ -35,7 +35,7 @@ The current intermediate milestone projection is:
 | Milestone | Candidate proof | Release authority |
 | --- | --- | --- |
 | [M7](plans/M7.md#concept) | Coding workflow, compaction, configuration, questions and bounded host helpers, proved by the plan's retained closure evidence | Closed 2026-10-13; source release `v0.4.0`, whose `VERSION` still reads `0.3.0` |
-| [M8](plans/M8.md#concept) | Installed artifact, home discovery, service lifecycle, attached conversation, store readiness with backup and restore | Open for planning; separate acceptance and version decision |
+| [M8](plans/M8.md#concept) | Installed artifact on macOS arm64 and Linux x86-64, home discovery, service lifecycle, attached conversation, operator backup and restore over ADR 0051, current-format root refusal | Open for planning; label `0.5.0` selected; acceptance and publication are separate decisions |
 | [M9](drafts/m9-store-engine-successor.md#concept) | Measured engine selection, selected store engine, full-history migration and rollback | Draft; separate acceptance/version decision |
 
 The later numeric candidates are capability labels, not reserved source versions.

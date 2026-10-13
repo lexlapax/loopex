@@ -4,10 +4,10 @@
 Technical depth: [Attached conversation mapping, service configuration and evidence](0071-daemon-attached-conversation-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; it applies [ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept) and [ADR 0033](0033-collaboration-controller-lease-and-takeover.md#concept) to the conversation command, and extends the daemon's startup inputs with [ADR 0049](0049-explicit-host-configuration.md#concept)'s file
-- **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept) and the daemon generation [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) introduces, both conditional on the delivered M7 baseline; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the installed socket and file locations
+- **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept) and `loopex.experimental/4`, the daemon generation [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) introduced, both delivered by M7; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the installed socket and file locations
 - **Prerequisite for:** M8 outcomes 4 and 5
 
 <a id="concept-adr-0071-decision"></a>
@@ -21,11 +21,14 @@ ADR 0049 names the missing piece as successor work: a conversational terminal
 attached to the running service. An installed operator expects exactly that.
 They start a task, close the laptop lid or the terminal, and come back to it.
 
-M7 also leaves the daemon's startup grammar unchanged except for trace
-controls, so a daemon started under M7 reads no configuration file. The daemon
-protocol can already carry model changes, compaction and questions, but the
-host that serves it has no file-supplied roles, limits, instructions or
-summarizer.
+M7 left the daemon's startup grammar as six flags with environment fallbacks
+and one credential from `LOOPEX_PROVIDER_API_KEY`. The daemon reads no
+configuration file and has no trace controls. Its `loopex.experimental/4`
+protocol already carries control, model changes, compaction and questions.
+Daemon clients already detach and reattach at a cursor without cancelling the
+run, as M7's `m7.daemon-detach` case proved. But the host that serves the
+protocol has no file-supplied roles, limits, instructions or summarizer, and
+`loopex chat` cannot reach it.
 
 **The decision.**
 
@@ -44,7 +47,7 @@ summarizer.
    accepts the same explicitly selected file as chat, validated by the same
    reader, and uses it for every session it creates. Its existing startup
    flags keep their meaning. How those flags, the daemon's existing
-   environment inputs and its legacy single credential combine with the file
+   environment inputs and its single `LOOPEX_PROVIDER_API_KEY` credential combine with the file
    is fixed before acceptance, and a conflict is refused rather than resolved
    silently. A session keeps its committed settings; a changed file affects
    new sessions after a restart. There is no reload.
@@ -120,7 +123,7 @@ whether any of them starts a service on demand is ADR 0037's decision. A
 daemon started without a file behaves as M7 delivers it. Core gains no command
 and no record.
 
-The conversation's actions use members of the delivered M7 daemon generation.
+The conversation's actions use members of `loopex.experimental/4`.
 Three places may need a named, versioned addition with vectors, settled in the
 companion before acceptance: a workspace identity for the client, the source
 of compaction bounds, and the readiness record ADR 0037 reports. Nothing is

@@ -4,13 +4,13 @@
 Technical depth: [Artifact contents, companion placement and smoke proofs](0038-installed-distribution-and-release-artifact-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-21
+- **Date:** 2026-09-21; reconciled with the delivered M7 baseline and the maintainer's 2026-10-13 host and label decisions
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; it applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
   [ADR 0019](0019-host-owned-provider-protection.md#concept)'s separate
   protected provider companion, to an installed artifact
-- **Depends on:** [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for installed initialization and configuration discovery, and [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for backup and restore
+- **Depends on:** [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for installed initialization and configuration discovery, [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the current-format marker and the backup and restore commands, and accepted [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition they use
 - **Prerequisite for:** M8 outcomes 1, 6 and 7 (this was M6 before the maintainer's reframing of 2026-09-26), accepted before any release
   build, manifest or install script is written
 
@@ -79,21 +79,27 @@ minimal runtime distribution carries no compiler.
    its size and SHA-256 and the `SOURCE_IDENTITY` M5 defines. The archive
    digest belongs only in its external checksum or attestation. An installation can be
    verified against the manifest without the source tree.
-6. **Supported platforms for `<installed-version>` are the two the project can prove:**
-   macOS on Apple silicon and Linux on x86-64, each with a minimum base
-   system fixed at acceptance from its build environment, on the current
-   toolchain pair. A platform without a retained install smoke is not
+6. **Supported platforms for `0.5.0` are the two the maintainer selected on
+   2026-10-13:** macOS on Apple silicon (arm64), and Linux on x86-64 with a
+   glibc 2.35 base built in an Ubuntu 22.04 container, on the current
+   toolchain pair. The macOS minimum version is fixed at acceptance from the
+   retained build. A platform without a retained install smoke is not
    supported, whatever the archive builds on.
-7. **The install and rollback contract is explicit.** Install is extract and
-   run; upgrade is extract beside and switch. Switching back is supported only
-   when the exact prior reader is proved compatible with the root. Otherwise
-   restore a quiescent pre-upgrade backup using ADR 0072 and its matching binary.
-   The plan proves the binary and root procedure together. Uninstall is delete
-   the directory; the home is the operator's and is never deleted.
-8. **Publication is a separate maintainer decision** after closure, gated on
-   the public-name clearance the vision's name section already requires and
-   on the macOS signing decision the companion records. Building and
-   retaining the artifact is M8 scope; publishing it is not.
+7. **The install and recovery contract is explicit.** Install is extract and
+   run. A release opens only roots in its own current format and refuses any
+   other root before writing to it, under ADR 0072. Before 1.0 there is no
+   upgrade of an older root and no switching back to an earlier release over
+   a root this release wrote. Recovery is a backup restored under the build
+   whose format the root is in, with ADR 0072's commands. Uninstall is
+   delete the directory; the home is the operator's and is never deleted.
+8. **macOS uses a documented quarantine-removal step, not signing.** The
+   maintainer chose on 2026-10-13 that the macOS archive is neither signed nor
+   notarized. The operator guide verifies the archive against its checksum
+   and manifest, then removes the quarantine attribute with a documented
+   command.
+9. **Publication is a separate maintainer decision** after closure, gated on
+   the public-name clearance the vision's name section already requires.
+   Building and retaining the artifact is M8 scope; publishing it is not.
 
 <a id="concept-adr-0038-consequences"></a>
 ### Observable Consequences
@@ -101,7 +107,8 @@ minimal runtime distribution carries no compiler.
 Technical depth: [Smoke proofs and manifest](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-smoke).
 
 An operator on a supported platform downloads one archive and its checksum,
-verifies, extracts, runs `bin/loopex init`, and has a working daemon and CLI
+verifies, extracts, on macOS removes the quarantine attribute as documented,
+runs `bin/loopex init`, and has a working daemon and CLI
 with no toolchain and no third-party OpenSSL installed. `loopex version`
 prints the release version, the source commit, the toolchain pair and the
 platform from the manifest. The
@@ -118,11 +125,11 @@ This creates the vision's surface 7, released package contents, which is inert
 until publication and permanent afterward. The archive's contents are
 therefore fixed by this decision, not by convenience: one archive contains the
 whole reference host and nothing that is a separately versioned library. Hex
-packages are not published by M8. Binary rollback by switching directories
-requires proved reader compatibility; otherwise use ADR 0072's backup restore
-with its matching binary. The two are proved together in
-one demonstration so that "restart the old binary" is never mistaken for a
-plan.
+packages are not published by M8. Before 1.0 there is no binary rollback over
+a newer root, and no earlier build is claimed to refuse one safely. Recovery
+restores a backup under the matching build with ADR 0072's commands.
+The installed demonstration proves the refusal and the same-build restore
+together, so that "restart the old binary" is never mistaken for a plan.
 
 ## Governance Record
 

@@ -154,8 +154,8 @@ Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technic
 <a id="concept-roadmap-governed-extension-runtime"></a>
 #### Governed extension runtime — version unselected
 
-The closed M7 coding-agent proof and the M8 installed operation and M9 store
-migration drafts precede this M10 draft. M8's and M9's acceptance and eventual
+The closed M7 coding-agent proof, the M8 installed operation plan, Open for
+planning, and the M9 store migration draft precede this M10 draft. M8's and M9's acceptance and eventual
 release versions remain separate decisions; the later numeric candidates are illustrative capability labels and
 do not reserve the next source version.
 
