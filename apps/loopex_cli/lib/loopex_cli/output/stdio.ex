@@ -14,19 +14,26 @@ defmodule LoopexCli.Output.Stdio do
   inherited fd 1 and fd 2. The port uses private fd 3 for control and payload
   and fd 4 for acknowledgements. A write is one header line naming the nonce,
   sequence, destination descriptor and byte count, followed by exactly that
-  many raw bytes; POSIX `dd` reads them in one-byte input blocks and writes
-  them in 64-KiB output blocks, so NUL, LF and invalid UTF-8 reach the
-  destination unchanged and Bash never holds payload in a variable. `WRITTEN` follows the foreground copy's exit. The writer leads its
-  own process group; retirement kills that group and proves it absent through a
-  bounded process-table read. Output never supplies shell syntax, paths,
-  environment or descriptors.
+  many raw bytes; POSIX `dd` reads them in one-byte input blocks into a copier
+  that writes the whole record, so NUL, LF and invalid UTF-8 reach the
+  destination unchanged and Bash never holds payload in a variable. `WRITTEN`
+  follows the copier's write. The writer leads its own process group; loss of
+  its owner or of its leader kills that group from inside, and retirement
+  kills that group and proves it absent through a bounded process-table read.
+  Output never supplies shell syntax, paths, environment or descriptors.
   """
 
-  # Concept: the writer accepts only its own nonce and two fixed descriptors.
+  # Concept: the writer accepts only its own nonce and two fixed descriptors,
+  # and its whole group dies with its owner or its leader, even mid-write.
   # Technical depth: `read -r -u 3` consumes a pipe byte by byte, so the header
-  # never over-reads payload; `dd ibs=1 count=N` reads exactly N bytes and
-  # `obs=65536` writes them in large blocks. Any malformed control, failed copy
-  # or failed acknowledgement kills the group.
+  # never over-reads payload; `dd ibs=1 count=N` reads exactly N bytes into a
+  # copier whose `obs=262144` holds the whole bounded record before its one
+  # physical write. The leader is never blocked by the destination and is back
+  # on control while the copier writes, so owner loss (control EOF) kills the
+  # group. A watcher holds the only read end of fd 5, whose write end only the
+  # leader keeps; the leader's death, however it happens, gives the watcher EOF
+  # and it kills the group. The copier sends `WRITTEN`. Any malformed control,
+  # failed copy or failed acknowledgement kills the group.
   @script ~S"""
   exec 0<&-
   set +m
@@ -36,9 +43,15 @@ defmodule LoopexCli.Output.Stdio do
     kill -s KILL -- -"$$"
     exit 125
   }
+  copy() {
+    exec 3<&- 5>&-
+    dd ibs=65536 obs=262144 >&"$2" 2>/dev/null || abort_group
+    printf 'WRITTEN %s %s\n' "$nonce" "$1" >&4 || abort_group
+  }
   trap abort_group HUP INT PIPE TERM
   case "$nonce" in ''|*[!0-9a-f]*) exit 125 ;; esac
   [ "${#nonce}" = 32 ] || exit 125
+  exec 5> >(exec 3<&- 4>&-; read -r _; kill -s KILL -- -"$$") || exit 125
   printf 'READY %s %s\n' "$nonce" "$$" >&4 || exit 125
   while IFS= read -r -u 3 header; do
     case "$header" in
@@ -53,12 +66,9 @@ defmodule LoopexCli.Output.Stdio do
     case "$sequence" in ''|*[!0-9]*) abort_group ;; esac
     case "$size" in ''|0*|*[!0-9]*) abort_group ;; esac
     [ "${#sequence}" -le 12 ] && [ "${#size}" -le 6 ] && [ "$size" -le 262144 ] || abort_group
-    case "$target" in
-      1) dd ibs=1 obs=65536 count="$size" <&3 2>/dev/null || abort_group ;;
-      2) dd ibs=1 obs=65536 count="$size" <&3 1>&2 2>/dev/null || abort_group ;;
-      *) abort_group ;;
-    esac
-    printf 'WRITTEN %s %s\n' "$nonce" "$sequence" >&4 || abort_group
+    case "$target" in 1|2) ;; *) abort_group ;; esac
+    dd ibs=1 obs=65536 count="$size" > >(copy "$sequence" "$target") <&3 4>&- 5>&- 2>/dev/null ||
+      abort_group
   done
   abort_group
   """

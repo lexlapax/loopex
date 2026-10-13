@@ -1031,10 +1031,17 @@ defmodule LoopexCli.Output do
           close_sink(state)
         else
           Process.send_after(self(), :join_poll, 25)
-          {:noreply, state}
+          {:noreply, retire_survivors(state)}
         end
     end
   end
+
+  # Concept: a member that outlives the writer's leader is still output custody.
+  # Technical depth: after the leader's exit the join just failed to read the
+  # group as empty; a populated group's ID cannot be reused, so the one group
+  # kill still names this writer's survivors before the join polls again.
+  defp retire_survivors(%{target: %{kind: :stdio, exited: true}} = state), do: kill(state)
+  defp retire_survivors(state), do: state
 
   defp target_joined?(%{target: nil}), do: true
 

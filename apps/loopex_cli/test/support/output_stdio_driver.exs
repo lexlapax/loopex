@@ -9,6 +9,16 @@ alias LoopexCli.Output
 leader = fn {:loopex_cli_output, owner, _} -> :sys.get_state(owner).target.leader end
 write_report = fn map -> File.write!(report, :erlang.term_to_binary(map)) end
 
+# The commands of the writer group's members, read from the process table.
+commands = fn group ->
+  {table, 0} = System.cmd("/bin/ps", ["-e", "-o", "pgid=,command="])
+
+  for line <- String.split(table, "\n", trim: true),
+      [pgid, command] = String.split(line, ~r/\s+/, trim: true, parts: 2),
+      pgid == Integer.to_string(group),
+      do: command
+end
+
 # Concept: read the exec-time environment from the kernel, not from the process.
 # Technical depth: Linux exposes the writer's block NUL-separated in /proc.
 # Darwin has no /proc and SIP hides a platform binary's (`/bin/bash`, `/bin/dd`)
@@ -127,4 +137,29 @@ case mode do
       leader: group,
       elapsed: System.monotonic_time(:millisecond) - started
     })
+
+  # Concept: a blocked write survives neither its custodian nor its leader.
+  # Technical depth: the write fills an unread pipe, then the cut is made while
+  # the VM stays alive, so only target-side retirement or the surviving owner
+  # can end the group; the parent proves it gone through the process table.
+  "custodian_loss" ->
+    {:ok, output, _sink} = Output.open(:stdio, Output.acquisition())
+    group = leader.(output)
+    :ok = Output.write(output, :text, :stdout, String.duplicate("c", 200_000))
+    Process.sleep(500)
+    before = commands.(group)
+    {:loopex_cli_output, owner, _} = output
+    Process.exit(owner, :kill)
+    write_report.(%{leader: group, before: before})
+    Process.sleep(:infinity)
+
+  "leader_loss" ->
+    {:ok, output, _sink} = Output.open(:stdio, Output.acquisition())
+    group = leader.(output)
+    :ok = Output.write(output, :text, :stdout, String.duplicate("l", 200_000))
+    Process.sleep(500)
+    before = commands.(group)
+    {_, 0} = System.cmd("/bin/kill", ["-KILL", Integer.to_string(group)])
+    write_report.(%{leader: group, before: before})
+    Process.sleep(:infinity)
 end

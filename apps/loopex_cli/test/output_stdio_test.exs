@@ -87,6 +87,63 @@ defmodule LoopexCli.OutputStdioTest do
     close_shell(port)
   end
 
+  # Concept: a blocked write is retired when its custodian or its leader is lost.
+  # Technical depth: fd 1 is a real pipe that is never read. The VM and the
+  # reader record their own PIDs before exec so cleanup ends exactly them. A
+  # `dd` is in the group when the cut is made; afterwards the writer's whole
+  # group, not only its leader, must have no live member.
+  for cut <- ["custodian_loss", "leader_loss"] do
+    test "#{cut} with a blocked write retires every member of the writer group", f do
+      vm = Path.join(f.root, "vm")
+      reader = Path.join(f.root, "reader")
+
+      port =
+        start_shell(
+          "sh -c #{sh_quote("echo $$ >#{sh_quote(vm)}; exec #{child(unquote(cut), f.report)}")}" <>
+            " 2>#{sh_quote(f.stderr)} | sh -c #{sh_quote("echo $$ >#{sh_quote(reader)}; exec sleep 60")}"
+        )
+
+      try do
+        report = await_report(f.report)
+        assert Enum.any?(report.before, &String.starts_with?(&1, "dd "))
+        assert members_gone?(report.leader, System.monotonic_time(:millisecond) + 5_500)
+      after
+        # A surviving group is ended here so a failure leaves no writer behind.
+        with true <- File.exists?(f.report), %{leader: group} <- report(f.report) do
+          System.cmd("/bin/kill", ["-KILL", "--", "-#{group}"], stderr_to_stdout: true)
+        end
+
+        for path <- [vm, reader], {:ok, pid} <- [File.read(path)] do
+          System.cmd("/bin/kill", ["-KILL", String.trim(pid)], stderr_to_stdout: true)
+        end
+
+        assert_receive {^port, {:exit_status, _}}, 10_000
+      end
+    end
+  end
+
+  defp members_gone?(group, deadline) do
+    {table, 0} = System.cmd("ps", ["-e", "-o", "pgid=,stat=,pid=,command="])
+
+    live =
+      for line <- String.split(table, "\n", trim: true),
+          [pgid, stat | _] = String.split(line, ~r/\s+/, trim: true, parts: 4),
+          pgid == Integer.to_string(group) and not String.starts_with?(stat, "Z"),
+          do: line
+
+    cond do
+      live == [] ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("live group members: #{inspect(live)}")
+
+      true ->
+        Process.sleep(50)
+        members_gone?(group, deadline)
+    end
+  end
+
   defp child(mode, report) do
     elixir = System.find_executable("elixir") || flunk("elixir executable unavailable")
 
