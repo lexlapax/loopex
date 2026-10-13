@@ -2073,16 +2073,24 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   def joins(_case_id, _rows, _entry, _outcome), do: {:ok, nil}
 
-  # Concept: the finding is the reply's TSV, not prose around it.
-  # Technical depth: from the exact header line, the header and its next line
-  # are kept byte for byte; a reply with no such header is passed whole, so the
-  # oracle still decides.
+  # Concept: the finding is the reply's TSV, not short prose around it.
+  # Technical depth: a reply within the oracle's 1,024-byte bound whose only
+  # tab-bearing lines are the exact header and the one row after it yields
+  # those two lines byte for byte. Any other reply is passed whole, so a long
+  # reply or a second row still fails the oracle.
   @tsv_header "file\tfunction\tdefect_code\tcall_chain"
   @doc false
   def tsv_finding(text) do
-    case String.split(text, "\n") |> Enum.drop_while(&(&1 != @tsv_header)) do
-      [header, row | _] -> header <> "\n" <> row <> "\n"
-      _ -> text
+    lines = String.split(text, "\n")
+
+    case Enum.drop_while(lines, &(&1 != @tsv_header)) do
+      [header, row | _] when byte_size(text) <= 1024 ->
+        if Enum.filter(lines, &String.contains?(&1, "\t")) == [header, row],
+          do: header <> "\n" <> row <> "\n",
+          else: text
+
+      _ ->
+        text
     end
   end
 

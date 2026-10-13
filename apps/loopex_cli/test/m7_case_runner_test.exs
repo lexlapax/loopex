@@ -1113,6 +1113,13 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert CaseRunner.tsv_finding("Here is the finding:\n\n" <> tsv <> "Done.") == tsv
     assert CaseRunner.tsv_finding(String.trim_trailing(tsv)) == tsv
     assert CaseRunner.tsv_finding("no table here") == "no table here"
+
+    contradicted = tsv <> "lib/fees.ex\ttotal/2\tmissing_fee\tA/1\n"
+    assert CaseRunner.tsv_finding(contradicted) == contradicted
+    earlier = "lib/x.ex\tf/1\n" <> tsv
+    assert CaseRunner.tsv_finding(earlier) == earlier
+    long = String.duplicate("prose ", 200) <> "\n" <> tsv
+    assert CaseRunner.tsv_finding(long) == long
   end
 
   test "feature lets the model read before asking but not change anything before the answer" do
