@@ -226,11 +226,18 @@ defmodule LoopexDaemon.ProviderBindingsTest do
           "credential",
           "provider_mapping",
           "model_capabilities",
-          "provider_bindings",
-          "env"
+          "provider_bindings"
         ] do
       refute public =~ private, private
     end
+
+    # Three letters can occur inside a random base64url identity, so `env` is
+    # refused where host-only data would carry it: as any record key.
+    refute Enum.any?(
+             keys([records, created, acquired, snapshot, unbound, bound, inspected]),
+             &String.contains?(&1, "env")
+           ),
+           "env"
 
     :socket.close(client)
     send(sentinel, {:daemon_signal, ref, :sigterm})
@@ -426,6 +433,10 @@ defmodule LoopexDaemon.ProviderBindingsTest do
   end
 
   defp custodies(state), do: for({{:custody, _}, pid} <- Enum.sort(state.pids), do: pid)
+
+  defp keys(%{} = map), do: Enum.flat_map(map, fn {key, value} -> [key | keys(value)] end)
+  defp keys(list) when is_list(list), do: Enum.flat_map(list, &keys/1)
+  defp keys(_value), do: []
 
   defp trace_calls(functions) do
     trace = :trace.session_create(:m7_daemon_bindings, self(), [])
