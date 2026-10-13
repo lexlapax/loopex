@@ -530,10 +530,40 @@ vision's rule.
 **ADR 0003.** The archive carries no build path: no Mix, Hex, `erlc`,
 `elixirc`, `rebar3`, source or dependency tree, and nothing that fetches,
 builds or loads an extension. The Erlang `compiler` library and Elixir's own
-modules ship because the Elixir application declares and loads them; this ADR
-reads clause 4's "no compiler" as no build toolchain, and the release check
-proves the archive starts nothing but the two escripts. Extension acquisition
-and installation remain deferred.
+modules ship because the Elixir application declares and loads them. The
+clarifying amendment below, decided by the maintainer, governs that reading,
+and the release check proves the archive starts nothing but the two escripts.
+Extension acquisition and installation remain deferred.
+
+<a id="technical-adr-0038-compiler"></a>
+**ADR 0003 amendment text.**
+
+Concept: [The compiler clarification of ADR 0003](0038-installed-distribution-and-release-artifact.md#concept-adr-0038-compiler).
+
+- **Clause amended.** ADR 0003 Technical depth, section "Exact Obligations
+  and Deferred Questions"
+  ([anchor](0003-extension-contract-boundary-technical.md#technical-adr-0003-decision)),
+  obligation 4, second sentence: "A minimal runtime distribution carries no
+  compiler, and shared-VM activation rejects loading from unvalidated paths."
+- **Amended reading.** "A minimal runtime distribution carries no build
+  toolchain: no Mix, Hex, `erlc`, `elixirc`, `rebar3`, source or dependency
+  tree. The OTP `compiler` application may ship only as a runtime dependency
+  that Elixir declares and requires to start; no Loopex code calls it to build
+  or load a candidate. Shared-VM activation rejects loading from unvalidated
+  paths."
+- **Unchanged.** Obligation 4's first sentence ("A brain never fetches or
+  compiles a candidate"), obligations 1 to 3 and 5, and every deferred
+  question. ADR 0003's accepted bytes are not edited; the ADR index records
+  this amendment when this record is accepted.
+- **Why the application is needed.** `elixir.app` lists `compiler` in its
+  `applications`, and `mix release` keeps it with mode `:load`. Without it
+  the runner cannot start Elixir (measured in the build section above).
+- **Proof.** The release layout step (step 5 of the release definition above)
+  also raises `release_layout_unexpected` for any file named `mix`, `hex`,
+  `erlc`, `elixirc` or `rebar3` and for any `.ex`, `.exs`, `.erl` or `.hrl`
+  file, so no build toolchain or source enters the manifest. The installed
+  smoke proves that only the two escripts start. The `compiler` application's
+  presence is expected, not refused.
 
 **ADR 0019 and ADR 0034.** The companion remains a separate OS process behind
 the Port and OS guard; the credential still crosses the private channel; the
@@ -582,7 +612,9 @@ runtime mise installs; Linux x86-64 with a glibc 2.35 base built from source
 in an `ubuntu:22.04` container with OpenSSL 3 linked statically, never from
 the build host's runtime; the macOS quarantine-removal step after manifest
 verification, without signing or notarization; and current-format roots only,
-with recovery by backup and restore under the matching build.
+with recovery by backup and restore under the matching build; and the
+clarifying reading of ADR 0003's "no compiler" as "no build toolchain", with
+the OTP `compiler` application shipped as a runtime dependency of Elixir.
 
 **Open for the maintainer.** None for M8. Publication, which this ADR does not
 authorize, additionally needs public-name clearance and the third-party licence

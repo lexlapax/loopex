@@ -4,10 +4,13 @@
 Technical depth: [Provider sign-in contract, token store, refresh and evidence](0073-provider-oauth-sign-in-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-10-13
+- **Date:** 2026-10-13; the maintainer's decisions on the `chatgpt:` reply
+  ceiling, the public failure reason, daemon exit statuses and outcome
+  numbering recorded the same day
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0019](0019-host-owned-provider-protection.md#concept),
+  [ADR 0029](0029-bounded-provider-failure-diagnostics.md#concept),
   [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept),
   [ADR 0039](0039-ephemeral-embedded-profile.md#concept) and
   [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept),
@@ -21,8 +24,8 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   the service as the host that holds credentials;
   [ADR 0038](0038-installed-distribution-and-release-artifact.md#concept) for
   the two supported hosts
-- **Prerequisite for:** the M8 provider sign-in outcome and workstream added by
-  the maintainer on 2026-10-13
+- **Prerequisite for:** M8 outcome 8, provider sign-in, and its workstream,
+  added by the maintainer on 2026-10-13
 
 <a id="concept-adr-0073-decision"></a>
 ### Context and Decision
@@ -95,11 +98,65 @@ new provider protocol.
    explains why each provider has none today. `loopex auth status` reports
    which routes are signed in without reading a token. `loopex auth logout
    <provider>` revokes the token with the provider and removes it locally.
+9. **Loopex enforces the `chatgpt:` reply ceiling itself.** A plan-billed
+   request cannot carry a maximum output length. Loopex ends the reply stream
+   once the configured ceiling is reached and records the reply as cut at its
+   limit, as any provider's truncated reply is recorded. So `chatgpt:` works
+   in every role, the summarizer included. See
+   [The `chatgpt:` reply ceiling](#concept-adr-0073-reply-ceiling).
+10. **"Sign-in required" is a public failure reason.** A call refused because
+    its route needs sign-in ends the run as failed with the reason
+    `provider_sign_in_required`, which every client can show. This amends
+    accepted ADR 0029's bounded failure vocabulary. See
+    [The public failure reason](#concept-adr-0073-failure-reason).
+
+The maintainer decided items 9 and 10, the daemon exit statuses and the
+outcome numbering on 2026-10-13. They are recorded as decided, not proposed.
 
 Alternatives are in the companion. The main one rejected is reusing a widely
 deployed client identity, such as Codex CLI's or Claude Code's, which the
 provider library ships with. That impersonates another product, can break
 without notice, and for Anthropic contradicts the published terms.
+
+<a id="concept-adr-0073-reply-ceiling"></a>
+### The `chatgpt:` Reply Ceiling
+
+Technical depth: [Ceiling enforcement in the stream drain](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-reply-ceiling).
+
+Every model call carries a reply ceiling, a maximum number of output tokens.
+On other routes the provider enforces it. OpenAI rejects that member on a
+plan-billed request, so for `chatgpt:` Loopex never sends it and counts
+instead. While the reply streams, the adapter keeps Loopex's existing
+conservative token estimate of what has arrived. When the estimate reaches
+the ceiling, it stops reading, closes the stream and builds the reply from
+what it kept. The reply is recorded with the same `limit` completion a
+provider-truncated reply has, so the run, accounting and compaction treat it
+as they already treat a reply cut at its limit. The estimate is
+conservative, about one token per three bytes, so a cut reply is usually
+shorter than a provider-enforced ceiling would have allowed, never longer by
+that estimate. The summarizer and every other
+role may therefore use `chatgpt:`.
+
+<a id="concept-adr-0073-failure-reason"></a>
+### The Public Failure Reason
+
+Technical depth: [Reason, schemas, vectors and Core handling](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-failure-reason).
+
+When a call is refused before dispatch because its sign-in route has no
+usable sign-in, the run ends as failed with the reason
+`provider_sign_in_required`, not the generic `model_call_failed`. Nothing was
+sent and nothing is owed. Loopex does not retry the call, because a retry
+would meet the same refusal. A maintenance or compaction run reports the same
+category.
+
+Clients see the reason in the run's terminal outcome on both
+`loopex.experimental/3` and `/4`. The reference chat and `ask` print that the
+route needs sign-in and the exact `loopex auth login <provider>` command, then
+leave the session resumable. After the operator signs in, the next turn or
+resume uses the route without a restart. Other clients show the reason as
+they show any failed outcome. A token that merely expired while the provider
+was unreachable is not this reason: it stays `model_call_failed`, because
+signing in again would not help.
 
 <a id="concept-adr-0073-consequences"></a>
 ### Observable Consequences
@@ -123,8 +180,9 @@ credential is available.
 
 A service holding a sign-in route keeps the token fresh while it runs. If the
 operator signs out, or the provider revokes access, new calls on that route
-fail before dispatch. The service records the reason in its own diagnostic
-output, and `auth status` shows it. After the operator signs in again with
+fail before dispatch with the public reason `provider_sign_in_required`. The
+service also records the reason in its own diagnostic output, and `auth
+status` shows it. After the operator signs in again with
 the same account, the service picks up the new token without a restart. A
 different account needs a service restart, as replacing an API key does
 today. A running call is never cut off or repeated because a token changed.
@@ -150,6 +208,7 @@ byte-for-byte as accepted, and the ADR index records the amendment.
 | 0019 | The sender passes a credential read from the environment | The credential may be a host-held access token. A new token-exchange invocation of the same companion carries a refresh token over the same private channel |
 | 0034 | Custody holds one value bound at composition | Custody's existing rotation and expiry are used by a host refresher; the token, registry and sender rules are unchanged |
 | 0039 | In the ephemeral profile, each hosted provider's key is read from its variable at the model boundary for each call | A sign-in route resolves from custody owned by the composition. A refresh in this profile runs in the host VM, under the same audience the profile already accepts |
+| 0029 | A failed model call's public result is the fixed `model_call_failed`; the diagnostic pair stays private | A host refusal before dispatch because a sign-in route needs sign-in is public as `not_dispatched` with `provider_sign_in_required`. Dispatched failures and the private diagnostic pair are unchanged |
 
 The Proposed ADR 0037's sentence that file, keychain and command credentials
 need a separate future decision is answered by this record, for sign-in tokens
@@ -168,12 +227,15 @@ Technical depth: [Compatibility mechanics](0073-provider-oauth-sign-in-technical
 Existing configuration files, `env` and `none` bindings, and the
 `openai:`, `anthropic:`, `openrouter:` and `ollama:` routes are unchanged. The
 configuration schema stays at version 1. The new forms are additive members
-that a build without this decision refuses by name. No durable record, wire
-generation or Core callback changes. The committed model already names its
-route.
+that a build without this decision refuses by name. No Core callback
+changes. The committed model already names its route. The one durable and wire
+change is the new failure reason: the settled-attempt record admits its
+category, and the `loopex.experimental/3` and `/4` schemas and vectors list
+it. Before 1.0 only the current contract is kept, so no older reader is
+supported.
 
-Removing sign-in removes the `auth` command, the sign-in routes and the token
-store code. Sessions whose committed model names a removed route refuse to
+Removing sign-in removes the `auth` command, the sign-in routes, the token
+store code and the failure reason. Sessions whose committed model names a removed route refuse to
 resume until the operator configures a supported route and switches model.
 Tokens the store holds are revoked with `auth logout` before downgrade. They
 can also be revoked from the provider's account settings.
@@ -197,16 +259,12 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
 3. **Anthropic sanction.** Ask Anthropic whether it will sanction an OAuth
    client registration for Loopex, and on what terms. Until it does, `claude:`
    stays disabled.
-4. **OpenAI request limits.** A plan-billed request may not send
-   `max_output_tokens` or system-role items. Choose whether Loopex enforces its
-   reply ceiling by ending the stream once the ceiling is reached, or keeps
-   `chatgpt:` out of roles that need a provider-enforced ceiling, such as the
-   summarizer.
-5. **Public failure reason.** Choose whether a refused sign-in call stays the
-   fixed `model_call_failed` with a host diagnostic, or ADR 0029's bounded
-   failure set gains a `provider_sign_in_required` reason with vectors.
-6. **Outcome number.** The M8 outcome number and the release-lane names for
-   each provider.
+
+Decided on 2026-10-13, and no longer open: the `chatgpt:` reply ceiling
+(decision 9), the public failure reason (decision 10), and the numbering.
+The sign-in outcome is M8 outcome 8, and its release lanes are
+`real-sign-in-openai`, `real-sign-in-gemini` and `real-sign-in-anthropic`.
+Items 1 to 3 remain maintainer actions with the providers.
 
 ## Governance Record
 

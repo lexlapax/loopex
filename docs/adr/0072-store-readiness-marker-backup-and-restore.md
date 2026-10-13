@@ -4,9 +4,9 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision and the daemon exit-status renumbering recorded on 2026-10-13
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in one clause only: its statement that no backup CLI is added. It adds operator commands in front of ADR 0051's unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2 until the maintainer selects it
+- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added, and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2 until the maintainer selects it
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
 - **Prerequisite for:** M8 outcomes 3 and 7, accepted before any marker, adopt, backup or restore command code is written
 
@@ -58,11 +58,20 @@ decided, not proposed:
    rewrites configuration.
 6. **Unreadable session history (P6).** It is recovered by restore. The
    readiness report names the unreadable session. There is no quarantine.
+   The operator moves the root aside and restores with `--source lost`,
+   adding `--discard-later-work` when the backup predates later work
+   (decision 9).
 7. **`store backup`** produces ADR 0051's complete backup of a closed root.
 8. **Ownership.** ADR 0037 owns the command family framework, `doctor` and the
    status report, which show this record's root facts by reference. This
    record owns the `store backup|restore|adopt` grammar and the readiness
    facts.
+9. **Older backups.** `store restore` may restore a backup that is not the
+   latest state of the root only when the operator gives the explicit
+   `--discard-later-work` statement. Without it, restore stays strict: the
+   operator states that the backup is the latest state, as ADR 0051 requires.
+   The statement is recorded in the retained attestation in place of the two
+   latest-state statements.
 
 This record decides how each of those works. ADR 0051 still decides the
 restore transition and ADR 0070 the retirements.
@@ -151,6 +160,18 @@ observation contradicts the operator, such as a live lock holder. It retains
 the exact plan and the operator's statements beside the backup, then calls
 ADR 0051's restore once.
 
+**Restoring an older backup.** When work happened on the root after the
+backup, the operator adds `--discard-later-work`. It is accepted only with
+`--source lost`: the operator first moves the original root aside, and the
+command refuses the flag with an available source. With the flag the operator
+no longer states that the backup is the latest state. They state instead that
+every session turn, record and approval after the backup is abandoned, and
+that external effects performed after it stand as they are, unrecorded and
+unreconciled. The command prints that statement, records it in the retained
+attestation and in the plan, and restores the backup exactly as for a latest
+backup. Without the flag nothing changes: the operator states the backup is
+the latest state, as before.
+
 After a committed restore it prints the new root and the ADR 0037 command that
 selects it, and changes no configuration. After an uncertain result it prints
 the transaction and the exact command that re-presents it, which reuses the
@@ -188,7 +209,10 @@ alone, and the documentation says so plainly.
 
 An operator whose service reports a closed root learns which session is
 unreadable, moves the unservable root aside and restores a backup into a new
-root. An operator who points the release at an unmarked or unknown root gets a
+root with `--source lost`. If the service did work after that backup, which is
+the usual case, the operator adds `--discard-later-work` and knowingly gives
+up that work; the restored root's history ends at the backup, and effects made
+after it are not reconciled. An operator who points the release at an unmarked or unknown root gets a
 named refusal and an unchanged root, never a partial upgrade. A root the M7
 source build wrote is adopted once and then used normally.
 
@@ -198,8 +222,9 @@ source build wrote is adopted once and then used normally.
 Technical depth: [Compatibility mechanics and alternatives](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-compatibility).
 
 The private Store ports, session and command identity, public event schemas,
-the daemon's placement rules and ADR 0051's inputs, records and outcomes do not
-change. The marker, the backup layout and its records are experimental
+the daemon's placement rules and ADR 0051's records and outcomes do not
+change. ADR 0051's plan gains one alternative attestation form, used only
+with `--discard-later-work`; a plan in the existing form is unchanged. The marker, the backup layout and its records are experimental
 current-format contracts, each with its own version. Before 1.0 only the
 current version of each is read. A later engine migration reads its source
 root through the marker check; how its retired source relates to these backups
@@ -209,31 +234,33 @@ This decision is removed by not shipping the three commands and the marker
 writer. A root that already carries a marker stays readable by the build that
 wrote it; no other build is promised to read it.
 
+<a id="concept-adr-0072-amendment"></a>
+### Amendment of ADR 0051
+
+Technical depth: [ADR 0051 amendment text](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-amendment).
+
+ADR 0051 stays byte-for-byte as accepted. On acceptance this record amends
+exactly two of its clauses, and the ADR index records both:
+
+1. **Backup CLI.** ADR 0051 says no backup CLI is added. This record adds
+   `store backup`, `store restore` and `store adopt` as host commands in front
+   of ADR 0051's transition.
+2. **Latest backup only.** ADR 0051 places arbitrary historical snapshot
+   rewind outside its decision, and its plan requires the host to attest that
+   the backup is the latest cut with no activity after it. The maintainer
+   decided on 2026-10-13 to admit an older backup when the host instead
+   attests that later work is deliberately discarded, for a lost source only.
+   Everything else ADR 0051 decides stays: the same machine and workspace, a
+   complete idle backup, an empty destination, exclusion of every other copy,
+   fresh ledger generations, and never redispatching an uncertain effect.
+
 <a id="concept-adr-0072-open"></a>
 ### Open for the Maintainer
 
-Technical depth: [Mechanics of the open choice](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-open).
+Technical depth: [Resolved choice](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-open).
 
-One choice remains. ADR 0051 admits only the latest quiescent backup: its plan
-requires the host to attest `latest_cut` and `no_post_cut_activity`, and it
-places restoring an older snapshot outside its decision. Recovering an
-unreadable session history (decision 6) usually means restoring a backup taken
-before activity that the service then performed on the root. The command as
-specified states those two attestations on the operator's behalf whenever it
-runs, and prints them.
-
-- **(a) Strict.** The statements mean what ADR 0051 says. Decision 6's
-  recovery then works only when no Loopex activity followed the backup, and
-  the runbook says to back up at every planned stop.
-- **(b) Discard later work.** Add a required `--discard-later-work` statement
-  when the backup is not the latest state, meaning work and records after the
-  backup are abandoned and their external effects stand unreconciled. This
-  needs an ADR 0051 amendment that the maintainer limited this record from
-  making.
-
-The recommendation is (b), recorded as its own narrow amendment of ADR 0051,
-because decision 6 otherwise rarely applies. Either choice leaves the commands,
-records and tests in this record unchanged apart from that one statement.
+Nothing remains open. The older-backup choice was decided on 2026-10-13 as
+decision 9, with the amendment above.
 
 ## Governance Record
 

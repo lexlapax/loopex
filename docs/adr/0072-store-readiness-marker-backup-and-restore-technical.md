@@ -13,11 +13,13 @@ result unions, `Loopex.Store.Local`'s record format, log and frame ceilings
 (`log.ex` `@max_log_bytes` 256 MiB, `@max_frame_bytes` 4 MiB), the placement
 lock (`LoopexComposition.Placement`, `placement.lock` inside the root) and the
 writer marker (`Loopex.Store.Local.WriterLock`, `store.log.writer`, record
-`loopex_store_writer_v2`). ADR 0051's signatures, plan and invocation schemas,
+`loopex_store_writer_v2`). ADR 0051's signatures, invocation schema,
 canonical manifest, lineage records, limits, cleanup cutoffs, refusal codes
-and outcomes are used as accepted. Core (`apps/loopex`) gains no callback,
-module or dependency. Every piece below is host code in composition, the CLI
-and the daemon.
+and outcomes are used as accepted. Its plan schema is used as accepted except
+for the one alternative `host_attestation` form the
+[amendment](#technical-adr-0072-amendment) adds. Core (`apps/loopex`) gains no
+callback, module or dependency. Every piece below is host code in
+composition, the Local executor's restore codec, the CLI and the daemon.
 
 **What this record no longer decides.**
 
@@ -42,6 +44,8 @@ and the daemon.
 | `store backup|restore|adopt` grammar, output, exit statuses | `LoopexCli.Store` (`lib/loopex_cli/store.ex`), dispatched from `LoopexCli.dispatch/2` as `"store"` | `loopex_cli` | New |
 | Marker check for read-only commands (`sessions`, `artifact`) | `LoopexCli` before `SessionCatalog.list/1` and `LoopexComposition.artifacts/1` | `loopex_cli` | Existing, changed |
 | Daemon exit statuses for marker refusals | `LoopexDaemon.ExitStatus`, `LoopexDaemon.Service.acquire_placement/1` | `loopex_daemon` | Existing, changed |
+| Discard-later-work attestation form of the ADR 0051 plan | `Loopex.Executor.Local.RestoreCodec` (`apps/loopex_executor_local/lib/restore_codec.ex`), its `attestation` grammar | `loopex_executor_local` | Existing, changed |
+| Refusal of the discard form with an available source | The plan validation in `LoopexComposition.Restore.Workflow` (`lib/loopex_composition/restore/workflow.ex`) | `loopex_composition` | Existing, changed |
 | Unreadable-session code kept by helper classification | `LoopexComposition.Delegation.Helper` (`classify_sessions/4`, `classify_session/4`), `LoopexComposition.Delegation.incomplete/1` | `loopex_composition` | Existing, changed |
 
 The `store` commands compose no runtime, so `LoopexCli` removes the provider
@@ -137,13 +141,18 @@ and receives the backup's own marker through ADR 0051's copy.
 | Code | Meaning | Foreground commands | Daemon exit |
 | --- | --- | --- | --- |
 | `state_root_unusable` | Root exists and is not a usable directory | 1 | 66 (existing) |
-| `root_unmarked` | Nonempty root without the marker | 1 | 111 |
-| `root_format_unknown` | Marker names another format or version | 1 | 112 |
-| `root_marker_unreadable` | Marker is not a regular file, exceeds 64 bytes or cannot be read | 1 | 113 |
-| `root_marker_write_failed` | A new root's marker could not be published | 1 | 114 |
+| `root_unmarked` | Nonempty root without the marker | 1 | 116 |
+| `root_format_unknown` | Marker names another format or version | 1 | 117 |
+| `root_marker_unreadable` | Marker is not a regular file, exceeds 64 bytes or cannot be read | 1 | 118 |
+| `root_marker_write_failed` | A new root's marker could not be published | 1 | 119 |
 
-`LoopexDaemon.ExitStatus` gains those four classes; its moduledoc range becomes
-65 through 114 and its `fetch/1` spec `65..114`. `Service.acquire_placement/1`
+ADR 0071 takes daemon statuses 111 to 115 and ADR 0073 takes 120 to 123, so
+these four are 116 to 119. `LoopexDaemon.ExitStatus` gains those four
+classes; its moduledoc range and `fetch/1` spec extend through 119 (through
+123 once ADR 0073's classes land). The assertion in
+`apps/loopex_daemon/test/command_test.exs`, which today checks
+`Enum.to_list(65..110)`, grows to cover every status through the highest
+assigned, 111 to 123 included, each used exactly once. `Service.acquire_placement/1`
 maps each class to `{:fatal, class}`. Foreground commands print one line to
 standard error, `loopex: CODE: SENTENCE`, where the sentences are:
 
@@ -370,6 +379,7 @@ Concept: [Restore](0072-store-readiness-marker-backup-and-restore.md#concept-adr
 
 ```text
 loopex store restore --source available|lost --old-writer stopped|rebooted
+                     [--discard-later-work]
                      [--work-ms N] [--cleanup-grace-ms N] BACKUP DESTINATION
 loopex store restore --resume TX_ID --previous-restore stopped|rebooted
                      [--work-ms N] [--cleanup-grace-ms N] BACKUP DESTINATION
@@ -382,6 +392,17 @@ means the machine restarted since the root was last used. They map to ADR
 0051's `old_authority_termination` `"joined"` and `"host_rebooted"`. Limits
 default as for adopt. Restore takes no `--state-root`: its source is the one
 the capture names.
+
+`--discard-later-work` takes no value and has no negative form. It is the
+operator's statement that the backup may predate work on the root and that
+this work is abandoned. It is admitted only with `--source lost`; with
+`--source available` the command refuses `discard_requires_lost_source`
+before any check, because ADR 0051's available branch requires the source to
+be unchanged since the cut and retires it. With `--resume` it is a `usage`
+refusal: a re-presentation reuses the retained plan, which already carries the
+statement. Without the flag the command is strict, as before: the operator
+states the backup is the latest state, which the command cannot verify for a
+lost source; ADR 0051 notes that a backup hash does not prove latestness.
 
 **Checks, in order** (`StoreAdmin.restore/3`). Each refusal writes nothing.
 
@@ -417,6 +438,15 @@ the capture names.
      will be used; work after the backup is lost; workspace contents are unchanged
    ```
 
+   With `--discard-later-work` the last two lines are instead:
+
+   ```text
+   you state: work after this backup is discarded; its sessions, records and
+     approvals are abandoned, and its external effects stand unrecorded and
+     unreconciled; no other copy of the root will be used; workspace contents
+     are left as they are, including changes made after the backup
+   ```
+
 **Plan construction.** `tx_id` is lowercase hex of 32 random bytes. The plan
 is ADR 0051's version 1 map, filled entirely from the capture except:
 
@@ -426,7 +456,7 @@ is ADR 0051's version 1 map, filled entirely from the capture except:
 | `source_status` | `--source` |
 | `backup_state_root` | physical `BACKUP/state` |
 | `destination_state_root` | physical `DESTINATION` |
-| `host_attestation` | `latest_cut`, `no_post_cut_activity`, `all_other_copies_excluded` and `host_ledgers_validated` all `true` as the operator's statements; `old_authority_termination` from `--old-writer`; `evidence_sha256` the SHA-256 of the attestation record |
+| `host_attestation` | Without `--discard-later-work`: `latest_cut`, `no_post_cut_activity`, `all_other_copies_excluded` and `host_ledgers_validated` all `true` as the operator's statements. With it: the amendment's discard form, `discard_later_work` `true` in place of `latest_cut` and `no_post_cut_activity`, with the other members as before. In both: `old_authority_termination` from `--old-writer`; `evidence_sha256` the SHA-256 of the attestation record |
 
 The invocation is `work_ms`, `cleanup_grace_ms`, `max_total_file_bytes` equal
 to the capture's `total_regular_bytes`, `prior_admin_authority` `"none"` and
@@ -437,6 +467,7 @@ at most 4,096 bytes):
 
 ```text
 {"kind", "tx_id", "capture_sha256", "source_status", "old_writer",
+ "discard_later_work": true | false,
  "observed": {"source_path": "present"|"absent",
               "placement": "free"|"stale"|"held"|"not_applicable",
               "store_writer_marker": "absent"|"present"|"not_applicable",
@@ -447,7 +478,11 @@ at most 4,096 bytes):
 ```
 
 `start_identity` is what `Placement.process_incarnation/3` reports for the
-command's own process.
+command's own process. `discard_later_work` is `true` exactly when the flag was
+given, and then the plan carries the discard form; `false` with the latest
+form. A retained attestation and plan that disagree are `backup_invalid` on
+`--resume`. The retained `attestation` and `plan` files are the durable record
+that later work was deliberately discarded; they stay beside the backup.
 
 **Retention, then one call.**
 
@@ -571,6 +606,7 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `backup_exists`, `backup_path_invalid`, `backup_write_failed` | backup, restore | Target path rules or write failure | Choose another path |
 | `backup_invalid`, `backup_changed` | restore | Capture or copy differs from its manifest | Use another backup |
 | `attestation_required` | restore | `--source` or `--old-writer` missing | State both |
+| `discard_requires_lost_source` | restore | `--discard-later-work` with `--source available` | Move the original root aside and restore with `--source lost`, or drop the flag if the backup is the latest state |
 | `old_writer_running`, `previous_restore_running` | restore | A live holder or earlier restore process | Stop it |
 | `source_absent`, `source_not_absent` | restore | Path contradicts `--source` | State the true branch |
 | `destination_not_empty`, `destination_path_invalid` | restore | Destination rules | Choose a new empty directory |
@@ -601,13 +637,16 @@ own manifest.
 | `apps/loopex_composition/test/placement_root_format_test.exs` | `Placement.acquire/2` on unmarked, unknown and unreadable roots refuses and creates no `placement.lock`, owner link or guard; on a new root the marker exists before the lock (hook observes no lock at publication) |
 | `apps/loopex_composition/test/composition_root_format_test.exs` | `compose/1` refuses an unmarked root holding a torn `store.log` and a stale `store.log.writer`: the tail, the writer marker, `runtime_id` and `resource-packs` are unchanged; an embedded start on an empty root marks it |
 | `apps/loopex_cli/test/store_marker_entrypoints_test.exs` | For `run`, `resume`, `cancel`, `skill`, `chat`, durable `ask`, `sessions` and `artifact`: an M7-shaped unmarked root, a root with only `sessions/`, an unknown marker and an unreadable marker each exit 1 with the named code and leave the root unchanged; `sessions` on an absent root creates nothing |
-| `apps/loopex_daemon/test/daemon_root_format_test.exs` | Daemon start exits 111, 112, 113 and 114 for the four codes with the root unchanged and no socket; `ExitStatus.classes/0` covers 65 to 114 exactly once |
+| `apps/loopex_daemon/test/daemon_root_format_test.exs` | Daemon start exits 116, 117, 118 and 119 for the four codes with the root unchanged and no socket |
+| `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers every status from 65 through the highest assigned exactly once; its range assertion grows from `65..110` to include 111 to 123 (ADR 0071, this record and ADR 0073) |
 | `apps/loopex_composition/test/store_adopt_test.exs` | A root built by the current code with its marker removed is adopted and differs only by the marker; idempotent second run writes nothing; job-index caches tolerated and left; refusals with no write for a corrupt frame, a torn tail, a session with an unknown record kind (session named), a receipt without its marker, a missing artifact object, a workspace mismatch, a retired catalogue, a live lock, a stale lock, a writer marker, a helper writer marker and a restore claim; a file changed between manifests A and B gives `source_changed` and no marker; kill before and after the link |
 | `apps/loopex_composition/test/store_backup_test.exs` | Backup of a closed root with sessions, receipts, artifacts, resources, a helper namespace and earlier restore lineage: `state/` equals an independent walk of the source; capture fields equal an independent derivation; refusals for held, stale, writer-marker, helper-marker, claim, unmarked, existing, nested and symlinked targets, a changed workspace and 65,537 entries; a source write during the copy gives `source_changed` and no `BACKUP`; kill during copy, before rename and after rename leave no `BACKUP` or a complete one; job-index removal is the only source change |
-| `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; kill at each ADR 0051 phase, then `--resume` reaching committed with the same plan bytes; `previous_restore_running`; an edited plan file gives `restore_conflict` |
-| `apps/loopex_cli/test/store_command_test.exs` | Grammar, defaults, exit statuses 0, 1 and 2, exact output lines, the printed ADR 0037 writer command parsed by ADR 0037's own parser to `/paths/state_root` = destination, the `LOOPEX_HOME` precedence note, and the configuration file byte-identical after restore |
+| `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; kill at each ADR 0051 phase, then `--resume` reaching committed with the same plan bytes; `previous_restore_running`; an edited plan file gives `restore_conflict`. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged |
+| `apps/loopex_executor_local/test/restore_codec_test.exs` (extended) | The discard attestation form round-trips exactly; a form carrying both `discard_later_work` and `latest_cut`, or `discard_later_work` `false`, is refused; the latest form's bytes are unchanged |
+| `apps/loopex_composition/test/restore_workflow_test.exs` (extended) | A plan with the discard form and `source_status` `available` refuses `invalid_plan` before any claim; with `lost` it commits and its receipt equals a latest-form restore's apart from the plan digest |
+| `apps/loopex_cli/test/store_command_test.exs` | Grammar, defaults, exit statuses 0, 1 and 2, exact output lines including both statement forms, the printed ADR 0037 writer command parsed by ADR 0037's own parser to `/paths/state_root` = destination, the `LOOPEX_HOME` precedence note, and the configuration file byte-identical after restore |
 | `apps/loopex_composition/test/delegation_readiness_code_test.exs` | Classification keeps `%{session_id, code}` for each of the three codes and names no session for runtime-page failures |
-| `apps/loopex_daemon/test/readiness_closed_root_test.exs` | A root with one session history made unreadable after a backup: readiness `closed` with that session and `invalid_history`; the root moved aside and the earlier backup restored with `--source lost`; the service on the restored root reports `serving`; an on-demand start reports `project_resources` `not_admitted` |
+| `apps/loopex_daemon/test/readiness_closed_root_test.exs` | A root on which the service did further work after a backup, then had one session history made unreadable: readiness `closed` with that session and `invalid_history`; the root moved aside and the earlier backup restored with `--source lost --discard-later-work`; the service on the restored root reports `serving`; an on-demand start reports `project_resources` `not_admitted`. A second case with no activity after the backup restores without the flag |
 
 The installed lane of M8 outcomes 6 and 7 runs backup, restore and the
 refusal of an unmarked root under the installed artifact. Store conformance,
@@ -662,19 +701,79 @@ source as one of these backups is restated when M9 is planned.
 - *Backing up a live root.* A consistent copy of a root with an active writer
   needs a snapshot protocol the local adapter does not have.
 
+<a id="technical-adr-0072-amendment"></a>
+### ADR 0051 Amendment Text
+
+Concept: [Amendment of ADR 0051](0072-store-readiness-marker-backup-and-restore.md#concept-adr-0072-amendment).
+
+ADR 0051's accepted files are not edited. The two amended clauses are:
+
+1. **Backup CLI.**
+   - ADR 0051 Concept, scope paragraph: "No Runtime command, executor effect
+     envelope, backup CLI, generic migration engine or vision change is
+     added."
+   - ADR 0051 Technical depth, opening paragraph ("This proposal adds no Core
+     public mutation/query, executor effect envelope, generic migration
+     engine or backup CLI") and the closing scope paragraph ("It does not add
+     a Runtime API, generic migration layer, backup CLI, transport route or
+     extra provider attempt").
+   - Amended: the host's `store backup`, `store restore` and `store adopt`
+     commands of this record are added in front of the transition. They add
+     no copy, audit or transition of their own. The other exclusions in those
+     sentences stand.
+2. **Latest backup only.**
+   - ADR 0051 Concept, scope paragraph: "Another-host recovery, a
+     lost/recreated workspace, arbitrary historical snapshot rewind, …
+     are outside this decision." Amended: restoring a complete, idle,
+     current-format backup that is older than the root's last state is inside
+     the decision when, and only when, the plan's `source_status` is `lost`
+     and its `host_attestation` takes the discard form below. Another-host
+     recovery, a lost or recreated workspace, partial or selective rewind and
+     automatic removal of uncertain effects stay outside.
+   - ADR 0051 Technical depth, the plan grammar's `host_attestation` member,
+     `"latest_cut": true, "no_post_cut_activity": true,`. Amended: the member
+     is exactly one of two closed forms.
+
+     ```text
+     latest form (unchanged):
+       {"latest_cut": true, "no_post_cut_activity": true,
+        "all_other_copies_excluded": true,
+        "old_authority_termination": "joined" | "host_rebooted",
+        "host_ledgers_validated": true, "evidence_sha256": hex64}
+     discard form (new, source_status "lost" only):
+       {"discard_later_work": true,
+        "all_other_copies_excluded": true,
+        "old_authority_termination": "joined" | "host_rebooted",
+        "host_ledgers_validated": true, "evidence_sha256": hex64}
+     ```
+
+     A form mixing members of both, or `discard_later_work` other than
+     `true`, is `invalid_plan`. The discard form with `source_status`
+     `available` is `invalid_plan`. The plan stays version 1 and its digest
+     rule is unchanged, so a latest-form plan's bytes and digest do not
+     change.
+   - ADR 0051 Technical depth, "Host attestation is necessary in both source
+     branches: no post-cut effects, competing roots or stale snapshot activity
+     can be inferred from a manifest." Amended for the discard form: the host
+     attests that activity after the cut is abandoned rather than absent.
+     The restored root's history ends at the cut. Effects dispatched after the
+     cut have no record in it and are never reconciled by Loopex. An effect
+     open at the cut stays open or unknown in the restored root, exactly as
+     ADR 0051 restores it, and is never redispatched. Clients that saw later
+     events find a history that ends at the cut.
+
+Everything else ADR 0051 decides applies unchanged to both forms: same machine,
+same workspace identity, a complete unexcluded backup, an empty destination,
+exclusion of every other copy, fresh ledger generations, the lineage and its
+64-restore limit, the refusal order and the outcomes.
+
 <a id="technical-adr-0072-open"></a>
-### Mechanics of the Open Choice
+### Resolved Choice
 
 Concept: [Open for the maintainer](0072-store-readiness-marker-backup-and-restore.md#concept-adr-0072-open).
 
-Under (a), nothing in this record changes: the printed statement already says
-the backup is the latest state to keep, and the runbook adds a backup at every
-planned stop. Under (b), `store restore` gains one flag,
-`--discard-later-work`, required whenever the operator cannot state that no
-Loopex activity followed the backup. The attestation record gains
-`"discard_later_work": true | false`, and the printed statement names the
-abandoned work and its unreconciled external effects. The plan sent to ADR
-0051 is unchanged, because its attestation fields admit only `true`; the
-amendment is what makes that statement truthful for an earlier cut. The
-closed-root test in the evidence table uses a backup taken with no Loopex
-activity after it, so it holds under either choice.
+The earlier choice between a strict command and a `--discard-later-work`
+statement was decided on 2026-10-13 for the statement, with strict behavior
+kept whenever the flag is absent. Its grammar, refusals, retained bytes and
+tests are specified in the restore, failure and evidence sections above, and
+its ADR 0051 text in the amendment section. Nothing remains open.

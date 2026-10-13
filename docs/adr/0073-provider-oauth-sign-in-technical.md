@@ -8,7 +8,11 @@ Concept: [Provider OAuth sign-in](0073-provider-oauth-sign-in.md#concept).
 
 Concept: [Context and decision](0073-provider-oauth-sign-in.md#concept-adr-0073-decision).
 
-**Where the code lives.** Core gains nothing. Provider-specific sign-in
+**Where the code lives.** Core gains no callback, module or dependency. Its
+only change is admitting the one closed failure category
+`provider_sign_in_required` described under
+[the public failure reason](#technical-adr-0073-failure-reason); Core learns a
+category string, not any sign-in mechanism. Provider-specific sign-in
 profiles live in `loopex_llm_reqllm` under `Loopex.LLM.ReqLLM.SignIn.*`, beside
 `HostBindings` and the adapter's provider catalog. These are endpoints,
 scopes, request shapes and token-response validation. The token store,
@@ -82,7 +86,8 @@ environment variable:
 - **`chatgpt` request shape.** OpenAI's
   [models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
   page fixes these: Responses API only; `store: false` and `stream: true` on
-  every request; success only on `response.completed`. It also rejects
+  every request; success only on `response.completed`. The one exception is a reply Loopex
+ends itself at the ceiling, below. It also rejects
   `previous_response_id`, system-role items, `temperature`, `top_p`,
   `max_output_tokens`, `metadata`, `user`, `truncation`, hosted tools and
   audio. Function tools are supported.
@@ -90,9 +95,11 @@ environment variable:
     `instructions` member, not a system item.
   - It never relies on provider-side continuation.
   - It is streaming-only.
-  - Its reply ceiling is open item 4. Until the maintainer decides it, the
-    mapping refuses the route for the maintenance summarizer, whose ceiling
-    ADR 0043 fixes.
+  - It never sends `max_output_tokens`. The request's committed ceiling
+    (`Loopex.Model.max_tokens/1`) is enforced by Loopex in the stream drain,
+    as [the reply ceiling](#technical-adr-0073-reply-ceiling) specifies, so
+    the route is admitted in every role, including the maintenance summarizer
+    whose ceiling ADR 0043 fixes.
   - The admitted models are the account's `GET /v1/models` entries with
     `visibility == "list"`. Capability capture uses the route's registered
     mappings, as other routes do. A model the account does not list is refused
@@ -276,7 +283,8 @@ registry and custody edges and joins their reverse cleanup.
    `expires_at`. After that, resolution returns `:expired` and the sender
    refuses before dispatch.
 6. On `sign_in_required` it rotates custody to `nil`, so resolution returns
-   `:missing`. It writes `state: sign_in_required`, writes one bounded host
+   `:missing`, which a call on the route reports as the public reason
+   `provider_sign_in_required`. It writes `state: sign_in_required`, writes one bounded host
    diagnostic line, `loopex: provider sign-in required for route <route>; run
    loopex auth login <provider>`, and stops refreshing.
 7. Every 30 s it reads only the metadata file. A higher generation with the
@@ -301,19 +309,24 @@ stopped with it. It does not use the durable registry or exclusion plane.
 `in_process.ex` currently reads `System.get_env(variable)` in the sensitive
 caller. For a `:sign_in` route it instead calls `CredentialCustody.resolve/1`
 on the route's custody reference. The reference is passed in host-private
-model options next to the binding map, never in a request. `:missing` and
-`:expired` refuse as `not_dispatched`. Everything else in ADR 0039's caller,
+model options next to the binding map, never in a request. `:missing`
+refuses as `not_dispatched` with `provider_sign_in_required`, and `:expired`
+as `not_dispatched` with `model_call_failed`. Everything else in ADR 0039's caller,
 pool, cleanup and selected-value guard is unchanged.
 
 **Daemon and service.**
 
-- Composition refuses start with new exit statuses, appended after 110 in
-  the daemon's table:
-  - `provider_sign_in_required` (111);
-  - `credential_store_unavailable` (112);
-  - `credential_store_unsafe` (113).
-  `sign_in_route_lost` (114) is a fail-stop when a running `SignIn.Route` edge
+- Composition refuses start with new exit statuses. ADR 0071 takes 111 to
+  115 and ADR 0072 takes 116 to 119, so these follow at 120:
+  - `provider_sign_in_required` (120);
+  - `credential_store_unavailable` (121);
+  - `credential_store_unsafe` (122).
+  `sign_in_route_lost` (123) is a fail-stop when a running `SignIn.Route` edge
   exits, like `custody_lost`.
+- `LoopexDaemon.ExitStatus`'s moduledoc range and `fetch/1` spec extend
+  through 123. The assertion in `apps/loopex_daemon/test/command_test.exs`,
+  which today checks `Enum.to_list(65..110)`, grows to cover every status
+  through 123, 111 to 123 included, each used exactly once.
 - A transient refresh failure at startup does not refuse start. The service
   serves and the route stays unavailable until a refresh succeeds.
 - ADR 0037's start-on-demand presence check reads only the metadata file. It
@@ -432,6 +445,131 @@ binding's form and source, for example `oauth (loopex)`. They also show the
 `vertex` project and location. They never show availability, backend, label
 or expiry, keeping ADR 0048's inspection rule.
 
+<a id="technical-adr-0073-reply-ceiling"></a>
+### Ceiling Enforcement in the Stream Drain
+
+Concept: [The `chatgpt:` reply ceiling](0073-provider-oauth-sign-in.md#concept-adr-0073-reply-ceiling).
+
+**Where.** In `Loopex.LLM.ReqLLM`'s private `drain/5`
+(`apps/loopex_llm_reqllm/lib/loopex/llm/req_llm.ex`). The companion worker's
+transport path and the in-process caller already share this drain, so one
+implementation covers the durable and ephemeral profiles. The native
+transport's own drain serves other routes and is unchanged.
+
+**Rule.** For a request whose route is `chatgpt`, and only then:
+
+1. The ceiling is `Loopex.Model.max_tokens(request)`, the committed value.
+   Nothing is sent to the provider for it.
+2. The drain keeps a running estimate with `Loopex.Bounds.estimate/1`, one
+   token per three bytes rounded up, over the streamed text bytes plus the
+   streamed tool-call name and argument bytes. It is the estimator Core
+   already uses for bounds, and it overcounts.
+3. Before admitting a text fragment, the drain checks whether admitting it
+   would make the estimate exceed the ceiling. If so, it admits the longest
+   prefix of the fragment, cut on a UTF-8 character boundary, that keeps the
+   estimate at or below the ceiling. It emits that prefix as progress and
+   halts. A tool-call fragment that would exceed it halts without admitting
+   the fragment.
+4. On halting, the drain cancels the response stream, which closes the
+   connection, and does not wait for `response.completed`. It skips the
+   completion check that requires that event and builds the reply with
+   `Mapping.reply/6`, with these values:
+   - `completion` `"limit"`;
+   - `text`, the admitted text;
+   - `tool_calls` `[]`, because a call streamed before the cut was never
+     confirmed by the provider and its arguments may be incomplete;
+   - `usage` with nil input and output tokens, because the provider reported
+     none, so Core accounts the attempt as estimated, as it does any reply
+     without reported usage.
+5. A stream that reaches `response.completed` below the ceiling is classified
+   as before. A provider-reported output-limit stop is still `limit`.
+
+**Consequences.** The attempt settles as a `dispatched_or_unknown` reply with
+completion `limit`. Core, compaction and the summarizer already handle that
+completion. The plan is still charged for whatever the provider generated
+before the connection closed. Reasoning tokens are not streamed as text and
+are not counted; the ceiling bounds the visible reply. The plan's weekly cap
+bounds spend. The echo guard and every other drain rule apply unchanged to
+the admitted text.
+
+<a id="technical-adr-0073-failure-reason"></a>
+### Reason, Schemas, Vectors and Core Handling
+
+Concept: [The public failure reason](0073-provider-oauth-sign-in.md#concept-adr-0073-failure-reason).
+
+**Producing the reason.** For a route whose catalog credential kind is
+`:sign_in`, a custody resolution of `:missing` is answered before dispatch
+with `{:error, {:not_dispatched, "provider_sign_in_required"}}`. The durable
+sender in `worker_invoke/4` and the ephemeral `in_process.ex` caller both do
+this. Custody is `:missing` after `sign_in_required`, an account change or a
+logout. `:expired`, which a token that lapsed while the provider was
+unreachable produces, stays `{:not_dispatched, "model_call_failed"}`. An
+`env` route never produces the new reason.
+
+**Core.** These changes are in `apps/loopex` and only admit one more closed
+string:
+
+- `Loopex.Runtime.SessionCoordinator`'s model-result acceptance admits
+  `{:not_dispatched, "provider_sign_in_required"}` beside the existing
+  `{:not_dispatched, "model_call_failed"}`. Any other term is still
+  ambiguous.
+- `Loopex.Runtime.ProviderAttempt`'s settlement admits the result
+  `{"kind" => "error", "category" => "provider_sign_in_required"}` only with
+  transport `not_dispatched`, accounting `none`, attempt one, and no
+  termination or an abort or deadline termination. Its next step is always
+  `terminal`: there is no retry, because a retry would meet the same refusal.
+  Every other combination is invalid history.
+- `Loopex.Runtime.SessionState` ends the run `failed` with `reason`
+  `provider_sign_in_required` and `failure` nil. A maintenance or compaction
+  run's failure is `{"category": "provider_sign_in_required", "retryable":
+  false}`.
+
+**Protocol.** `LoopexProtocol.Session.Outcome` admits the reason in the
+`failed` reason set it enforces today, which holds `model_call_failed` and
+`unreadable_model_answer`. `LoopexProtocol.Session.CompactResult` admits the
+category. Under `apps/loopex_protocol/priv/schema`:
+
+- `loopex-experimental-3.json` and `loopex-experimental-4.json`: each
+  `failure.simple.categories` list gains `provider_sign_in_required`, three
+  occurrences in each file. The embedded `chat_terminal_outcome` definition
+  gains a `failed_reasons` list of `model_call_failed`,
+  `unreadable_model_answer` and `provider_sign_in_required`, so that the
+  schema states the set the decoder enforces.
+- `chat-terminal-outcome.v1.json` gains the same `failed_reasons` list.
+- `session-snapshot.v3.json`, `standalone-compact-result.v1.json` and
+  `standalone-compact-completion.v1.json`: each `failure.simple.categories`
+  list gains the category.
+
+Under `apps/loopex_protocol/priv/vectors`:
+
+- `chat-terminal-outcome.v1.json` gains a `provider_sign_in_required` case
+  and a refused case with a nonnull `failure`.
+- `standalone-compact-result.v1.json` and
+  `standalone-compact-completion.v1.json` gain a failure case with the
+  category.
+- `loopex-experimental-3.json` and `loopex-experimental-4.json` gain a run
+  terminal event carrying the reason.
+- `current-contract-manifests.v1.json` and `canonical-schema-proof.v1.json`
+  are regenerated for the changed schema bytes in the same change.
+
+The generation names stay `loopex.experimental/3` and `/4`. Before 1.0 only
+the current contract is kept. The independent Node client in the release
+check decodes the new vectors.
+
+**Client-visible behavior.**
+
+- Every client receives the terminal outcome `failed` with `reason`
+  `provider_sign_in_required` and nothing else new.
+- The reference chat and `ask` print one line, `loopex: provider sign-in
+  required for route ROUTE; run loopex auth login PROVIDER, then continue`,
+  where the route comes from the committed model's prefix. The session stays
+  resumable, and the command's exit status is that of any failed run.
+- A chat attached to the daemon under ADR 0071 prints the same line.
+- Nothing retries automatically. After `auth login`, the running service
+  adopts the token within 30 s (refresher step 7), and the next turn or
+  resume dispatches normally.
+
+
 <a id="technical-adr-0073-threats"></a>
 ### Threat Model
 
@@ -473,11 +611,16 @@ use temporary homes and never touch a real keyring.
 | `apps/loopex_composition/test/credential_plane_test.exs` (extended) | A sign-in route's custody is registered like an `env` route. Two canaries (access and refresh) never appear in journals, public events, progress, diagnostics, traces, executor job environments or resource subprocess environments. An invocation during rotation uses exactly one token |
 | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` (extended) | The `token_exchange` invocation: credential frame, closed failure classes, no raw body crossing, cleanup proof. The access-token echo guard withholds a reply containing the token |
 | `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`. The ADC metadata path |
-| `apps/loopex_cli/test/daemon_sign_in_test.exs` | Statuses 111 to 114; start-on-demand presence check; revoked mid-service → next call `not_dispatched` with no fallback to another route; re-login adopted |
+| `apps/loopex_cli/test/daemon_sign_in_test.exs` | Statuses 120 to 123; start-on-demand presence check; revoked mid-service → next call `not_dispatched` with no fallback to another route, and the attached client's terminal outcome is `failed` with `provider_sign_in_required` and the `auth login` hint; re-login adopted and the next turn succeeds without restart |
+| `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers every status from 65 through 123 exactly once |
+| `apps/loopex_llm_reqllm/test/chatgpt_reply_ceiling_test.exs` | Through the fake server: a stream longer than the ceiling ends with completion `limit`, text whose `Loopex.Bounds.estimate/1` is at most the ceiling and is a prefix of what the server sent, a cut on a UTF-8 boundary, no tool calls, nil reported usage, and the server observing the connection closed; a stream that completes below the ceiling is unchanged; a ceiling of 1; a cut during a streamed tool call; the same results through the companion worker and the in-process caller; the request body never contains `max_output_tokens` |
+| `apps/loopex_composition/test/chatgpt_summarizer_test.exs` | A maintenance summary on a `chatgpt:` route through the fake server, with a summary longer than ADR 0043's ceiling, settles as a `limit` reply within the ceiling and is handled as any limit-truncated summary |
+| `apps/loopex/test/sign_in_required_settlement_test.exs` | `{:not_dispatched, "provider_sign_in_required"}` settles attempt one as `not_dispatched`, accounting `none`, next `terminal` with no retry; the run ends `failed` with that reason; the record replays; the category with `dispatched_or_unknown`, on attempt two, or with a termination other than abort or deadline is invalid history; a maintenance run reports the category |
+| `apps/loopex_protocol/test/sign_in_required_vectors_test.exs` | The new vectors encode and decode on `loopex.experimental/3` and `/4`; the reason with a nonnull `failure`, or as a failure category with `retryable` `true`, is refused; the regenerated manifests and schema proof match |
 | `apps/loopex_cli/test/ask_sign_in_test.exs` | Ephemeral `ask` on a sign-in route through the fake server; refresh in host VM; custody stopped at composition stop |
 
-Release lanes, attended, gated on each provider's client being available, run
-with `--only`:
+Release lanes for M8 outcome 8, attended, gated on each provider's client
+being available, run with `--only`:
 
 - `real-sign-in-openai`: an attended `auth login openai` into a temporary
   home, one real `chatgpt:` conversation through the installed service, a
@@ -523,6 +666,18 @@ Concept: [Amendments to accepted decisions](0073-provider-oauth-sign-in.md#conce
   read at the model boundary for each call". Amended: a sign-in route resolves
   from composition-owned custody at the model boundary for each call. Its
   refresh runs in the host VM under the profile's stated audience.
+- **ADR 0029, Concept, "Purpose and Decision".** "The public Model result
+  remains `dispatched_or_unknown` with `"model_call_failed"`." And Technical
+  depth, "Core still receives exactly
+  `{:error, {:dispatched_or_unknown, "model_call_failed"}}`". Amended: these
+  stay exact for every failure the companion or provider classifies. In
+  addition, a host refusal before dispatch because a sign-in route has no
+  usable sign-in returns `{:error, {:not_dispatched,
+  "provider_sign_in_required"}}`, and that reason is public in the run
+  terminal outcome and in maintenance and compaction failures, with schemas
+  and vectors on `loopex.experimental/3` and `/4`. The private stage and
+  category pair, its sealing and its exclusion from every public plane are
+  unchanged; the new reason is never derived from it.
 - **ADR 0037 (Proposed).** "File/keychain/command credentials require a
   separate future decision" becomes: sign-in tokens follow ADR 0073; file and
   command API-key sources still need a separate decision.
@@ -596,9 +751,12 @@ Concept: [Compatibility and rollback](0073-provider-oauth-sign-in.md#concept-adr
   `invalid_credential_binding` or unsupported-provider class. Under the pre-1.0
   rule nothing older needs to read them.
 - **Durable data.** Committed models such as `chatgpt:<id>` are ordinary model
-  strings. Session replay needs no change; resuming needs the route admitted.
-- **Removal.** Delete `auth`, the three routes, `SignIn.*` and the companion's
-  `token_exchange` kind together. Run `auth logout` for each route first;
+  strings; resuming needs the route admitted. The settled-attempt record and
+  the run terminal admit the `provider_sign_in_required` category, and replay
+  validates it as above. Before 1.0 no older reader is supported.
+- **Removal.** Delete `auth`, the three routes, `SignIn.*`, the companion's
+  `token_exchange` kind and the failure reason with its schema and vector
+  entries together. Run `auth logout` for each route first;
   otherwise revoke in the provider's account settings. Then remove `<home>/auth/`.
 
 **Alternatives considered.**

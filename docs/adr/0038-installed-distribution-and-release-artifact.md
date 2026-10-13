@@ -6,12 +6,18 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
 - **Status:** Proposed
 - **Date:** 2026-09-21; reconciled with the delivered M7 baseline and the
   maintainer's 2026-10-13 host and label decisions; build recipe, manifest,
-  linkage inventory, install contract and failure names detailed on 2026-10-13
+  linkage inventory, install contract and failure names detailed on 2026-10-13;
+  the maintainer's ADR 0003 compiler reading recorded on 2026-10-13
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing; it applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
+- **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
   [ADR 0019](0019-host-owned-provider-protection.md#concept)'s separate
-  protected provider companion, to an installed artifact
+  protected provider companion, to an installed artifact. It makes one
+  clarifying amendment of accepted ADR 0003, decided by the maintainer on
+  2026-10-13: obligation 4's sentence "A minimal runtime distribution carries
+  no compiler" is read as "carries no build toolchain", so the OTP `compiler`
+  application ships as a runtime dependency (see
+  [The compiler clarification](#concept-adr-0038-compiler))
 - **Depends on:** [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for installed initialization and configuration discovery, [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the current-format marker and the backup and restore commands, and accepted [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition they use
 - **Prerequisite for:** M8 outcomes 1, 6 and 7 (this was M6 before the maintainer's reframing of 2026-09-26), accepted before any release
   build, manifest or install script is written
@@ -54,9 +60,10 @@ minimal runtime distribution carries no compiler.
    bytes the release check's real-provider lanes already exercise; only the
    runtime underneath them is bundled. The archive carries no build tool: no
    Mix, Hex, `erlc`, `elixirc`, source or dependency tree. The Erlang
-   `compiler` library and Elixir's own modules are present only because the
-   Elixir runtime declares and loads them; nothing in the archive builds or
-   fetches code. "No Erlang or Elixir installation required" is claimed only
+   `compiler` application and Elixir's own modules are present only because
+   the Elixir runtime declares them and does not start without them; nothing
+   in the archive builds or fetches code. The maintainer decided this reading
+   of ADR 0003 on 2026-10-13, below. "No Erlang or Elixir installation required" is claimed only
    because ERTS is bundled, and "no other installation required" only because
    every native object links nothing outside the platform base named below.
 2. **The build environment is part of the decision.** On macOS the runtime is
@@ -110,6 +117,25 @@ minimal runtime distribution carries no compiler.
 9. **Publication is a separate maintainer decision** after closure, gated on
    the public-name clearance the vision's name section already requires.
    Building and retaining the artifact is M8 scope; publishing it is not.
+
+<a id="concept-adr-0038-compiler"></a>
+### The Compiler Clarification of ADR 0003
+
+Technical depth: [ADR 0003 amendment text](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-compiler).
+
+Accepted ADR 0003 says that a minimal runtime distribution carries no
+compiler. Its purpose is that a running brain never fetches, builds or loads
+unvalidated code. Elixir declares the OTP `compiler` application as a
+dependency and does not start without it, so an archive that runs the
+escripts cannot omit that application.
+
+The maintainer decided on 2026-10-13 to read the rule as "carries no build
+toolchain": no Mix, no Hex, no `erlc`, no `elixirc`, and no source or
+dependency tree. The OTP `compiler` application ships as a runtime dependency
+of Elixir, and nothing in the archive calls it to build or load code. This is
+a clarifying amendment of ADR 0003's text. ADR 0003's accepted bytes are not
+edited, and its other obligations are unchanged. The release check proves the
+archive starts nothing but the two escripts.
 
 <a id="concept-adr-0038-consequences"></a>
 ### Observable Consequences
