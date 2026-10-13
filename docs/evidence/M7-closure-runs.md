@@ -351,12 +351,28 @@ cross-version steps are not passes; preserve current-format restore coverage.
 | Complete earlier-attempt records/reports and SHA-256 digests | Pending |
 
 Before commitment enumerate every known prior attempt and final case in
-literal rows. The final cases are the 28 rows below. No earlier M7 closure
-candidate was nominated, and no case attempt of campaign `m7-closure-1` is
-known before this candidate: the only committed attempts head,
-`m7-closure-1 2` in the M7 plan, covers the index's genesis and writer
-designation and no case record, and every paid case waited for the T17
-approval. Preserve the
+literal rows. The final cases are the 28 rows below. Campaign `m7-closure-1`
+ran ten earlier release matrices on serenity under the
+[restart override](../developer/agent-context-map.md#disposition-m7-t17-operator-override-2026-10-11).
+Each consumed index and its run outputs are retained whole under the evidence
+root's `t17-release/attemptN/`; attempt 10's are the root's current files.
+Every index began with the committed head's byte-identical genesis and writer
+designation (SHA-256 `7c63d8ec…`).
+
+| Attempt | Candidate | Ended at | Mechanical result | Verdict | Cause and correction | Index SHA-256 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `d00e06eb` | `real-provider-1` | `assertion_failed` | `evidence_unavailable` | The skill-import prompt went unanswered before any model call; the agent operator now answers attended prompts | `4b2fd95a5695ec50a4f01654d597d94ad459ae7e3265a4038b1bb58ea675f571` |
+| 2 | `d00e06eb` | `real-provider-1` | `assertion_failed` | `product_failure` | Anthropic wire drift (null envelope members, a direct `caller`) refused as `model_call_failed`; the adapter admits only those null members and a direct caller | `fa2f309ccc98c57cf6a2476540b4d639fe04e284a83d88d2807957c93b048ffd` |
+| 3 | `124ded8e` | `long-bound-loopex_composition` | `assertion_failed` | `product_failure` | The composition suite shared the caller's `LOOPEX_HOME`; it now has its own | `da7b19a3556c0e38843477e1f8392496515ad09815d0d83dded1792abb4aab1f` |
+| 4 | `d999373a` | `m7.baseline.ask` | `assertion_failed` | `product_failure` | The ask case ran on the default model with no key; ask cases use the configured model and key | `82eb1de64eda5c33792a3428c3455f1e344f18a4b2d5c8374a224965460f8b31` |
+| 5 | `a5cc21ab` | `m7.repair` | `evidence_incomplete_pre_dispatch` | `product_failure` | The release's umask 077 made fixture modes differ from the catalog; the M7 lanes run under scoped umask 022 | `4c1f925be896fb939365ae82709bd97a72b903d3845caab79f63899591a4229a` |
+| 6 | `bbabe3ec` | `real-provider-7` | `assertion_failed` | `product_failure` | The provider companion built inside ExUnit's 60-second budget; it builds in `setup_all` | `942d470f0e24de83c1fb4ffcc556f375646eeb02e31b12ae2cace8cb44165967` |
+| 7 | `c6925ffc` | `m7.question-restart` | `required_action_absent` | `product_failure` | Both attended redactors held the `answer>` prompt from the operator; they hold only a tail that can begin a key | `e87350e782e8c889a9f872f6d71fd54dd21ee3fd1336bd8b51a6d9bc637b5d62` |
+| 8 | `9762b105` | `m7.oversized-source` | `assertion_failed` | `product_failure` | The sentinel join matched the model's quotation in retained history; it now checks the excerpt's byte range | `e78c03d5517e2d4a5104c153593596f0294e8ae48743dd74c17c15040e13a854` |
+| 9 | `c602bc1d` | `m7.ephemeral-question` | `assertion_failed` | `evidence_unavailable` | An unclassified `model_call_failed` after a completed edit; ten diagnostic reruns did not reproduce it and no cause is established | `60dbddac17e346f28ed21d1759c735dd97bd8ae6ac9555e5f77aafa57b944529` |
+| 10 | `c602bc1d` | full matrix | every case `pass` | `pass` | Independent review of `c602bc1d` found the provider build fixture could leave an early-expired build's process group alive; corrected in the next candidate | `f4eec8130c1524e2f800d02fb1682e4c8bc1adb8b565db729122981a5ea45c94` |
+
+Preserve the
 plan's distinct `product_failure`, `model_nonconformance`,
 `evidence_unavailable` and `environment_failure` dispositions, separate from
 its mechanical results. A new candidate
