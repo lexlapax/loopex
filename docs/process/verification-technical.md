@@ -201,6 +201,13 @@ in [the observability technical depth](../developer/observability-technical.md#t
 `apps/loopex/test/trace_session_test.exs` also compiles a module to a code-path
 directory without loading it and proves a session naming it traces its calls.
 
+Changing the inventory starts with amending ADR 0030: the inventory is fixed
+there, the conformance test asserts it by name, and an emission the ADR does
+not list fails that test. A new span metadata field has the same constraint for
+a different reason: the handler refuses anything it cannot express as bounded
+plain data, and the boundary test asserts the absence of content, so a field
+carrying a model message, a tool argument or artifact bytes fails both.
+
 <a id="technical-verification-evidence-loop"></a>
 **The agent loop, interactions and transfers.** The guarantees in
 [Agent loop and tools](../developer/agent-loop-and-tools.md#technical-depth)

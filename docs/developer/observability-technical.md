@@ -173,19 +173,6 @@ marker, so an entry is bounded however deep or wide the term was.
 The tests that prove each claim on this page are listed in the
 [verification guide](../process/verification-technical.md#technical-verification-evidence-observability).
 
-<a id="technical-observability-adding"></a>
-## Changing the Inventory
-
-Adding a boundary means amending ADR 0030 first. The inventory is fixed there,
-the conformance test asserts it by name, and an emission the ADR does not list
-fails that test — which is the intended order of operations, not an obstacle to
-route around.
-
-Adding a field to a span's metadata has the same constraint for a different
-reason: the handler refuses anything it cannot express as bounded plain data,
-and the boundary test asserts the absence of content. A field carrying a model
-message, a tool argument or artifact bytes fails both.
-
 ## Related
 
 - [Architecture technical depth](architecture-technical.md#technical-depth) — the applications and the dependency budget.

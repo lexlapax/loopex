@@ -116,6 +116,6 @@ Technical depth: [Trace session ceilings](observability-technical.md#technical-o
 - [Architecture](architecture.md#concept) — truth planes and dependency direction.
 - [App server protocol](app-server-protocol.md#concept) — the wire surface's own bounded planes.
 - [Operator observability runbook](../operator/observability.md#concept) — turning it on and reading it.
-- [Getting started](getting-started.md#concept) — where diagnosing fits in a first contribution.
+- [Getting started](getting-started.md#concept) — a first embedded host and its first trace session.
 
 Back to the [developer index](README.md).
