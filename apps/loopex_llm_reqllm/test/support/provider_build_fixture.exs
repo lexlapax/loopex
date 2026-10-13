@@ -17,6 +17,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   alias Loopex.LLM.ReqLLM.{ProviderConfiguration, ProviderLauncher, ProviderWorker}
 
   @source_root Path.expand("../../../..", __DIR__)
+  @build_ms 300_000
   @launch_keys [:worker_path, :interpreter_path, :worker_sha256, :build_manifest_sha256]
   @wire_modules [
     Loopex.LLM.ReqLLM,
@@ -38,7 +39,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
 
   A standalone caller must append its own `cleanup_grace_ms`; managed runtime
   calls obtain that period from Core. `root` must be an absolute, test-owned
-  directory outside the checkout. This setup adds no request or test timeout.
+  directory outside the checkout. This setup adds no request or test timeout;
+  a cold build is bounded at 300,000 ms.
   """
   def options!(root) when is_binary(root) do
     unless Path.type(root) == :absolute,
@@ -118,10 +120,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
         "GIT_OPTIONAL_LOCKS" => "0"
       })
 
-    {output, status} =
-      System.cmd(
-        "/bin/sh",
-        [
+    port =
+      Port.open({:spawn_executable, "/bin/sh"}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        args: [
           "-c",
           "exec \"$1\" \"$2\" loopex.provider.build </dev/null",
           "provider-build",
@@ -129,12 +133,32 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
           mix
         ],
         cd: Path.join(@source_root, "apps/loopex_llm_reqllm"),
-        env: Map.to_list(environment),
-        stderr_to_stdout: true
-      )
+        env:
+          Enum.map(environment, fn {name, value} ->
+            {~c"#{name}", if(value, do: ~c"#{value}", else: false)}
+          end)
+      ])
 
+    {output, status} = collect(port, System.monotonic_time(:millisecond) + @build_ms, [])
     File.write!(Path.join(build, "build.log"), output)
     unless status == 0, do: raise("provider cold build failed (#{status}):\n#{output}")
+  end
+
+  # Concept: the build has its own deadline, since setup_all has none.
+  # Technical depth: on expiry the build's OS process is killed and the build
+  # fails as unavailable evidence; a fresh extraction's build takes about a
+  # minute.
+  defp collect(port, deadline, output) do
+    receive do
+      {^port, {:data, data}} -> collect(port, deadline, [output | data])
+      {^port, {:exit_status, status}} -> {IO.iodata_to_binary(output), status}
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        {:os_pid, pid} = Port.info(port, :os_pid)
+        System.cmd("kill", ["-KILL", Integer.to_string(pid)])
+        Port.close(port)
+        raise "provider cold build exceeded #{@build_ms} ms:\n#{IO.iodata_to_binary(output)}"
+    end
   end
 
   @doc """
