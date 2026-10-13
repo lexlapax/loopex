@@ -6,7 +6,7 @@ Technical depth: [Attached conversation mapping, service configuration and evide
 - **Status:** Proposed
 - **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service-hosted helpers designed on 2026-10-13
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing; it applies [ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept) and [ADR 0033](0033-collaboration-controller-lease-and-takeover.md#concept) to the conversation command, extends the daemon's startup inputs with [ADR 0049](0049-explicit-host-configuration.md#concept)'s file, and applies [ADR 0046](0046-child-session-tool.md#concept), [ADR 0056](0056-host-helper-ledger-recipe.md#concept) and [ADR 0069](0069-helper-run-evidence-and-route-guard.md#concept) to the service. It narrowly amends ADR 0049's conversation status record so a service-owned value can be absent, ADR 0032's activation ceiling so it counts client activations and not helper children, and [ADR 0055](0055-remote-session-creation-options.md#concept)'s creation options on a helper-enabled service
+- **Supersedes:** nothing; it applies [ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept) and [ADR 0033](0033-collaboration-controller-lease-and-takeover.md#concept) to the conversation command, extends the daemon's startup inputs with [ADR 0049](0049-explicit-host-configuration.md#concept)'s file, and applies [ADR 0046](0046-child-session-tool.md#concept), [ADR 0056](0056-host-helper-ledger-recipe.md#concept) and [ADR 0069](0069-helper-run-evidence-and-route-guard.md#concept) to the service. It narrowly amends ADR 0049's conversation status record so a service-owned value can be absent, ADR 0032's activation ceiling so it also counts helper children, [ADR 0046](0046-child-session-tool.md#concept)'s fixed refusal order with one new refusal, `helper_activation_limit`, and [ADR 0055](0055-remote-session-creation-options.md#concept)'s creation options on a helper-enabled service
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept) and `loopex.experimental/4`, the daemon generation [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) introduced, both delivered by M7; ADRs 0046, 0056 and 0069 as delivered by M7; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the home, the on-demand start and `daemon.readiness`
 - **Prerequisite for:** M8 outcomes 4 and 5
 
@@ -92,7 +92,9 @@ foreground conversation works through the service; decision 10 records it.
     within a per-run allowance kept in the service's private ledger; the child
     works in the service's workspace and cannot change it; and the result
     reports the child's usage, the run's delegation totals and the parent's
-    own usage separately and combined. An attached conversation drives a
+    own usage separately and combined. Each child spends one of the
+    service's activations, like a client session. An attached conversation
+    drives a
     helper parent like any other session. A helper child can be watched but
     never prompted, steered, configured, compacted, answered, aborted or
     resumed by any client; it stops only through its parent. When the service
@@ -129,10 +131,18 @@ committed configuration the service projects; host policy and trace state
 belong to the service and are shown as absent.
 
 The service's existing residency limits are unchanged. A daemon activates at
-most 64 sessions for its clients in its lifetime, so a service left running
-eventually refuses a new or resumed conversation until it is restarted; the
-refusal is shown as the service returns it. Helper children do not spend those
-activations; each parent run's child count and token allowance bound them.
+most 64 sessions in its lifetime, so a service left running eventually refuses
+a new or resumed conversation until it is restarted; the refusal is shown as
+the service returns it. Helper children count toward those 64 exactly as
+client sessions do: each child the service starts spends one activation, and,
+as for any session, finishing or stopping it does not give the activation
+back. When none is left, the parent's `task` call is refused as
+`helper_activation_limit` before anything is reserved or charged; the parent
+sees the refusal as its tool result, the attached conversation shows it in the
+transcript, and the parent keeps working. Children the service stops while
+recovering from a restart are counted too but are never refused, because
+stopping them cannot wait for capacity. `loopex service status` reports the
+activations used, children included.
 
 With helpers enabled, the attached conversation shows the parent's `task`
 calls and their results as the foreground does: the role, model, child
@@ -166,7 +176,12 @@ both hosts classify and recover the same history. A service started with
 delegation disabled still classifies and guards a root's helper history, as
 M7 delivers. Core gains no command, record or public function; it gains one
 undocumented detailed form of its existing exact-genesis creation call, so the
-service accounts a helper parent's activation as it does any other session's.
+service accounts helper parents' and children's activations as it does any
+other session's. The helper owner asks the service for each child's
+activation through a function the host supplies, so composition and Core
+never depend on the daemon; the foreground conversation supplies none and is
+unchanged. The new refusal is the one change to ADR 0046's fixed refusal
+order and is returned only by a host that supplies that function.
 
 Removing this capability removes a client and one startup input. No durable
 session fact depends on which kind of terminal admitted a command.
@@ -174,20 +189,10 @@ session fact depends on which kind of terminal admitted a command.
 ## Open for the Maintainer
 
 Decided on 2026-10-13: the service hosts helper roles in M8 (decision 10),
-and the earlier refusal of a file that enables delegation is withdrawn.
+and the earlier refusal of a file that enables delegation is withdrawn. Also
+decided on 2026-10-13: helper children count toward the daemon's
+64-activation limit, refused as `helper_activation_limit` when it is reached.
 
-- **Helper children and the activation ceiling.** The helper owner activates
-  children inside the service's runtime, outside the daemon's admission relay,
-  so ADR 0032's 64-activation lifetime ceiling does not count them, and Core
-  has no deactivation. Each parent run is bounded by its `max_children` (at
-  most 128) and token allowance, but a service left running accumulates idle
-  child coordinators across many runs until it is restarted, as a long
-  foreground conversation does today. The alternative is to count each child
-  against the ceiling, which needs a permit from the daemon's registry inside
-  the helper owner and a new refusal in ADR 0046's fixed order.
-  Recommendation: do not count them in M8, state the cost in the operator
-  runbook, and leave a bounded child lifetime to the successor that adds Core
-  deactivation.
 - **Daemon exit statuses across M8 records.** This record uses 111 to 115 and
   leaves 114 retired. ADR 0072 and ADR 0073 each also number their daemon
   statuses from 111. One order must be fixed when the three are accepted; this

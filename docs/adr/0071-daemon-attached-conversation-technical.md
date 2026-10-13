@@ -242,7 +242,8 @@ delegation, the frozen catalog, parent creation and the evidence below.
 | 3. Freeze the catalog, after placement | `Service`, calling the host's `{LoopexCli.HostOptions, :helper_catalog, [helpers]}` with the placement identity | `Catalog.digest(runtime_id, providers, roles)` and one capture of the parent instructions with `enabled_roles` and `catalog_digest`, exactly as `ChatConfiguration`'s `capture_instructions/2` does; the result is kept in the service's state for its lifetime | `configuration_invalid` (111) as a fail-stop that releases the lock |
 | 4. Compose | `LoopexComposition.start_edges/2` | The handle's `enabled: true` registers the fixed `loopex.task` generation through `Delegation.definitions/1`; bind and the first 60,000 ms classification as delivered | As delivered |
 | 5. Keep classifying | `Service` | ADR 0037's further 60,000 ms `Helper.classify/2` slices from a linked task until coverage completes or a session is named | — |
-| 6. Serve | `LoopexDaemon.Owner` | The connection context carries `helper_parents: %{handle, catalog, prepare}` to every connection, as it carries `runtime` today | — |
+| 6. Bind the activation permit, after the collaboration services start and before the listener | `Service` | `Helper.bind_activation_permit(helper, {LoopexDaemon.HelperActivation, [registry]})` (below); the call returns the sessions the owner activated before it had a permit, which the service accounts to the registry | A refused bind is the delivered `daemon_services_start_failed` |
+| 7. Serve | `LoopexDaemon.Owner` | The connection context carries `helper_parents: %{handle, catalog, prepare}` to every connection, as it carries `runtime` today | — |
 
 The service application depends on composition and not on the CLI, while the
 configuration selection and genesis builders belong to the CLI host. The host
@@ -287,19 +288,21 @@ new identity. The creation runs inside the helper owner's serial call, so a
 guard read from another connection waits for it, bounded by Core's
 60,000 ms creation cutoff, as in the foreground.
 
-**Running helpers.** The service adds nothing to the delivered helper path:
-the router forwards the parent's `task` job to the owner, which reserves,
-creates the child with its frozen read-only genesis, prompts it with the
+**Running helpers.** The service adds one step, the activation permit below,
+to the delivered helper path: the router forwards the parent's `task` job to
+the owner, which takes a permit, reserves, creates the child with its frozen
+read-only genesis, prompts it with the
 authored bounds and the absolute cutoff, waits in the caller, settles from
 ADR 0069's run evidence, retains the receipt and returns up to 16,384 bytes of
 child text with `usage` members `child`, `delegation`, `parent` and
 `combined_tokens`. The limits are those delivered and named by ADR 0046's
-fixed refusal order:
+fixed refusal order, plus the service's activation limit:
 
 | Limit | Value and refusal |
 | --- | --- |
 | Active helpers per parent | One; a second `task` call while one runs refuses `helper_slot_occupied` |
-| Parents in parallel | Independent parents may each run one helper; there is no service-wide slot |
+| Parents in parallel | Independent parents may each run one helper; there is no service-wide helper slot |
+| Service activations | ADR 0032's 64 per lifetime, shared by client sessions and helper children; a child that would exceed them refuses `helper_activation_limit` |
 | Per parent run | `max_children` (1 to 128) and `token_budget`; `delegation_count_exhausted`, `delegation_tokens_exhausted`; the ADR 0056 log cap, `ledger_capacity` |
 | Router registry | 4,096 active rows shared by every parent in the service; `router_registration_capacity` |
 | Cancellation tombstones | 4,096; their exhaustion closes helper admission until the service restarts, `helper_admission_closed` |
@@ -334,20 +337,84 @@ passes the guard.
 | `service stop` or `SIGTERM` while a helper runs | The delivered stop closes the listener and stops the runtime edges, ending parent and child coordinators; only then does `Delegation.close/1` stop the owner and its writer within the stop bound. The owner is never stopped while the runtime runs |
 | `SIGKILL` or host loss | The same next start, plus ADR 0056's incomplete-final-frame recovery under the writer's stale-writer rule; an unresolved append fences the owner, `ledger_fenced`, until it resolves |
 | Owner or writer exit while serving | Fail-stop `runtime_lost`, as delivered |
-| Next start | `host(..., true)` opens with `recover_stale_writer`, binds and classifies. Each unfinished operation stops with `adapter_recovery`: a known child is aborted through a prepared, never activated owner; no create or prompt is replayed; conclusive evidence is settled and receipted; anything less keeps that parent's slot occupied, so its later `task` calls refuse `helper_slot_occupied` |
+| Next start | `host(..., true)` opens with `recover_stale_writer`, binds and classifies. Each unfinished operation stops with `adapter_recovery`: a known child is aborted through a prepared owner whose recovery work is never activated, and that owner is counted as one activation, below; no create or prompt is replayed; conclusive evidence is settled and receipted; anything less keeps that parent's slot occupied, so its later `task` calls refuse `helper_slot_occupied` |
 | Reattaching to the parent | `loopex chat --service --resume PARENT` resumes it, which the guard admits for a parent; its interrupted `task` call carries the stop-only result and the operator asks again |
 | Configuration changed between starts | An existing parent keeps its retained catalog; new parents use the new one |
 | Delegation disabled at the next start | The owner still opens because history exists, classifies and guards; the `task` generation is not registered, so an existing parent's `task` call behaves as the delivered foreground does when helpers are disabled on resume |
 
-**Child activations.** Children, and the prepared owners recovery uses, are
-created by the helper owner through Core and not through the daemon's
-admission relay. They do not spend ADR 0032's 64 activations; see the open
-item in the Concept file.
+**Child activations.** A helper child, and the prepared owner stop-only
+recovery uses to abort one, each start a coordinator in the service's
+runtime, so each counts toward ADR 0032's 64 activations exactly as a client
+session does. Activation stays one-way: finishing, stopping or settling a
+child returns nothing, as ADR 0032 states for every session. The helper owner
+creates children through Core, not through the daemon's admission relay, so it
+obtains its count from the daemon's session registry through a host-supplied
+permit.
+
+*Permit seam.* `Delegation.open/4` and `host/4` take one new option,
+`activation_permit`, a `{module, extra_args}` pair or `nil`. The helper owner
+calls `module.reserve(extra_args ++ [child_create_command_id])`,
+`module.resolve(extra_args ++ [reference, disposition, session_id])` and
+`module.account(extra_args ++ [session_id])`. Composition knows only that
+contract; Core is not involved and no composition module names a daemon
+module. The foreground passes `nil`: no permit is asked for, nothing is
+counted and `helper_activation_limit` never occurs, so the foreground's
+behaviour and bytes are unchanged. The service passes `nil` at open, because
+its registry starts after composition, and binds the pair at startup step 6
+with `Helper.bind_activation_permit/2` (new). `LoopexDaemon.HelperActivation`
+(new) implements the three functions over the delivered
+`ConnectionRegistry.reserve_activation/3` and `resolve_activation/4`, with a
+helper origin distinct from every connection origin and the binding keyed by
+the child's deterministic create command identity, which ADR 0046 already
+derives from the operation. It adds `ConnectionRegistry.account_activation/2`
+(new) for the recovery accounting below.
+
+*Order.* A permit is taken for a new operation only after every other check in
+ADR 0046's order has passed and immediately before the reserve append; the
+amended order ends `delegation_tokens_exhausted`, `ledger_capacity`,
+`helper_activation_limit`. It goes last for two reasons. Every earlier check
+reads only the owner's own state and has no effect, while a permit takes a
+resource from another process, so a call another check refuses must never hold
+one. It precedes the reserve append because ADR 0046 tags a refusal only
+before that append, and a refusal there consumes no child count, no token
+allowance and no ledger record. `cancelled_before_reservation` still applies
+whenever its cancel wins before the append; the permit taken for that call is
+then released.
+
+*Permit lifecycle.*
+
+| Moment | Registry effect |
+| --- | --- |
+| `reserve` answers `activation_ceiling_reached` | The call returns `{:error, {:refused_before_effect, :helper_activation_limit}}`; no ledger frame, slot or allowance is touched |
+| The reserve append, a cancel or any step before child creation fails | `resolve(reference, :no_activation, nil)`: the reservation is released, as for a client create that activated nothing |
+| Child creation answers through `create_session_with_genesis_detailed/4` | `resolve` with Core's disposition and the child's session, mapped exactly as `account_create_promotion/3` maps a client create: `:activated` counts the session, `:activated` without a session counts one anonymous activation, `:no_activation` releases |
+| Child creation is `commit_unknown` | Counted as an anonymous activation, as for a client create, because Core may have started a coordinator |
+| The child completes, fails, is stopped or is settled | Nothing; the activation stays counted until the service exits |
+
+*Recovery.* Stop-only recovery is never refused for capacity: an unfinished
+child must be stopped whatever the count. A prepared owner started to abort a
+child is counted after the fact with `account(session_id)`, which adds the
+session to the registry's activated set if it is not there already and may
+take the count past 64; while it is, every new client activation refuses
+`activation_ceiling_reached` and every new helper call `helper_activation_limit`.
+Recovery during the first bind runs before the registry exists; the owner
+records those sessions and `bind_activation_permit/2` returns them, and the
+service accounts each before the listener opens. Recovery in later slices
+accounts each as it happens. A restarted service starts at zero, as ADR 0032
+states, plus whatever its own recovery accounts.
+
+*What the operator sees.* The parent's model receives the tagged refusal as
+the `task` tool's result, as for every ADR 0046 refusal; the parent run
+continues and may answer without a helper. The attached conversation shows
+that result in the transcript like any refused tool call, and the
+foreground-identical projection adds nothing. `daemon.status`'s
+`activations_used` includes children. The remedy is the one ADR 0032 gives:
+restart the service.
 
 #### Unchanged limits
 
 ADR 0032's residency ceilings apply, including 64 activations per daemon
-lifetime; `session.create` and a resume each spend one, and
+lifetime; `session.create`, a resume and a helper child each spend one, and
 `activation_ceiling_reached` is shown as the service returns it. The
 foreground conversation's refusal of a held root stays the delivered
 `placement_active`; when that root's socket answers `daemon.readiness`,
@@ -369,6 +436,8 @@ standard error adds `attach with: loopex chat --service`.
 | Helper creation context on each connection | `LoopexDaemon.Owner`, `LoopexDaemon.ConnectionRegistry` |
 | Creation checks and helper-parent routing | `LoopexDaemon.SocketConnection` (`create_task/4`) |
 | Detailed parent creation | `LoopexComposition.Delegation` (`create_parent_detailed/7`, new), `LoopexComposition.Delegation.Helper`; `Loopex.Runtime.create_session_with_genesis_detailed/4` (new, `@doc false`) |
+| Permit seam, refusal order and child creation through the detailed call | `LoopexComposition.Delegation` (`activation_permit` option), `LoopexComposition.Delegation.Helper` (`@order`, `bind_activation_permit/2`, new) |
+| Permit implementation and accounting | `LoopexDaemon.HelperActivation` (new); `LoopexDaemon.ConnectionRegistry` (`account_activation/2`, new); `LoopexDaemon.Service` (step 6) |
 | Route guard | Unchanged: `LoopexComposition.Delegation.guard/3`, `LoopexDaemon.SocketConnection.route_guard/3` |
 
 #### Accepted text this record touches
@@ -378,22 +447,32 @@ standard error adds `attach with: loopex chat --service`.
   its file reader under the existing schema, precedence and single alias,
   including the `delegation` and `roles` members.
 - **ADR 0032, narrowly amended.** "At most 64 sessions are activated per
-  daemon lifetime" counts activations the daemon makes for its clients:
-  `session.create`, including a helper parent's creation, and `session.resume`.
-  Helper children and the prepared owners helper recovery uses are activated
-  by the helper owner and are not counted. This stands only if the maintainer
-  takes the Concept file's recommendation.
+  daemon lifetime" counts every coordinator the service's runtime starts:
+  `session.create` (a helper parent included), `session.resume`, each helper
+  child and each prepared owner stop-only recovery starts. A child is counted
+  through the session registry's reservation and resolution exactly as a
+  client create is. Recovery activations are counted but never refused, so
+  the count may exceed 64 after a restart that recovers children; the ceiling
+  then refuses every further activation. Activation stays one-way.
 - **ADR 0055, narrowly amended.** On a service with delegation enabled,
   `session.create` refuses `configuration.instructions` and `tools` with
   `helper_parent_option_unsupported`, and the remaining configuration members
   are resolved by the host into the parent's complete genesis instead of by
   runtime Control's creation preparation. A service without delegation keeps
   ADR 0055's behaviour unchanged.
-- **ADRs 0046, 0056 and 0069, applied.** The daemon is one of the resident
-  host routes ADR 0046 already names for classification, recovery and
-  slicing; its ledger bytes, refusal order, stop-only recovery and route guard
-  are used as accepted. Closing creation while classification is incomplete
-  on the daemon route implements ADR 0046's existing rule.
+- **ADR 0046, narrowly amended.** Its closed list of tagged pre-effect
+  reasons gains `helper_activation_limit`, and its fixed order gains it last,
+  after `ledger_capacity`, for the reasons under *Order* above. It is returned
+  only by a host that supplies an activation permit, so a host without one,
+  the foreground included, sees the order exactly as accepted. The executor
+  contract is unchanged: Core already reads any tagged pre-effect refusal.
+  Everything else in ADR 0046 is applied as accepted; the daemon is one of the
+  resident host routes it already names, and closing creation while
+  classification is incomplete on the daemon route implements its existing
+  rule.
+- **ADRs 0056 and 0069, applied.** Ledger bytes, stop-only recovery and the
+  route guard are used as accepted; a refusal before the reserve append writes
+  no frame, as ADR 0056 already requires.
 - **ADRs 0033, 0044, 0045, 0070, reused.** Lease and takeover, the `/4`
   generation, question expiry and the single-credential plane for a daemon
   without a file are used as accepted.
@@ -419,7 +498,9 @@ another application is named.
 | `apps/loopex_daemon/test/command_test.exs` (extended) | Unit | `--config` and `--admit-project-resources` parsing; statuses 65 to 115 each used once except 114, which no class maps to and `fetch/1` refuses |
 | `live_daemon_test.exs` (extended) | Real daemon | The activation-ceiling refusal shown to the operator; the foreground conversation's refusal of a service-held root with its hint |
 | `daemon_helpers_test.exs` | Real daemon with two saved roles, using the provider isolation fixture the daemon tests use | Startup captures both roles; an attached conversation's prompt makes the parent call `task`; the child completes and the result carries `child`, `delegation`, `parent` and `combined_tokens`, with combined equal to parent plus child; the workspace tree digest is unchanged by the child; a second `task` in the same parent while one runs refuses `helper_slot_occupied`; two parents each run one helper concurrently; the parent's committed original options equal the client's `session_options`; `configuration.instructions` and `tools` each refuse `helper_parent_option_unsupported`; a repeated create identity returns the same parent and spends no second activation; a role whose instruction file is unreadable exits 111 naming `/roles/NAME` with no lock, log entry or socket; a service-created parent resumes under the foreground conversation and a foreground-created parent under the service |
-| `daemon_helper_restart_test.exs` | Process fault, real daemon | `SIGTERM` and `SIGKILL` to the service after the child is prompted and while its provider reply is held; the restart reports `classifying` then `serving`; the child is aborted and its provider receives no second prompt; the parent's `task` result is the stop-only outcome; the slot is released on conclusive evidence and stays occupied otherwise; a torn final ledger frame recovers under ADR 0056; `session.create` and every mutation during classification refuse `helper_classification_incomplete`; a restart with delegation disabled classifies and guards the same history |
+| `daemon_helper_restart_test.exs` | Process fault, real daemon | `SIGTERM` and `SIGKILL` to the service after the child is prompted and while its provider reply is held; the restart reports `classifying` then `serving`; the child is aborted and its provider receives no second prompt; the parent's `task` result is the stop-only outcome; the slot is released on conclusive evidence and stays occupied otherwise; a torn final ledger frame recovers under ADR 0056; `session.create` and every mutation during classification refuse `helper_classification_incomplete`; a restart with delegation disabled classifies and guards the same history; each prepared owner recovery starts is counted in `activations_used`, and a recovery that takes the count past 64 still stops every child |
+| `daemon_helper_activation_test.exs` | Real daemon at the delivered limit of 64, using the provider isolation fixture; no test-only limit | One parent whose children spend activations until the 64th: the next `task` call returns `helper_activation_limit` as its tool result, writes no ledger frame, charges no child count or tokens, and the parent's run completes; mixed: client sessions and children together reach 64, after which `session.create` refuses `activation_ceiling_reached` and a `task` call `helper_activation_limit`; release: a reservation whose call is refused by a later failure, cancelled before the reserve append, or whose child creation activates nothing is returned and the next call succeeds; one-way: a child that completes, fails or is stopped through its parent keeps its activation counted; `daemon.status` reports children in `activations_used`; the attached conversation shows the refusal in the transcript |
+| `apps/loopex_composition/test/delegation_activation_permit_test.exs` | Unit, fake permit module | The refusal is decided after `ledger_capacity` and before the reserve append; every earlier refusal is returned without calling `reserve`; `nil` permit never refuses and leaves the order as accepted; `resolve` is called exactly once per reserved permit on every path, including `commit_unknown` and cancel; recovery calls `account` and never `reserve`; sessions recovered before `bind_activation_permit/2` are returned by it |
 | `apps/loopex_daemon/test/helper_route_guard_test.exs` (extended) | Socket | Every mutating `/4` method on a helper child refuses `helper_session_owned` and the child's records are unchanged; attach, inspect and history on the child are admitted; resuming a dormant child refuses; killing the owner makes every mutation refuse `helper_owner_unavailable` and the service exit `runtime_lost` |
 | `apps/loopex/test/runtime_create_with_genesis_detailed_test.exs` | Unit | `create_session_with_genesis_detailed/4` reports `:activated` for a fresh create, no activation for a replay and the same refusals `create_session_with_genesis/4` projects |
 | `apps/loopex_cli/test/chat_configuration_test.exs` (extended) | Unit | `helper_parent/2` and its three parts in sequence produce byte-identical role geneses, catalog digest and parent genesis |
@@ -460,8 +541,19 @@ conversation and by a later service.
 - *Let core's creation preparation build the helper parent.* Core would have
   to learn the catalog and the `task` binding, which ADR 0046 keeps in
   composition.
-- *Count helper children against the activation ceiling.* Left open for the
-  maintainer; the Concept file states the trade.
+- *Leave helper children uncounted.* An earlier draft did this. It let a
+  service left running accumulate child coordinators beyond the ceiling ADR
+  0032 sets; the maintainer decided on 2026-10-13 that children count.
+- *A separate ceiling for children.* It would add a second limit to explain
+  and tune while bounding the same resource.
+- *Refuse recovery when the limit is reached.* An unfinished child would then
+  stay unstopped, which ADR 0046's stop-only rule forbids.
+- *Insert the new refusal earlier in the order.* A permit taken before a later
+  check refuses would have to be returned on that path, and a refusal would
+  then depend on another process's state ahead of the owner's own checks.
+- *Count children through the admission relay.* The relay serves client
+  requests and connection origins; children are created by the helper owner
+  inside a parent's tool job, which has no connection.
 
 - *A daemon the conversation starts and owns privately.* It makes the terminal
   the owner of session lifetime again and excludes a second terminal.
