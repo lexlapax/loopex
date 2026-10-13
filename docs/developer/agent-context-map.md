@@ -7578,3 +7578,14 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   under the restart override; its records carry the label `Maintainer`,
   which is not a claim of human attendance. This closure authorizes no tag,
   release or publication.
+
+<a id="disposition-m7-evidence-move-2026-10-13"></a>
+### M7 review evidence moved after closure, 2026-10-13
+
+- **Decision.** The maintainer moved the M7 review evidence from
+  `~/m7-validate/` to `~/projects/lexlapax/loopex-evidence/M7/reviews/` and
+  overrode the closure rule that keeps the closed
+  [evidence page](../evidence/M7-closure-runs.md) unchanged, so its five
+  references name the new location. Contents and SHA-256 digests are
+  unchanged. Tag `v0.4.0` still names the closure commit `9fe9618b`, whose
+  page carries the old path.
