@@ -57,7 +57,7 @@ The concrete proposals are [ADR 0019](../adr/0019-host-owned-provider-protection
 [ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept), and
 [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept).
 All three were accepted at proposal `b7f97092f7b6d6661e66bc775fd88195b92b67a0`
-by the [standalone disposition](../developer/agent-context-map.md#disposition-adrs-0019-0021-2026-09-07),
+by the [standalone disposition](../process/agent-context-map.md#disposition-adrs-0019-0021-2026-09-07),
 recorded in transition `63511ca264ef99e8b93367a9cd671165525e4d4f`.
 ADR 0021 makes one operator cost explicit: an old unreadable-plus-reported settlement
 has no recoverable usage provenance, so the new reader refuses that session
@@ -1755,7 +1755,7 @@ of the revisions and times where they were made. The maintainer explicitly
 accepted ADR 0022 at Proposed candidate
 `4c75ae3f81f3caefe7745c40a5b24e9133255e57`. The acceptance commit is
 `12a5daaf327874c36fb1adbd88db0fc925a44585`; the
-[standalone disposition](../developer/agent-context-map.md#disposition-adr-0022-acceptance-2026-09-08)
+[standalone disposition](../process/agent-context-map.md#disposition-adr-0022-acceptance-2026-09-08)
 records that authority and its exact limits. Independent read-only transition
 review verified the five changed paths, both Proposed-file digests, the
 Technical companion's byte identity, the minimal Concept changes, and the new

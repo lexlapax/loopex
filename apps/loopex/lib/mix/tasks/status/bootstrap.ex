@@ -37,7 +37,7 @@ defmodule Loopex.Checks.Bootstrap do
   ]
 
   @contract_pointer "AGENTS.md"
-  @context_pointer "docs/developer/agent-context-map.md"
+  @context_pointer "docs/process/agent-context-map.md"
 
   @heredoc_free [
     "scripts/check-bootstrap.sh",
@@ -61,7 +61,7 @@ defmodule Loopex.Checks.Bootstrap do
                      ])
 
   @role_prologue "Authority loads first: `AGENTS.md`, then " <>
-                   "`docs/developer/agent-context-map.md` for routing and version-specific technical guidance. " <>
+                   "`docs/process/agent-context-map.md` for routing and version-specific technical guidance. " <>
                    "This profile only frames the assigned role."
 
   @expected_claude_agents [".claude/agents/conformance-author.md", ".claude/agents/reviewer.md"]

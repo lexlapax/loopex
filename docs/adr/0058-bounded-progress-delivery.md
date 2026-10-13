@@ -145,4 +145,4 @@ It waives no required check, live-progress outcome, milestone review or closure.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07) | candidate `3c97b6a1ca0cd73350cfe0f1b55c05fff316e655`; concept `sha256:292a45cec72a9011e1bb6eb48eebccdd24a325c11f43b083089f8008db781762`; technical `sha256:57fd78afae837af50c2cc51123083413a519b06f75cb656b101b6f36c6c39f12` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07) | candidate `3c97b6a1ca0cd73350cfe0f1b55c05fff316e655`; concept `sha256:292a45cec72a9011e1bb6eb48eebccdd24a325c11f43b083089f8008db781762`; technical `sha256:57fd78afae837af50c2cc51123083413a519b06f75cb656b101b6f36c6c39f12` |

@@ -7,7 +7,7 @@ Technical depth: [Compaction activity payload and ownership](0054-compaction-act
 - **Date:** 2026-10-06
 - **Decision owner:** Maintainer
 - **Proposed amendments:** [ADR 0043](0043-context-compaction-checkpoint.md#concept), only the exact transient compaction-progress projection; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept), only the additional compaction domain and its activity-only, unclosed observation rule.
-- **Constrained by:** [ADR 0014](0014-stream-closure-at-owner-loss.md#concept), current-owner admission and loss semantics; [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), coordinated current wire generations; the [pre-1.0 current-contract rule](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+- **Constrained by:** [ADR 0014](0014-stream-closure-at-owner-loss.md#concept), current-owner admission and loss semantics; [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), coordinated current wire generations; the [pre-1.0 current-contract rule](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
 
 <a id="concept-adr-0054-context"></a>
 ### Purpose and current gap
@@ -116,4 +116,4 @@ it is not generation activation, milestone closure or publication.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-compaction-activity-2026-10-06) | candidate `3c33a2ca875f94c0b41ea7ca92900d4c9084e90a`; concept `sha256:c7628948485d90b660b7e19609862267a2a1c675e51dd828739ed227e226fe74`; technical `sha256:a75fa09ba62fa465373f5761ba3b4a74652b3674834b837bbc48106b709d5e8e` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-compaction-activity-2026-10-06) | candidate `3c33a2ca875f94c0b41ea7ca92900d4c9084e90a`; concept `sha256:c7628948485d90b660b7e19609862267a2a1c675e51dd828739ed227e226fe74`; technical `sha256:a75fa09ba62fa465373f5761ba3b4a74652b3674834b837bbc48106b709d5e8e` |

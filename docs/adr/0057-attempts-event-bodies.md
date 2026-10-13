@@ -7,7 +7,7 @@ Technical depth: [Attempts event bodies](0057-attempts-event-bodies-technical.md
 - **Date:** 2026-10-06
 - **Decision owner:** Maintainer
 - **Completes:** The literal event-body grammar required by [M7's attempts procedure](../plans/M7-technical.md#technical-plan-evidence).
-- **Constrained by:** The accepted M7 case, ownership, handoff, causal-correction and committed-head rules, and the [current-contract disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+- **Constrained by:** The accepted M7 case, ownership, handoff, causal-correction and committed-head rules, and the [current-contract disposition](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
 
 <a id="concept-adr-0057-purpose"></a>
 ### Purpose and boundary
@@ -96,4 +96,4 @@ writer, recovery and dispatch proofs.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-attempts-event-bodies-2026-10-07) | candidate `4007adf7e9450b2cdcfc5edcbcf2c6b9fa454366`; concept `sha256:9e009d2cd2b634818a22dae46424867faa38b55ec7ac7f1a5606d15ba6b603e8`; technical `sha256:045e3b1003c0d5829e4d0df095f3a61178fd92b01353ba9db2f9fe224adb9359` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-attempts-event-bodies-2026-10-07) | candidate `4007adf7e9450b2cdcfc5edcbcf2c6b9fa454366`; concept `sha256:9e009d2cd2b634818a22dae46424867faa38b55ec7ac7f1a5606d15ba6b603e8`; technical `sha256:045e3b1003c0d5829e4d0df095f3a61178fd92b01353ba9db2f9fe224adb9359` |

@@ -512,4 +512,4 @@ Technical depth: [Compatibility mechanics](0032-daemon-attachment-residency-and-
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m5-acceptance-2026-09-21) | candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`; concept `sha256:7d0fb8b8b095f0e843b19b3160aefb9ed1600262fc7bc0b4cac95076598b47c3`; technical `sha256:51a2bb5d938c4f409fb6d0480d0cad503ddb60ed2b38e210c9f2bae5757a4a02` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m5-acceptance-2026-09-21) | candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`; concept `sha256:7d0fb8b8b095f0e843b19b3160aefb9ed1600262fc7bc0b4cac95076598b47c3`; technical `sha256:51a2bb5d938c4f409fb6d0480d0cad503ddb60ed2b38e210c9f2bae5757a4a02` |

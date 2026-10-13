@@ -13,7 +13,7 @@ thinking witness proves provider acceptance after a cut tool run and native
 thinking on the exchange after it. The reviewed outage verdict covers
 provider-side failures only. Durable host startup classifies helper history
 under a fixed, resumable 60-second bound. The
-[context map](../developer/agent-context-map.md#disposition-m7-round6-decisions-2026-09-30)
+[context map](../process/agent-context-map.md#disposition-m7-round6-decisions-2026-09-30)
 records all three.
 
 Three repairs make a reversible choice the maintainer may change before
@@ -72,11 +72,11 @@ remain phase-0 implementation obligations; naming one does not prove it.
 | 26 | Proposal repaired | [M7](../plans/M7-technical.md#technical-plan-evidence): any consumed non-pass result stops the logical matrix, which is then not resumable. Smallest safe reading; reversible by the maintainer. |
 | 27 | Proposal repaired | [M7](../plans/M7-technical.md#technical-plan-evidence): a ceiling breach adds its assertion ID; the mechanical result follows the precedence list and the reviewer assigns the cause. |
 | 28 | Maintainer choice recorded | [M7](../plans/M7-technical.md#technical-plan-evidence): provider-side transport failure, 5xx/529 and timeout after `started` are outages; 429, quota and host-local network loss are operator prerequisites under the evidence-loss rule. |
-| 29 | Proposal disclosed | [M7 Concept](../plans/M7.md#concept-plan-decisions) and the [context map](../developer/agent-context-map.md#disposition-m7-round6-matrix-proposal-2026-09-30) name the logical-matrix rule as a proposed change to what the release check proves. |
+| 29 | Proposal disclosed | [M7 Concept](../plans/M7.md#concept-plan-decisions) and the [context map](../process/agent-context-map.md#disposition-m7-round6-matrix-proposal-2026-09-30) name the logical-matrix rule as a proposed change to what the release check proves. |
 | 30 | Proposal repaired | [M7](../plans/M7-technical.md#technical-plan-evidence): committed heads, not the genesis pin, are the anchor; each gated change records the head; a lost index needs a maintainer-authorized successor campaign; a marker is superseded by a verified later acceptance. |
 | 31 | Obligation explicit | [M7](../plans/M7-technical.md#technical-plan-evidence): mechanical-result precedence and criterion, matrix ID in the case event, one digest cell for invocation logs, separate committed and Pending heads. |
 | 32 | Obligation explicit | [M7](../plans/M7-technical.md#technical-plan-evidence): trace cases are `m7-operator`; the task's commit adds manifest and scaffold skeleton; the daemon observer is a second connection; legacy attended rows keep first position. |
-| 33 | Record disclosed | [Context map](../developer/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30) cites the round 6 brief's restatement of the authorized section 13.4 scope, including the retained descriptor. |
+| 33 | Record disclosed | [Context map](../process/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30) cites the round 6 brief's restatement of the authorized section 13.4 scope, including the retained descriptor. |
 | 34 | Proposal repaired | [0041](../adr/0041-session-lineage-projection-and-context-budget.md#concept) header, Technical and the plan row name the ADR 0009 order amendment. |
 | 35 | Proposal repaired | [Concept files](../adr/0044-run-model-and-reasoning-configuration.md#concept): sentences added in 0043 (cutoff, `maintenance_active`, one checkpoint per compact), 0044 (mandatory nine-key replies, unregistered default, alias) and 0046 (startup classification on every durable host). |
 | 36 | Proposal repaired | Both [vision](../vision.md#concept) headers list the section 25 risk note. |

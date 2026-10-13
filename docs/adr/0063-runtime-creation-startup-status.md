@@ -97,4 +97,4 @@ generation.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-creation-startup-status-2026-10-08) | candidate `16c251ad572f9907fdc7ea3cf14be71622778c28`; concept `sha256:a28aa264c9e05186c2f877c6998b07b9d82e1593fb99b34658d7b869ef584064`; technical `sha256:751549dcd11b20a7c175a8f3f6380c100eb424c708ff4e4a389c3c8be0131d2b` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-creation-startup-status-2026-10-08) | candidate `16c251ad572f9907fdc7ea3cf14be71622778c28`; concept `sha256:a28aa264c9e05186c2f877c6998b07b9d82e1593fb99b34658d7b869ef584064`; technical `sha256:751549dcd11b20a7c175a8f3f6380c100eb424c708ff4e4a389c3c8be0131d2b` |

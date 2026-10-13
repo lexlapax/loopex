@@ -80,7 +80,7 @@ refuses. No clock, ambient env values or credential references are included.
 Explicit instruction reconfiguration refreshes mutable host facts while keeping
 the immutable tool/catalog facts equal to the session binding.
 
-The [pre-1.0 disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+The [pre-1.0 disposition](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 removes the Core fallback and superseded readers. Fixtures capture explicit
 host sections; the reference-default proof pins the host's literal text.
 

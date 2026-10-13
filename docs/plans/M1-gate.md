@@ -1187,7 +1187,7 @@ product, selector, gate, envelope, or other byte may change in `R`.
 generation rows remain unchanged. The new row carries this gate's digest and
 leaves authority, evidence and candidate unset until exact-proposal acceptance.
 
-The [approved M3 repair](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) applies exact patch
+The [approved M3 repair](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) applies exact patch
 `sha256:d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8` to the shared standalone runner and its corpus.
 Failure output now identifies the invocation mode and seed, bounded failed-case
 names and attributable source locations, and finite failure categories and
@@ -1201,7 +1201,7 @@ paths and exit predicates retain their meaning.
 The three rebound artifacts below contain only that shared repair and the two
 embedded digest replacements in this holder's gate script. This adds no M1
 outcome or scope and reopens no lifecycle state. The
-[approved checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) must be reviewed before this proposal.
+[approved checker correction](../process/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) must be reviewed before this proposal.
 Complete M1's proposal and immediate one-parent rebind before M2, then M3.
 Pending other holders remain explicit; their old rows are not global PASS.
 
@@ -1234,7 +1234,7 @@ Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose
 the validation pairs explicitly: floor Elixir 1.18.5 with OTP 27.3.4 and
 current Elixir 1.20.3 with OTP 29.0.5. M0 settled the shared `.tool-versions`
 bytes first through its
-[generation 7](../developer/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13);
+[generation 7](../process/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13);
 M1 is the second holder in register order, M2 and M3 follow, and Open M4 then
 refreshes its own table directly. This proposal changes only floor literals in
 M1's own bound machinery: the evidence verifier's exact locked-pair
@@ -1287,7 +1287,7 @@ bound verifier judged the closure captures against the working tree's
 commit the Closure row names, so no capture taken after closure could ever
 validate. The ordinary gate was therefore red on the refreshed floor with no
 route to green, which the
-[M4 waiver](../developer/agent-context-map.md#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14)
+[M4 waiver](../process/agent-context-map.md#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14)
 records and defers to M4 implementation. The maintainer chose on 2026-09-14,
 among a second evidence block, replacing the closure captures, and running
 lanes live, to add a second evidence block.
@@ -1586,7 +1586,7 @@ leaves authority, evidence and candidate unset until exact-proposal acceptance.
 
 The maintainer directed on 2026-09-15 that every gate be observable while it
 runs, and
-[the chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+[the chain disposition](../process/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
 orders this generation second. A capture run of this gate took between 92 and
 139 minutes and printed nothing until it exited: the outer launch reads the
 whole sealed stream, proves it free of credential bytes and NUL bytes, and only

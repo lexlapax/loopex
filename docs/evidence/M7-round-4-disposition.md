@@ -9,7 +9,7 @@ conclusion, without rewriting that historical evidence.
 
 The maintainer selected A for lost post-dispatch evidence: retain the attempt,
 require a reviewed causal fix and a new candidate. A new SHA alone permits no
-retry. The [scope disposition](../developer/agent-context-map.md#disposition-m7-round4-evidence-loss-2026-09-30)
+retry. The [scope disposition](../process/agent-context-map.md#disposition-m7-round4-evidence-loss-2026-09-30)
 records the choice. The optional additional live capsule calibration remains
 unselected. No provider call was made for this repair.
 

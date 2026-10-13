@@ -911,7 +911,7 @@ leaves authority, evidence and candidate unset until exact-proposal acceptance.
 
 The maintainer directed on 2026-09-15 that every gate, bootstrap aggregate and
 inherited-gate invocation be observable while it runs, and
-[the chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+[the chain disposition](../process/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
 orders this generation first among the closed-gate runners. A run of this gate
 took about an hour on the floor pair and printed nothing between its checks.
 

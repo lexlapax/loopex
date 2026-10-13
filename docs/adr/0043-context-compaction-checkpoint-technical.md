@@ -656,7 +656,7 @@ terminal or acknowledgement. Detailed provider blocks and descriptors remain
 absent from all failure projections.
 
 **Active maintenance public view.** The maintainer accepted the durable-view
-option in the [maintenance-view disposition](../developer/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03). The closed event kind is `context.maintenance_changed`,
+option in the [maintenance-view disposition](../process/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03). The closed event kind is `context.maintenance_changed`,
 with exactly one payload member:
 
 
@@ -750,7 +750,7 @@ The closed schema and literal vectors are
 `apps/loopex_protocol/priv/vectors/checkpoint-owner.v1.json`; the shared Elixir
 codec and independent Node decoder reject unknown members/kinds and
 noncanonical or oversized identities. The approved
-[owner disposition](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
+[owner disposition](../process/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
 records the amendment authority.
 
 Ranges extend contiguously without gaps/cycles and never split tool/result groups.

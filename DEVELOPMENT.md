@@ -4,9 +4,9 @@ This document describes how to validate and work on the repository, and it
 owns the commands, not the milestone state. The canonical status for the
 checked-out revision, including currently authorized work and the next
 maintainer decision, is in [docs/plans/README.md](docs/plans/README.md). The
-[development charter](docs/developer/development-charter.md#concept) explains
+[development charter](docs/process/development-charter.md#concept) explains
 the project's clarity and traceability commitments; its
-[technical companion](docs/developer/development-charter-technical.md#technical-depth)
+[technical companion](docs/process/development-charter-technical.md#technical-depth)
 defines the exact documentation, review, and code-comment conventions.
 
 ## Prerequisites
@@ -69,7 +69,7 @@ register), `mix loopex.docs_check`, `mix loopex.m7_evidence` (the M7 evidence
 validator: well-formed, non-conflicting committed `index-head:` lines in the M7
 plan, the intact pinned coding-fixture catalog, external task and execution
 manifest, the legacy and M7 release case families, and the
-[M7 validation runbook](docs/operator/m7-validation.md)'s matching step
+[M7 validation runbook](docs/evidence/M7-validation-runbook.md)'s matching step
 ownership), the release-runner, escript-inventory,
 archive-manifest, archive source-binding, attended-release, floor-lane, and M6
 demonstration fixtures,
@@ -142,7 +142,7 @@ manifest has no pending case or step owner. The M7 conversation lanes carry
 exactly provider A's `LOOPEX_PROVIDER_API_KEY` and provider B's
 `OPENAI_API_KEY`; set `LOOPEX_M7_EXTERNAL_REPOSITORY` to the external task's
 checkout. The cases themselves run through `scripts/m7-fixture-chat.exs`,
-described in the [M7 validation runbook](docs/operator/m7-validation.md).
+described in the [M7 validation runbook](docs/evidence/M7-validation-runbook.md).
 It refuses without the credential, without the pinned Node, or on a dirty tree, and raises its own open-file soft limit toward the hard limit, refusing below 4,096, because the maximum-population case holds both ends of 512 daemon connections in one VM.
 It first stages the candidate as a fresh source archive and builds it there
 (described below), then runs every test lane inside that extraction rather than
@@ -200,7 +200,7 @@ for the operator's decisions (`Type yes and press Enter.`), so run the command
 from a terminal. Before its first case the `m7-operator` block prints its
 summed finite block ceiling, and before each conversation the operator types
 it prints the case's objective and the exact lines to type; the
-[M7 validation runbook](docs/operator/m7-validation.md#attended-block) has the
+[M7 validation runbook](docs/evidence/M7-validation-runbook.md#attended-block) has the
 details.
 
 An unchanged-source release reuses this closure evidence. It runs only the
@@ -317,16 +317,16 @@ mode, or design decision.
 Development clients are optional tools, not project dependencies. The currently
 tested adapters are Claude Code and Codex; their retained versions and loading
 evidence live in
-[docs/developer/agent-adapter-smoke.md](docs/developer/agent-adapter-smoke.md).
+[docs/evidence/agent-adapter-smoke.md](docs/evidence/agent-adapter-smoke.md).
 Canonical behavior lives in [AGENTS.md](AGENTS.md) and routes through
-[the agent context map](docs/developer/agent-context-map.md).
+[the agent context map](docs/process/agent-context-map.md).
 
 ## Before Working
 
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
-[agent context map](docs/developer/agent-context-map.md) only to load relevant
+[agent context map](docs/process/agent-context-map.md) only to load relevant
 Concept sections and their exact Technical depth. Work lands on `main` in small
 reviewed changes, as the
-[milestone guide](docs/developer/milestones.md#concept-milestones-develop)
+[milestone guide](docs/process/milestones.md#concept-milestones-develop)
 describes.

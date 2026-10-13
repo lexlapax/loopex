@@ -7,7 +7,7 @@ Technical depth: [Policy event schemas and proof](0052-policy-interaction-public
 - **Date:** 2026-10-05
 - **Decision owner:** Maintainer
 - **Proposed amendments:** [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept), only the policy interaction public event payload and answer provenance; [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), only these payload definitions in its coordinated current wire generations; [ADR 0049](0049-explicit-host-configuration.md#concept), only its retained-public-event encoding promise for these policy terminal events.
-- **Constrained by:** [ADR 0045](0045-model-originated-questions.md#concept), the [accepted answer-admission disposition](../developer/agent-context-map.md#disposition-m7-policy-answer-received-event-2026-10-05), and the [pre-1.0 current-contract rule](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+- **Constrained by:** [ADR 0045](0045-model-originated-questions.md#concept), the [accepted answer-admission disposition](../process/agent-context-map.md#disposition-m7-policy-answer-received-event-2026-10-05), and the [pre-1.0 current-contract rule](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
 
 <a id="concept-adr-0052-context"></a>
 ### Purpose
@@ -105,4 +105,4 @@ proof, milestone closure, publication or a relaxed required check.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-policy-public-events-2026-10-06) | candidate `ec9e8fbe6c2ed3fb427a93a5d3361e356de01795`; concept `sha256:50350c393f74002a4123031ac7f36e393371336c89ff4ae132efb552acebb8e8`; technical `sha256:2c59a51bef945000f4083360de3ceee7590d30a44597a3541cc22bcf168ad82c` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-policy-public-events-2026-10-06) | candidate `ec9e8fbe6c2ed3fb427a93a5d3361e356de01795`; concept `sha256:50350c393f74002a4123031ac7f36e393371336c89ff4ae132efb552acebb8e8`; technical `sha256:2c59a51bef945000f4083360de3ceee7590d30a44597a3541cc22bcf168ad82c` |

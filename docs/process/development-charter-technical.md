@@ -125,7 +125,7 @@ and identify exactly one explicit anchor. Reciprocal links must return to the
 originating concept anchor. Link text describes the target rather than using an
 ambiguous phrase such as “details here.”
 
-Active repository documentation uses the simple `[label](relative-path#anchor)`
+Active repository documentation uses the simple `[label](../developer/relative-path#anchor)`
 form for local links. Link-title syntax and angle-bracket destinations are not
 part of the retained grammar; the structural check rejects them rather than
 silently skipping a path it cannot prove. Reference-style links, local query

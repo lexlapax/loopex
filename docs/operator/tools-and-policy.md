@@ -134,7 +134,7 @@ runs without shell interpretation. Core and other executors are unaffected.
 Provide `/bin/bash` before using the reference stack. The executor does not
 fall back to another shell when it is absent, and a failed launch is not proof
 that an effect completed or that cleanup succeeded. The
-[recorded implementation choice](../developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07)
+[recorded implementation choice](../process/agent-context-map.md#disposition-local-executor-bash-2026-09-07)
 and [accepted ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
 set this prerequisite and its qualification requirements.
 

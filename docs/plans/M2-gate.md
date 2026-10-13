@@ -168,7 +168,7 @@ print neither `capture` nor `M2 gate GREEN`.
 Before Amendment 10, `scripts/m1-exunit-runner.exs` and its adversarial corpus,
 `apps/loopex/test/m1_exunit_runner_test.exs`, retained exactly the bytes M1 closed
 with. For this M3 repair only, the
-[approved successor exception](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) replaces that continuing byte
+[approved successor exception](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) replaces that continuing byte
 restriction with the exact diagnostic bytes bound in this table and the separate
 M1/M2/M3 transactions. The authoritative success channel retains its meaning.
 M2 re-runs the corpus; its case `fake stdout at_exit and early halt cannot
@@ -1943,7 +1943,7 @@ numbered 10 to follow its nine historical amendments. The additive v2 transactio
 preserves historical Acceptance, Closure and Amendments 1–9. At A the new row
 contains only the gate digest; authority, evidence and candidate remain unset.
 
-The [approved M3 repair](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) replaces only the continuing requirement
+The [approved M3 repair](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) replaces only the continuing requirement
 to keep the old M1 runner/corpus bytes. It binds the exact shared diagnostic
 repair already settled by M1 generation 9, with patch SHA-256
 `d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`. This proposal changes the two embedded digests in
@@ -1955,7 +1955,7 @@ and exit predicates remain unchanged. No M2 outcome, product scope or lifecycle
 state changes.
 
 M1's immediate rebind must be complete before this proposal. The
-[reviewed checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) enforces the sequential holder rules;
+[reviewed checker correction](../process/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) enforces the sequential holder rules;
 M3 remains explicitly pending until its own transaction. Scoped M2 validation
 cannot report global PASS while M3 still holds old rows.
 
@@ -1989,9 +1989,9 @@ Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose
 the validation pairs explicitly: floor Elixir 1.18.5 with OTP 27.3.4 and
 current Elixir 1.20.3 with OTP 29.0.5. M0 settled the shared `.tool-versions`
 bytes through its
-[generation 7](../developer/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13)
+[generation 7](../process/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13)
 and M1 followed through its
-[generation 10](../developer/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14);
+[generation 10](../process/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14);
 M2 is the third holder in register order, M3 follows, and Open M4 then
 refreshes its own table directly. This proposal changes only floor literals in
 this holder's own runner: the Darwin floor lane's expected Elixir and OTP
@@ -2040,7 +2040,7 @@ evidence lifecycle admitted only the evidence commit whose four blobs stay
 byte-identical for ever, so no capture taken after closure could validate and
 the ordinary gate was red on the refreshed floor with no route to green, which
 the
-[M4 waiver](../developer/agent-context-map.md#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14)
+[M4 waiver](../process/agent-context-map.md#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14)
 records and defers to M4 implementation. The maintainer chose on 2026-09-14,
 among a second evidence block, replacing the closure captures, and running
 lanes live, to add a second evidence block, the same choice M1 generation 11
@@ -2090,7 +2090,7 @@ proposal records no acceptance and grants no waiver, closure or release.
 generation rows remain unchanged. The new row carries this gate's digest and
 leaves authority, evidence and candidate unset until exact-proposal acceptance.
 
-[The chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+[The chain disposition](../process/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
 orders this generation third and carries two changes to the runner.
 
 **The opening probe names its policy.** Accepted ADR 0024 makes policy

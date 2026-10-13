@@ -145,7 +145,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
   # Concept: the operator runbook shows exactly the committed ownership.
   # Technical depth: every step key and case row appears literally.
   defp runbook(root, execution) do
-    with {:ok, text} <- read(Path.join(root, "docs/operator/m7-validation.md"), :m7_runbook_stale) do
+    with {:ok, text} <-
+           read(Path.join(root, "docs/evidence/M7-validation-runbook.md"), :m7_runbook_stale) do
       lines = MapSet.new(String.split(text, "\n"))
 
       steps =

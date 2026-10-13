@@ -163,7 +163,7 @@ that change provider or credential handling, wire protocol, or daemon behavior.
 Checks are honest by rule: a required check is never skipped, filtered, softened,
 or retried into passing, and a failure that disappears on retry is a flake to
 fix. [DEVELOPMENT.md](../../DEVELOPMENT.md) owns the commands and prerequisites,
-and the [verification guide](verification.md#concept) owns which checks a
+and the [verification guide](../process/verification.md#concept) owns which checks a
 change selects and why.
 
 Technical depth: [Everyday commands](getting-started-technical.md#technical-getting-started-checks).
@@ -178,7 +178,7 @@ documentation under `docs/`. Dependencies point inward to the kernel,
 application, and a boundary's shared conformance suite is reused rather than
 copied. Public modules and functions document a `Concept` section before a
 `Technical depth` section, and project documents come in the same two depths,
-as the [development charter](development-charter.md#concept) explains.
+as the [development charter](../process/development-charter.md#concept) explains.
 
 Technical depth: [The repository map](getting-started-technical.md#technical-getting-started-layout).
 
@@ -197,7 +197,7 @@ Decisions about ownership, trust, public contracts, persistent formats,
 dependencies, or migration are architecture decisions, proposed and accepted
 before the work that depends on them. [AGENTS.md](../../AGENTS.md) is the
 canonical development contract, [the plans register](../plans/README.md) says
-what is authorized now, and the [milestone guide](milestones.md#concept) has the
+what is authorized now, and the [milestone guide](../process/milestones.md#concept) has the
 procedure.
 
 Technical depth: [Plans, decisions, and commits](getting-started-technical.md#technical-getting-started-milestones).

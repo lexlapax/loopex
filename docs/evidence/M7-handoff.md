@@ -16,7 +16,7 @@ and decisions are asked as clear options with consequences.
 Read first: [AGENTS.md](../../AGENTS.md), [plans register](../plans/README.md),
 [M7](../plans/M7.md#concept), the newest entries at the top of the
 [task ledger](M7-implementation-tasks.md), and the dispositions dated
-2026-10-09 at the end of the [context map](../developer/agent-context-map.md).
+2026-10-09 at the end of the [context map](../process/agent-context-map.md).
 
 ## Technical depth
 
@@ -86,7 +86,7 @@ unmerged work. `main` (`e78fa64c`) is an ancestor of the candidate.
     pinned `30a49d6`;
   - the retained attempts index created once with
     `scripts/m7-fixture-chat.exs --create` as in the
-    [M7 validation runbook](../operator/m7-validation.md), outside the
+    [M7 validation runbook](M7-validation-runbook.md), outside the
     checkout, with its writer identity and markers directory.
 - Also owed for the candidate: the independent review, and ADR 0068's Darwin
   physical output proof on both pairs, which this Linux host cannot run.

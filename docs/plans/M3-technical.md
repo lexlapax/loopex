@@ -19,7 +19,7 @@ prove bootstrap, the complete deterministic suite, the distinct behavioral red,
 every applicable runner mode, the accepted-floor runner regression, exact
 bindings and independent review on the exact candidate. The independently
 reviewed
-[acceptance aggregate override](../developer/agent-context-map.md#override-disposition-m3-acceptance-aggregate-2026-09-10)
+[acceptance aggregate override](../process/agent-context-map.md#override-disposition-m3-acceptance-aggregate-2026-09-10)
 waives only the new M0–M2 aggregate at this plan-acceptance transition. Record
 that evidence as waived, not green or unavailable.
 M3 stays Open until explicit acceptance of the reviewed plan pair and gate.
@@ -49,7 +49,7 @@ M3 if M3's accepted gate binds a file it changes. Deferral moves transaction cos
 it does not prove that only three holders will exist later.
 
 **Approved CLI exception.** The maintainer's
-[reviewed override](../developer/agent-context-map.md#override-disposition-m3-cli-extension-ratification-2026-09-10)
+[reviewed override](../process/agent-context-map.md#override-disposition-m3-cli-extension-ratification-2026-09-10)
 changes the continuing assertion in `cli_test.exs`: preserve the five inherited
 commands and permit `skill` in M3. The old protected test name remains a
 historical selector identity, not a permanent command ceiling. No Closed gate,
@@ -62,7 +62,7 @@ constraints remain required. This exception accepts no M3 product implementation
 The current opening probe exercises required-only admission through real session
 staging and retained Store receipts. It proves that one missing repair; it does
 not prove skills work. Under the maintainer's
-[reviewed preparation-rule ratification](../developer/agent-context-map.md#override-disposition-m3-incremental-witness-ratification-2026-09-10),
+[reviewed preparation-rule ratification](../process/agent-context-map.md#override-disposition-m3-incremental-witness-ratification-2026-09-10),
 acceptance binds complete outcome clauses, exact contracts, witness identities,
 checkpoint routing and executable closure commands. Test bodies and feature
 fixtures are developed with implementation; they need not all exist before
@@ -130,7 +130,7 @@ names, whole-file counts or exclusions. Adding or renaming an unprotected test
 is not a gate amendment. Changing a protected obligation needs its amendment or
 an explicit maintainer override. Existing Closed locks remain fully enforced
 with the recorded CLI assertion exception and Amendment 2's
-[approved diagnostic replacement bindings](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) at required contract
+[approved diagnostic replacement bindings](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) at required contract
 moments.
 
 Do not freeze test-file bytes that M3 must extend. Bind canonical gate/harness,
@@ -212,7 +212,7 @@ accepted diagnostic contract without inventing new locked witness names.
 
 **Amendment 2: shared selector diagnostics and binding validation**
 
-The [approved exact patch](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) changes only
+The [approved exact patch](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) changes only
 `scripts/m1-exunit-runner.exs` and its existing
 `apps/loopex/test/m1_exunit_runner_test.exs` corpus. Failure output retains the
 mode/seed, bounded case/location identifiers and finite category/type summaries,
@@ -220,7 +220,7 @@ excluding arbitrary runtime values. Two synthetic cases extend the corpus;
 its original five cases, success reports/digest inputs, required counts,
 exclusions, real-provider paths and exit predicates remain unchanged.
 
-The [separately approved checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) makes current/history
+The [separately approved checker correction](../process/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) makes current/history
 validation enforce M1 generation 9, then M2 generation 10, then M3 Amendment 2.
 Each holder retains its own proposal, exact-SHA acceptance and immediate rebind;
 Closed-holder Acceptance and Closure remain historical. The checker derives
@@ -251,7 +251,7 @@ results do not replace required full evidence or excuse an observed inherited
 failure.
 
 For the documentation-only Amendment 1 proposal A and immediate rebind child R,
-the approved [Amendment 1 gate-cadence override](../developer/agent-context-map.md#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
+the approved [Amendment 1 gate-cadence override](../process/agent-context-map.md#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
 replaces the full-gate timing requirement above. Full M0–M3 commands at A/R are
 **unrun and deferred** to the completed implementation candidate, including
 Linux serenity. Retain focused status, artifact/envelope binding, documentation
@@ -263,7 +263,7 @@ are never reported PASS, and earlier results retain their original source
 identities. All final commands, tests and pass/failure criteria remain unchanged.
 
 For the three Amendment 2 holder transactions only, the
-[approved final-only cadence](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) replaces full-gate execution at A/R
+[approved final-only cadence](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) replaces full-gate execution at A/R
 with focused exact-patch identity, owning diagnostic corpus, unchanged success
 semantics, script syntax/digests and applicable status/binding checks. Each
 holder's exact-SHA review and status validation precede the next. Pending/stale
@@ -367,8 +367,8 @@ stop for a new decision rather than extend this allowance.
 
 Amendment 2 separately permits only the exact shared diagnostic patch, its
 M1/M2/M3 binding replacements and the
-[approved checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) with focused governance tests. These are test and
-repository-check changes under the [new scoped decision](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12); they do
+[approved checker correction](../process/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12) with focused governance tests. These are test and
+repository-check changes under the [new scoped decision](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12); they do
 not extend Amendment 1's product-diagnostic allowance or add an acceptance
 criterion.
 <!-- loopex:plan-technical-envelope:end -->

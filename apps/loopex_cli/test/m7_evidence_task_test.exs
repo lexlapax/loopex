@@ -34,8 +34,8 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     )
 
     File.cp!(
-      Path.join(@repository, "docs/operator/m7-validation.md"),
-      Path.join(root, "docs/operator/m7-validation.md")
+      Path.join(@repository, "docs/evidence/M7-validation-runbook.md"),
+      Path.join(root, "docs/evidence/M7-validation-runbook.md")
     )
 
     File.cp!(
@@ -129,7 +129,7 @@ defmodule LoopexCli.M7EvidenceTaskTest do
   test "the operator runbook must show exactly the committed step and case ownership",
        %{root: root} do
     concept!(root, [])
-    runbook = Path.join(root, "docs/operator/m7-validation.md")
+    runbook = Path.join(root, "docs/evidence/M7-validation-runbook.md")
     original = File.read!(runbook)
     assert {:ok, _} = Task.validate(root, [])
 
@@ -252,7 +252,7 @@ defmodule LoopexCli.M7EvidenceTaskTest do
   # row by text, so every other byte of the copy stays the committed one.
   defp pend!(root, cases) do
     manifest = Path.join(root, "test/fixtures/m7/manifest.json")
-    runbook = Path.join(root, "docs/operator/m7-validation.md")
+    runbook = Path.join(root, "docs/evidence/M7-validation-runbook.md")
 
     for id <- cases do
       text = File.read!(manifest)

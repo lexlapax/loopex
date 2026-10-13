@@ -522,11 +522,11 @@ Concept: [Contributing: toolchain and checks](getting-started.md#concept-getting
 | The fast check for a prose-only change | `bash scripts/check.sh --docs` |
 | The mode CI picks from the diff | `bash scripts/check.sh --select` |
 | The floor-pair lane for the exact committed closure candidate | `bash scripts/floor-lane.sh SHA --output-dir DIR --long-bound` |
-| The attended release check for the exact committed closure candidate | `bash scripts/attended-release.sh --output LOG --attempts-index FILE --writer ID --host ID --markers DIR --m7-config FILE --operator NAME`, with the history-safe provider credentials, pinned Node, running Ollama and `LOOPEX_RELEASE_OLLAMA_MODEL` described in [DEVELOPMENT.md](../../DEVELOPMENT.md) and the [validation runbook](../operator/m7-validation.md) |
+| The attended release check for the exact committed closure candidate | `bash scripts/attended-release.sh --output LOG --attempts-index FILE --writer ID --host ID --markers DIR --m7-config FILE --operator NAME`, with the history-safe provider credentials, pinned Node, running Ollama and `LOOPEX_RELEASE_OLLAMA_MODEL` described in [DEVELOPMENT.md](../../DEVELOPMENT.md) and the [validation runbook](../evidence/M7-validation-runbook.md) |
 
 A local pre-merge fast check counts only from a clean candidate. Retain its
 complete output and exact HEAD SHA outside the repository; otherwise use the
-hosted CI result for that candidate. The [milestone guide](milestones.md#concept-milestones-close)
+hosted CI result for that candidate. The [milestone guide](../process/milestones.md#concept-milestones-close)
 owns branch-candidate rejoin and the separate closure matrix.
 
 Before `floor-lane.sh`, fetch `origin/main` into the source checkout if it is
@@ -550,7 +550,7 @@ check additionally needs, is in [DEVELOPMENT.md](../../DEVELOPMENT.md); every
 repository check and what it holds is listed in
 [the architecture technical depth](architecture-technical.md#technical-arch-checks),
 and which checks a change selects is in the
-[verification guide](verification.md#concept-verification-selection).
+[verification guide](../process/verification.md#concept-verification-selection).
 
 <a id="technical-getting-started-layout"></a>
 ## The Repository Map
@@ -590,8 +590,8 @@ Concept: [Contributing: how work is planned](getting-started.md#concept-getting-
   [docs/plans/README.md](../plans/README.md).
 - **A milestone:** `docs/plans/NAME.md` and `docs/plans/NAME-technical.md`,
   written with the `open-milestone` skill and closed with `close-milestone`;
-  the steps are in the [milestone guide](milestones.md#concept) and
-  [its mechanics](milestones-technical.md#technical-depth).
+  the steps are in the [milestone guide](../process/milestones.md#concept) and
+  [its mechanics](../process/milestones-technical.md#technical-depth).
 - **An architecture decision:** a numbered pair under `docs/adr/`, prepared with
   the `adr` skill and accepted by the maintainer before dependent work.
 - **A document:** a new substantive Concept document under `docs/` has a
@@ -599,7 +599,7 @@ Concept: [Contributing: how work is planned](getting-started.md#concept-getting-
   named by the charter are exceptions. Index new documents in their directory's
   `README.md` and in [docs/README.md](../README.md) in the same change,
   following the
-  [charter's link and anchor rules](development-charter-technical.md#technical-traceable-depth).
+  [charter's link and anchor rules](../process/development-charter-technical.md#technical-traceable-depth).
 - **A commit:** a short imperative title `area(marker): summary`, where the
   marker is the milestone the work belongs to, such as `docs(M5): …`, with no
   content-origin attribution; `scripts/check-commit-messages.sh` enforces the

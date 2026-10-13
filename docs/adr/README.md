@@ -211,7 +211,7 @@ per-invocation private channel the launcher already opens. The first three were 
 plan on 2026-09-14 and revised twice that day on independent review; 0034
 follows the maintainer's outcome of 2026-09-19. The maintainer accepted all
 four with the M5 plan pair on 2026-09-21 at candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`;
-the [disposition](../developer/agent-context-map.md#disposition-m5-acceptance-2026-09-21)
+the [disposition](../process/agent-context-map.md#disposition-m5-acceptance-2026-09-21)
 records it.
 
 0035 is Proposed for the milestone after M5 and is not an M5 prerequisite: it
@@ -238,18 +238,18 @@ local and hosted providers, and the local executor on a temporary root.
 name-order clauses are superseded for named skill directories. Its scoped
 host-VM credential exposure, host-authorized tool audience and host-selected
 catalog effects are applied in all seven affected vision/AGENTS placements.
-The [acceptance disposition](../developer/agent-context-map.md#disposition-m6-adr-0039-acceptance-2026-09-27)
+The [acceptance disposition](../process/agent-context-map.md#disposition-m6-adr-0039-acceptance-2026-09-27)
 binds the exact reviewed candidate and both pairs' digests.
 
 0040 is the accepted narrow correction to 0039's startup-handler order,
 unproved-startup root naming and unknown-ownership cases. It also requires
 plain-English stderr recovery guidance after the fixed `ask` diagnostic. The
-[acceptance disposition](../developer/agent-context-map.md#disposition-m6-adr-0040-acceptance-2026-09-28)
+[acceptance disposition](../process/agent-context-map.md#disposition-m6-adr-0040-acceptance-2026-09-28)
 binds its exact Proposed pair and leaves 0039's other decisions unchanged.
 
 0041–0049 are Accepted with the M7 plan and both paired vision amendments at
 `2986150b878151524ecdd9bac5a9779e69e196b4` on 2026-09-30. The
-[acceptance disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+[acceptance disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds each historical pair and records implementation/integration authority.
 The clauses annotated above are the complete accepted-ADR prerequisite-table
 joins; unrelated guarantees remain unchanged. Their original accepted files

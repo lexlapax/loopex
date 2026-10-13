@@ -14,7 +14,7 @@ Technical depth: [Runtime floor mechanics](0002-bootstrap-runtime-floor-technica
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-founding-adrs-2026-08-15) | candidate `c703a65b665a5e64159e98833c63d29ff521cd2b`; concept `sha256:bc2d6dfe35707ec2551691186bbc16c7b6c34a5ebb7c6355ae9cda8c232d4a4f`; technical `sha256:06f0546ee680a97b88251a3f773ca95575c81aa1e5b3ec4a5490c53b0e9d4b8f` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-founding-adrs-2026-08-15) | candidate `c703a65b665a5e64159e98833c63d29ff521cd2b`; concept `sha256:bc2d6dfe35707ec2551691186bbc16c7b6c34a5ebb7c6355ae9cda8c232d4a4f`; technical `sha256:06f0546ee680a97b88251a3f773ca95575c81aa1e5b3ec4a5490c53b0e9d4b8f` |
 
 <a id="concept-adr-0002-context"></a>
 ## Context

@@ -45,7 +45,7 @@ rather than globbed, in the
 [technical companion](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-adr-0034-serial-modules);
 every passage that states this count cites that list rather than recounting,
 because recounting has been wrong three times. The
-[verification companion](../developer/verification-technical.md#technical-verification-speed)
+[verification companion](../process/verification-technical.md#technical-verification-speed)
 measured the result at M4 closure — that application is the critical path of
 the fast check, 96% of its time sits in those thirteen modules, and no further
 test change shortens the check while the slot is shared.
@@ -531,4 +531,4 @@ Technical depth: [Compatibility mechanics](0034-provider-credential-handoff-over
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m5-acceptance-2026-09-21) | candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`; concept `sha256:521a423dfbe97b6fed105ec3fa284f96053fa13f1284c23f5ee0d543c237a93c`; technical `sha256:bb698dd8b7c51e8eb39d9579e5e5227187477cef3a1ddddd34b7e5e600df533a` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m5-acceptance-2026-09-21) | candidate `1e1b33bfbf83953463e6abcdaebd52dc12735d8f`; concept `sha256:521a423dfbe97b6fed105ec3fa284f96053fa13f1284c23f5ee0d543c237a93c`; technical `sha256:bb698dd8b7c51e8eb39d9579e5e5227187477cef3a1ddddd34b7e5e600df533a` |

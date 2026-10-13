@@ -14,7 +14,7 @@ Technical depth: [Canonical request, conversation record, and termination mechan
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m2-prerequisite-adrs-2026-08-24) | candidate `e318690b6cd0e845d6dce694e5be80dc47211d6c`; concept `sha256:32cab87ba24ae499d5ed1f746c2c64a93cadaec0103b0dde1c17ab1722770518`; technical `sha256:35bce6b42bc88ae02ef7ca6592a257ee17f81e748784b7bdf074d2ff40727fe7` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m2-prerequisite-adrs-2026-08-24) | candidate `e318690b6cd0e845d6dce694e5be80dc47211d6c`; concept `sha256:32cab87ba24ae499d5ed1f746c2c64a93cadaec0103b0dde1c17ab1722770518`; technical `sha256:35bce6b42bc88ae02ef7ca6592a257ee17f81e748784b7bdf074d2ff40727fe7` |
 
 <a id="concept-adr-0010-context"></a>
 ## Context
@@ -247,7 +247,7 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   commits `bound_reached`, the member the vision's closed run terminal set holds
   for exactly this case. That member is a prerequisite this decision depends on
   rather than one it makes: the maintainer
-  [dispositioned the vision change](../developer/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23)
+  [dispositioned the vision change](../process/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23)
   that added it, and this ADR neither restates nor reopens that argument. The
   terminal record names which bound was reached, the observed value against the
   declared limit, and how that value was
@@ -825,6 +825,6 @@ Technical depth: [Format, migration, and rollback mechanics](0010-provider-conti
 - [Vision executor protocol and brain/hand topology](../vision.md#concept-vision-executor-protocol) — the opaque workspace reference core never resolves
 - [Vision recovery truth](../vision-technical.md#technical-vision-recovery-truth) — §9.5's outcome immutability and reconciliation rules, which a `bound_reached` run terminal obeys like any other
 - [Vision loop semantics](../vision-technical.md#technical-vision-loop-semantics) — one run, the closed run terminal set `bound_reached` belongs to, input queues, and the split payload rule
-- [Vision terminal algebra disposition](../developer/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23) — the recorded maintainer decision that added `bound_reached` to that closed set; a prerequisite this ADR depends on, not one it makes or reopens
+- [Vision terminal algebra disposition](../process/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23) — the recorded maintainer decision that added `bound_reached` to that closed set; a prerequisite this ADR depends on, not one it makes or reopens
 - [AGENTS.md](../../AGENTS.md) — durability and recovery truth, truth planes,
   credentials and context, and the smallest sufficient system

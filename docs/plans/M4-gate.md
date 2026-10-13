@@ -12,9 +12,9 @@ implementation; every named witness must pass before closure. The
 [Concept plan](M4.md#concept) owns the seven outcomes and the
 [technical plan](M4-technical.md#technical-depth) owns the contracts and evidence.
 The reviewed
-[planning-revision aggregate override](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
+[planning-revision aggregate override](../process/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
 and its reviewed
-[widened scope](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-scope-2026-09-11)
+[widened scope](../process/agent-context-map.md#override-disposition-m4-planning-aggregate-scope-2026-09-11)
 covered earlier revisions of this Open lineage (plan and gate documents,
 manifests, runner and support work, ADR proposals, documentation, and
 repository-status enforcement with its tests, with no product bytes and
@@ -412,11 +412,11 @@ sequence requires of the last holder of `.tool-versions`: accepted
 [ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose the
 validation pairs explicitly, Closed M0, M1, M2 and M3 settled the shared
 bytes through their
-[generation 7](../developer/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13),
-[generation 10](../developer/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14),
-[generation 11](../developer/agent-context-map.md#disposition-m2-gate-generation-11-2026-09-14)
+[generation 7](../process/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13),
+[generation 10](../process/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14),
+[generation 11](../process/agent-context-map.md#disposition-m2-gate-generation-11-2026-09-14)
 and
-[generation 4](../developer/agent-context-map.md#disposition-m3-gate-generation-4-2026-09-14),
+[generation 4](../process/agent-context-map.md#disposition-m3-gate-generation-4-2026-09-14),
 and Open M4 now refreshes its own Bound Artifacts row directly, as its
 technical plan's phase A prescribes.
 
@@ -725,7 +725,7 @@ Three changes to bound artifacts travel in one transaction, because each one
 would otherwise need its own proposal, rebind and evidence run.
 
 **The shared binding.** `scripts/check-closed-gates.sh` is bound by this gate
-and by the M3 gate. [The chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+and by the M3 gate. [The chain disposition](../process/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
 ordered M3 gate generation 5 to change it, so that it prints each gate's
 elapsed seconds when that gate ends, and ordered this gate's next amendment
 last, to rebind this holder and complete the shared sequence. Generation 5 has

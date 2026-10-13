@@ -102,7 +102,7 @@ tree.
 
 Parallel writers take one worktree each over these non-overlapping paths, and
 one integrator owns rejoin, conflicts and post-rejoin verification, as the
-[milestone guide](../developer/milestones-technical.md#technical-milestones-develop)
+[milestone guide](../process/milestones-technical.md#technical-milestones-develop)
 sets out.
 
 **Semantics the rejoin must preserve.** Use the existing command identity for
@@ -174,7 +174,7 @@ ownership and parser effects rather than a core invariant:
 
 **Checks a boundary selects.** Beyond `bash scripts/check.sh`, which every
 merge needs green in hosted CI, M5 selects exactly these, from the
-[selection table](../developer/verification.md#concept-verification-selection):
+[selection table](../process/verification.md#concept-verification-selection):
 
 - generation 2's schema and vectors select the independent client workflows
   (`--only node_client`, part of `bash scripts/check-release.sh`) and an
@@ -1087,7 +1087,7 @@ against nothing cannot read as a pass.
 The **mismatch** case is proved where the external truth exists: the release
 check stages the archive with `git archive` from a known commit and creates and
 populates its extraction in a subshell that sets `umask 022` before either
-operation, as the [canonical archive-extraction rule](../developer/milestones-technical.md#technical-milestones-archive-extraction)
+operation, as the [canonical archive-extraction rule](../process/milestones-technical.md#technical-milestones-archive-extraction)
 requires. The witness invokes that subshell from hostile caller `umask 0777`
 and requires the extracted manifest's complete unexcluded `(kind, mode, path)`
 projection to match the commit's independently derived Git-tree projection,
@@ -1102,7 +1102,7 @@ merely extractable.
 
 `VERSION` and the application versions move to `0.2.0` in an ordinary
 reviewed commit before closure, as the
-[milestone guide](../developer/milestones-technical.md#technical-milestones-release)
+[milestone guide](../process/milestones-technical.md#technical-milestones-release)
 sets out; every application reads it at compile time.
 
 **How a run is retained immutably, since a tag does not exist yet when the
@@ -1144,7 +1144,7 @@ closure record, and therefore the tree a reader who fetches the tag gets.
 Before the tag is created, four proofs run on the administrative SHA, in this
 order. First, the confinement proof requires its sole parent to be the tested
 SHA, requires the complete zero-context patch to reach exactly
-[the five confined paths and each path's allowed region](../developer/milestones-technical.md#technical-milestones-confinement),
+[the five confined paths and each path's allowed region](../process/milestones-technical.md#technical-milestones-confinement),
 compares the five paths' `git ls-tree` entries and raw diff to require ordinary
   blobs with unchanged modes, maps every changed byte to that table and requires
   the root README to be the sole path outside `docs/`. Reconstruction of
@@ -6079,7 +6079,7 @@ terms remain only in bounded redacted diagnostics and never become a class.
 | `drain_failed` | 108 | `quiesce/1` returned `{:error, :runtime_unavailable}`; during active quiesce captured Control exited or changed identity while the retained exact root remained live, including when an EventDispatcher-first monitor event's nonblocking checks found that root live and captured Control absent or dead; or the monitored outer quiesce helper exited or disappeared without its exact result and no earlier component class was latched, so no census or fence result can be claimed | `fatal:drain_failed`, best effort before crash-equivalent teardown |
 | `owner_lost` | 109 | The monitored daemon owner died before sending a fatal latch | — no live owner can write a record |
 | `prepare_index_interrupted` | 110 | Offline import: a handled operator stop won after signal-handler installation; the scan is reaped and Store and placement cleanup are bounded, while a post-rename complete image is retained | — no socket exists |
-| `session_index_lost` | 111 | The daemon session index exited while the daemon was running; added by the [session-index-lost disposition](../developer/agent-context-map.md#disposition-m5-session-index-lost-2026-09-23) | `fatal:session_index_lost` |
+| `session_index_lost` | 111 | The daemon session index exited while the daemon was running; added by the [session-index-lost disposition](../process/agent-context-map.md#disposition-m5-session-index-lost-2026-09-23) | `fatal:session_index_lost` |
 
 The mapping is injective and closed: status `0` has no nonzero class; every
 composition input, startup step, linked running component, drain failure and
@@ -7536,7 +7536,7 @@ measure and report actual process RSS under the maximum attachment count and
 at payload pressure separately.
 
 **Verification cost.** The
-[verification guide](../developer/verification.md#concept-verification-speed)
+[verification guide](../process/verification.md#concept-verification-speed)
 sets the target that checking work takes a small share of development time
 while every real guarantee keeps a check that would fail if it were broken. M5
 adds one application's suite to the fast check and must not lengthen the

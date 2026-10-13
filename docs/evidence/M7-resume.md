@@ -2835,7 +2835,7 @@ T01–T19 totals remain originals88 done /85 remaining /6 retired and additions
 
 The maintainer approved the exact recommended pair after the resumed proof.
 Acceptance is committed on primary `m7` at5d77836b and joined into the isolated
-candidate ata930e54b. The [disposition](../developer/agent-context-map.md#disposition-m7-creation-startup-status-2026-10-08)
+candidate ata930e54b. The [disposition](../process/agent-context-map.md#disposition-m7-creation-startup-status-2026-10-08)
 binds the unchanged historical pair. This supersedes every pending-ADR0063
 statement below; no host gate or public status implementation is yet qualified.
 
@@ -4882,7 +4882,7 @@ latest continuation above supersedes their approval, source and run status.
 
 
 ADR0061 exact-pair approval has arrived for9ba346fe: six-field remote cancellation
-is accepted. The [disposition](../developer/agent-context-map.md#disposition-m7-creation-cancellation-envelope-2026-10-07)
+is accepted. The [disposition](../process/agent-context-map.md#disposition-m7-creation-cancellation-envelope-2026-10-07)
 binds both historical digests; dependent codec/vector work is authorized,
 complete generation activation still waits for coordinated integration. No
 asked approval remains unanswered at this checkpoint.
@@ -5006,7 +5006,7 @@ Earlier paragraphs below describe their named historical revisions.
 
 ADR 0059 is accepted against exact candidate
 `a550ae337be6d94cea5dfcf9aa07a44ec0a571f7`; its
-[disposition](../developer/agent-context-map.md#disposition-m7-responsive-creation-transactions-2026-10-07)
+[disposition](../process/agent-context-map.md#disposition-m7-responsive-creation-transactions-2026-10-07)
 binds both historical Proposed digests. Responsive creation implementation is
 authorized. A read-only source map is sizing the first Store/Control unit;
 native implementation and proofs remain open. The separate ProgressSink V6
@@ -5402,7 +5402,7 @@ closes and original/added counts remain88/85/6 and353/22.
 
 Ownership integration is committed and pushed at `bd0c9a57`. The maintainer
 accepted the exact ADR0058 pair, resolving its previously asked decision;
-[disposition](../developer/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07)
+[disposition](../process/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07)
 binds the historical proposal. Implementation and required proof remain open.
 The case-replay source packet is frozen at99 cases, not97:74 existing plus25
 new. Packet SHA-256
@@ -6952,7 +6952,7 @@ markers must be retained. No integration/full-check PASS is claimed yet.
 
 ADR0055 is now accepted by the maintainer's explicit option1 reply on
 2026-10-07, binding exact Proposed candidate `f1f0fb3a07e35d6a3712ce4054f70c9bd4adc91e`.
-The [acceptance disposition](../developer/agent-context-map.md#disposition-m7-remote-creation-options-2026-10-07)
+The [acceptance disposition](../process/agent-context-map.md#disposition-m7-remote-creation-options-2026-10-07)
 records both historical digests. Native initial-creation implementation may
 proceed; transport generation activation and its complete proofs remain owed.
 This resolves the earlier asked0055 question. ADR0056/0057/0058 remain Proposed;

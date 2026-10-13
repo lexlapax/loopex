@@ -29,7 +29,7 @@ defmodule Loopex.Checks.Documents do
   @adr_concept_path ~r|\Adocs/adr/[0-9]{4}-[a-z0-9]+(?:-[a-z0-9]+)*\.md\z|u
   @code_span_label ~r/\A\[`[^`\]\r\n]+`\]\z/u
 
-  @fixed_pairs ["docs/vision.md", "docs/roadmap.md", "docs/developer/development-charter.md"]
+  @fixed_pairs ["docs/vision.md", "docs/roadmap.md", "docs/process/development-charter.md"]
 
   # Concept: developer documents whose companion is an operator document.
   #
@@ -41,8 +41,7 @@ defmodule Loopex.Checks.Documents do
   # exist only to satisfy a suffix.
   @exact_exceptions [
     "docs/README.md",
-    "docs/developer/agent-context-map.md",
-    "docs/developer/agent-adapter-smoke.md",
+    "docs/process/agent-context-map.md",
     "docs/developer/runtime-and-embedding.md",
     "docs/developer/agent-loop-and-tools.md",
     "docs/developer/compatibility-surfaces.md"

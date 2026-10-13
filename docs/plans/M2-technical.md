@@ -224,7 +224,7 @@ is:
   explicitly non-delegable, and accepting ADR 0010 or this plan pair neither
   implies it, authorizes it, nor schedules it.
 - **Durable disposition anchor.** Recorded 2026-08-23 as
-  [`disposition-bound-reached-vision-change-2026-08-23`](../developer/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23),
+  [`disposition-bound-reached-vision-change-2026-08-23`](../process/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23),
   in the durable register every earlier authority disposition in this repository
   already uses. That anchor names the principle changed, the evidence, the
   compatibility impact, and the empty migration path, and it is the single
@@ -279,7 +279,7 @@ fixed here so acceptance sees its whole cost:
   pair does not imply it, authorize it, or schedule it. It was approved
   separately on 2026-08-23 and recorded as
   `disposition-m1-gate-generation-exception-2026-08-23` in
-  [the context map](../developer/agent-context-map.md#disposition-m1-gate-generation-exception-2026-08-23),
+  [the context map](../process/agent-context-map.md#disposition-m1-gate-generation-exception-2026-08-23),
   scoped to exactly the two artifacts below. That approval authorizes the
   transaction; it does not approve any particular proposal `A`, which still
   requires its own exact-SHA review and the `A` to `R` transition review.

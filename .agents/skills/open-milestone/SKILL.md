@@ -7,10 +7,10 @@ disable-model-invocation: true
 # Open a Milestone
 
 Follow `AGENTS.md` first; read `docs/plans/README.md` for the register, then
-use `docs/developer/agent-context-map.md` for routing and version-specific
+use `docs/process/agent-context-map.md` for routing and version-specific
 technical guidance. The process is the
-[milestone guide](../../../docs/developer/milestones.md); the checks are the
-[verification guide](../../../docs/developer/verification.md).
+[milestone guide](../../../docs/process/milestones.md); the checks are the
+[verification guide](../../../docs/process/verification.md).
 
 1. Name it: a lowercase hyphenated slug, `M` followed by digits, or a
    version-shaped slug such as `v0.1`; at most 64 ASCII bytes, unique under

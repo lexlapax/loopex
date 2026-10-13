@@ -14,14 +14,14 @@ its lock before a stopping call or `close/1` answers, and closing a writer that
 already stopped is a no-op. Review found the sweep had let the run-cutoff
 retention-join test pass without the join; `69e0d84a` restored it. `m7.long`
 overflows its 4,000-token budget from three fixed reference prompts
-([disposition](../developer/agent-context-map.md#disposition-m7-long-overflow-prompts-2026-10-10)),
+([disposition](../process/agent-context-map.md#disposition-m7-long-overflow-prompts-2026-10-10)),
 and the plan records the campaign's committed attempts head.
 
 The first closure matrix on `d00e06eb` ended at real-provider lane 1 twice:
 once for an unanswered skill-import prompt and once for Anthropic wire drift
 in its native stream envelope and `tool_use` blocks, which the adapter now
 admits only as null members and a direct caller
-([disposition](../developer/agent-context-map.md#disposition-m7-t17-operator-override-2026-10-11)).
+([disposition](../process/agent-context-map.md#disposition-m7-t17-operator-override-2026-10-11)).
 
 Two more matrices on `124ded8e` and `d999373a` ended in their first lanes: the
 composition suite shared the caller's `LOOPEX_HOME`, and `m7.baseline.ask` ran
@@ -61,7 +61,7 @@ nothing. The seventh, on `c6925ffc`, reached `m7.question-restart` and
 waited there: both attended redactors held the last key-width bytes of an
 unfinished line, so the `answer>` prompt never reached the operator. They
 now hold only a tail that can still begin a key
-([disposition](../developer/agent-context-map.md#disposition-m7-t17-rehearsed-candidate-2026-10-12)).
+([disposition](../process/agent-context-map.md#disposition-m7-t17-rehearsed-candidate-2026-10-12)).
 
 The Darwin run of `f85d7952` failed 34 of 942 `loopex_cli` tests. Under macOS's
 symlinked `/var/folders` temporary root, three owners met a logical path where
@@ -76,7 +76,7 @@ harness resolves its attempt root; symlinked-root tests cover the first two on
 every host. Three tests passed once stdin was `/dev/null` as `check.sh` runs
 them. The output test selects BSD `script` syntax on Darwin, and its Darwin
 environment proof follows the maintainer's
-[disposition](../developer/agent-context-map.md#disposition-m7-darwin-writer-environment-2026-10-11).
+[disposition](../process/agent-context-map.md#disposition-m7-darwin-writer-environment-2026-10-11).
 Those fixes change M7 harness source, so T17 runs on the new candidate.
 
 ### Closure candidate nominated, 2026-10-10
@@ -2122,7 +2122,7 @@ Exact evidence is in the [resume record](M7-resume.md). Earlier entries below
 are historical where superseded.
 
 The maintainer accepted ADR0058, resolving its asked decision. Its
-[disposition](../developer/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07)
+[disposition](../process/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07)
 binds the exact proposal. Implementation and proof remain open. Case replay
 is frozen at99 cases, with independent review and native preparation running.
 Original and added completion counts are unchanged by this acceptance.
@@ -2719,7 +2719,7 @@ its entire stated outcome is proved.
 
 Retired original rows use `[-]` and remain in the 186-item denominator.
 They are counted separately from done and todo, never as passing evidence. The
-[pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+[pre-1.0 maintainer override](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 retires older-version compatibility obligations; current-format proofs remain.
 
 Run `python3 scripts/m7-task-status.py` for the current T00–T19 tally. The
@@ -3755,7 +3755,7 @@ for this join. T01–T19 counts remain original78/95/6 and added286/19.
 ## Verified decoder and diagnostic setup repair — 2026-10-05
 
 The maintainer approved "1000 ms" for the individually presented diagnostic
-setup change. The [recorded override](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05)
+setup change. The [recorded override](../process/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05)
 binds one captured pre-fault cutoff per broken/killed disposition. Startup and
 actual IO handshake spend that same allowance. Faults, loss/privacy/sealing
 assertions and post-fault cleanup limits are unchanged. The complete diagnostic
@@ -4646,7 +4646,7 @@ did not resolve them. No paid provider calls were made during this check.
   SHA-256 `7b64ae2f58526b03407e1073a0ce4b4e13a517cc81a4de1e6a1645e2b316cf39`;
   handoff SHA-256
   `910c442314a63cb731260b787418bb74695128895858e03364d2a389b2e23d6e`.
-  The [approved amendment](../developer/agent-context-map.md#disposition-m7-pipe-shutdown-observation-2026-10-05)
+  The [approved amendment](../process/agent-context-map.md#disposition-m7-pipe-shutdown-observation-2026-10-05)
   captures one D+G fixture observation cutoff; production 5,000-ms delivery
   and parent 15,000-ms bounds remain unchanged. Original current causal FAIL
   remains immutable. This closes the added T16 pipe repair only; native compact
@@ -4674,7 +4674,7 @@ did not resolve them. No paid provider calls were made during this check.
   Technical digest
   `e07dd2382f161bd2ccf1cea8b6b31f2a36f6c0e4db8a3bcb0d0e153a055af67c`.
   The maintainer accepted this exact pair in the
-  [disposition](../developer/agent-context-map.md#disposition-m7-current-physical-restore-2026-10-05).
+  [disposition](../process/agent-context-map.md#disposition-m7-current-physical-restore-2026-10-05).
   Restore implementation and physical/helper-ledger proofs remain open.
 
   Read-only generation activation inventory:
@@ -4740,7 +4740,7 @@ did not resolve them. No paid provider calls were made during this check.
   No speculative timer repair or timeout amendment was made.
   The permission-answer distinct event, shared answered view and private
   transaction are approved by the
-  [maintainer disposition](../developer/agent-context-map.md#disposition-m7-policy-answer-received-event-2026-10-05). Restore
+  [maintainer disposition](../process/agent-context-map.md#disposition-m7-policy-answer-received-event-2026-10-05). Restore
   pair was subsequently accepted as recorded above; implementation remains
   separately tracked.
 
@@ -4762,7 +4762,7 @@ did not resolve them. No paid provider calls were made during this check.
   Both integrated writer worktrees, chat-pipe-proof and model-alias-preparation,
   are archived with recoverable Git snapshots; full external evidence remains.
   Expanded inspection shape is approved by the
-  [maintainer disposition](../developer/agent-context-map.md#disposition-m7-expanded-inspection-view-2026-10-05). Restore option B
+  [maintainer disposition](../process/agent-context-map.md#disposition-m7-expanded-inspection-view-2026-10-05). Restore option B
   selects direction only; its exact amendment is still under proposal/review.
   At failure recording: T01–T19 originals 78 / 95 / 6, added 275 / 20 / 0.
   Three failure-repair subtasks were added under T16. The wrapper repair now
@@ -4854,7 +4854,7 @@ did not resolve them. No paid provider calls were made during this check.
 
 - Maintainer selected restore option B with "Approved option 1" in response
   to the empty-root recovery question. The
-  [direction disposition](../developer/agent-context-map.md#disposition-m7-empty-root-restore-direction-2026-10-04)
+  [direction disposition](../process/agent-context-map.md#disposition-m7-empty-root-restore-direction-2026-10-04)
   retains that outcome and requires an exact reviewed ADR 0016 amendment before
   dependent implementation. The separate administrative API and persistent
   transition remain proposed, not accepted. Read-only concrete amendment work
@@ -4993,7 +4993,7 @@ did not resolve them. No paid provider calls were made during this check.
 
 - Maintainer decision: "Approved option 1" requires `session_options: {}` on
   every foreground /3 and daemon /4 wire create. The
-  [durable disposition](../developer/agent-context-map.md#disposition-m7-wire-create-empty-options-2026-10-04)
+  [durable disposition](../process/agent-context-map.md#disposition-m7-wire-create-empty-options-2026-10-04)
   binds the exact packet and preserves host embedding/prepared creation. No
   wire generation is activated from approval alone.
 
@@ -5080,7 +5080,7 @@ did not resolve them. No paid provider calls were made during this check.
 
 - Maintainer decision: "Approved option 1" approves the exact shared
   command-bounds Elixir/Node codecs, schemas and vectors. The
-  [durable disposition](../developer/agent-context-map.md#disposition-m7-command-bounds-codecs-2026-10-04)
+  [durable disposition](../process/agent-context-map.md#disposition-m7-command-bounds-codecs-2026-10-04)
   records every field, range and authored omission rule, without defaults or
   clock reads. Earlier automatic-review refusals remain retained; explicit
   authorization now permits this bounded implementation. Isolated writer
@@ -5132,7 +5132,7 @@ did not resolve them. No paid provider calls were made during this check.
 
 - Maintainer decision: "Approved option 1" accepts the revised alias-capable
   ADR 0050 pair at `108dbf3468c925c69696f05fd73848380b6787ef`.
-  [Durable disposition](../developer/agent-context-map.md#disposition-m7-model-preparation-alias-acceptance-2026-10-04)
+  [Durable disposition](../process/agent-context-map.md#disposition-m7-model-preparation-alias-acceptance-2026-10-04)
   binds both exact Proposed digests. The administrative transition changes only
   Concept Status/Acceptance within the pair and its index/0044 annotation.
   Model preparation and authored-alias/canonical-candidate v2 replay may now be
@@ -5410,7 +5410,7 @@ did not resolve them. No paid provider calls were made during this check.
 - Approved native compact busy observation: the maintainer selected the
   required Boolean `compact_pending` and definitive-status refusal during
   unresolved session mutation. The
-  [disposition](../developer/agent-context-map.md#disposition-m7-native-compact-busy-2026-10-05)
+  [disposition](../process/agent-context-map.md#disposition-m7-native-compact-busy-2026-10-05)
   binds the exact packet and ADR 0049 barrier amendment. Implementation and
   both-pair proofs remain open. This adds no wire or chat JSON fields.
 
@@ -6401,7 +6401,7 @@ did not resolve them. No paid provider calls were made during this check.
 
 - Decision recorded: the maintainer selected option B, centralized captured
   runtime defaults, after reviewing both alternatives. The
-  [disposition](../developer/agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04)
+  [disposition](../process/agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04)
   retains the selected template, host ownership and exact-create safeguards.
   Transport implementation is now authorized; this question is resolved.
 
@@ -7432,7 +7432,7 @@ did not resolve them. No paid provider calls were made during this check.
 
 - Accepted, implementation open: the maintainer selected the durable
   `context.maintenance_changed` view. ADR 0043 and the
-  [decision disposition](../developer/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03)
+  [decision disposition](../process/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03)
   retain its exact closed projection and same-cursor snapshot/replay obligations.
   Add no private captures to the public plane. This adds a T05 subtask and
   closes no original item.
@@ -7698,7 +7698,7 @@ did not resolve them. No paid provider calls were made during this check.
 
 - Approved: the captured 1,000-ms stalled-stderr writer-start cutoff and exact
   writer exit/join under the
-  [maintainer disposition](../developer/agent-context-map.md#disposition-m7-stalled-stderr-startup-2026-10-03).
+  [maintainer disposition](../process/agent-context-map.md#disposition-m7-stalled-stderr-startup-2026-10-03).
   The CLI fixture captures one cutoff before diagnostic dispatch, monitors the
   live IO writer before command cleanup, requires its exact shutdown DOWN and
   unchanged JSON output separation, then joins its fixture device normally.
@@ -7736,7 +7736,7 @@ did not resolve them. No paid provider calls were made during this check.
 - Approved: explicit standalone checkpoint ownership. The maintainer selected
   distinct private run/compact kinds and actual owner IDs, plus the closed
   public `{owner: {kind, id}}` object. The
-  [disposition](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
+  [disposition](../process/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
   binds the retained proposal and preserves actual lineage boundaries, current
   restart/replay and uncertain-commit proof. Implementing the selected private
   kind, public projections, current schemas and independent vectors remains
@@ -7794,7 +7794,7 @@ did not resolve them. No paid provider calls were made during this check.
 
 - Approved: `maintenance_reply_reserve_unavailable` in the existing v2
   preparation-failure cause union. The
-  [disposition](../developer/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
+  [disposition](../process/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
   binds the exact retained proposal. It preserves actual usage and zero summary
   dispatch when positive remaining tokens cannot fit the fixed 1,024-token
   reserve; actual budget/turn exhaustion keeps its existing bound outcome.
@@ -8288,7 +8288,7 @@ did not resolve them. No paid provider calls were made during this check.
   | `/private/tmp/loopex-m7-standalone-checkpoint-probe-docs-current-v1.log` | PASS, final metadata bootstrap/docs | `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8` |
 
 - Historical proposal, now resolved by the
-  [explicit-owner decision](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03): standalone checkpoint ownership. A compact
+  [explicit-owner decision](../process/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03): standalone checkpoint ownership. A compact
   command owns its episode without a run; the existing checkpoint kind and
   context.compacted projection require run_id. Recommend a distinct closed
   private standalone_compaction_checkpoint_committed_v1 kind with command_id,
@@ -16833,7 +16833,7 @@ full restore175, operator attendance, helpers or whole integration.
   Pending proof (2026-10-10, candidate nomination): the closure scaffold's two
   Linux pinned-load rows. The maintainer decided that the retained sets in
   `pinned-load/` (`CASES.txt`), run at pre-candidate SHAs, stand for the
-  candidate ([closure preparation](../developer/agent-context-map.md#disposition-m7-closure-preparation-2026-10-10)).
+  candidate ([closure preparation](../process/agent-context-map.md#disposition-m7-closure-preparation-2026-10-10)).
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
   Pending proof (2026-10-10, candidate nomination): the independent review of the exact candidate (T17).
 

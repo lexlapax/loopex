@@ -46,7 +46,7 @@ and `## Technical depth`, links back to `#concept`, and carries:
 - Compatibility, Migration and Rollback.
 - Packaging, if any.
 
-Register: add `| \`NAME\` | Open | [concept](NAME.md) | [technical depth](NAME-technical.md) | — |`
+Register: add `| \`NAME\` | Open | [concept](../developer/NAME.md) | [technical depth](../developer/NAME-technical.md) | — |`
 to the Milestone Register table in `docs/plans/README.md`. The register's Gate
 column is history: a milestone run under the retired gate machinery links its
 gate file, and a new milestone's entry is `—`. That row is the pair's index —
@@ -182,7 +182,7 @@ repeat its checks and review before seeking closure.
    review, what remains. On their decision, the **administrative closure
    commit** moves the register row to `Closed`, fills the plan's Closure row,
    records the maintainer's words in
-   `docs/developer/agent-context-map.md`, and fills the evidence-page scaffold
+   `docs/process/agent-context-map.md`, and fills the evidence-page scaffold
    with the runs of step 4, the review of step 5 and every predeclared
    plan-required outcome value. Supply both complete `Closed` marked blocks,
    using the date of the maintainer's recorded closure disposition for the
@@ -225,7 +225,7 @@ named region within each path**:
 | --- | --- |
 | `docs/plans/README.md` | The exact `<NAME>` register-table row, moved from `In review` to `Closed`, and the bytes between `<!-- loopex:current-status:start -->` and `<!-- loopex:current-status:end -->`, replaced by the complete block the administrative commit supplies. Its `Last closed product checkpoint` date is the date of the maintainer's recorded closure disposition. `mix loopex.status` validates the supplied block against the register; it does not generate it |
 | `docs/plans/<NAME>.md` | Only the plan's Closure governance-table row, naming the tested implementation SHA and the content digests |
-| `docs/developer/agent-context-map.md` | One newly appended, dated subsection recording the maintainer's closure disposition; every pre-existing byte remains unchanged |
+| `docs/process/agent-context-map.md` | One newly appended, dated subsection recording the maintainer's closure disposition; every pre-existing byte remains unchanged |
 | `docs/evidence/<NAME>-closure-runs.md` | Only the scaffold's designated `Pending` value fields and placeholder rows. The tested candidate predeclares every label, heading and row slot that closure will fill, including the generic run identities, results, measured durations, retained-output references and SHA-256 digests of step 4; the tested archive manifest's retained-output reference and SHA-256 digest; the independent review result, retained-output reference and SHA-256 digest; and any plan-required outcome fact, review, demonstration identity, source inventory or measured observation. The administrative commit replaces only those `Pending` values or placeholder cells; it adds no label, heading, row or prose. Every non-placeholder byte remains unchanged |
 | `README.md` | Only the bytes between `<!-- loopex:readme-status:start -->` and `<!-- loopex:readme-status:end -->`, replaced by the complete `Closed` summary block the administrative commit supplies; `mix loopex.status` validates its semantic agreement with the register, and every byte outside the markers remains unchanged |
 

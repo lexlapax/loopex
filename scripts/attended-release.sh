@@ -168,7 +168,7 @@ if [ "$automatic" -eq 1 ]; then
     fail invalid_authority_sha
   git --no-replace-objects merge-base --is-ancestor "$tested_sha" "$authority_sha" || fail authority_not_descendant
 
-  git --no-replace-objects show "$authority_sha:docs/developer/agent-context-map.md" >"$scratch/context" 2>/dev/null ||
+  git --no-replace-objects show "$authority_sha:docs/process/agent-context-map.md" >"$scratch/context" 2>/dev/null ||
     fail authority_context_unavailable
   awk -v anchor="$anchor" '
     $0 == "<a id=\"" anchor "\"></a>" { count++ }

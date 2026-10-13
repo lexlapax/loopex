@@ -18,11 +18,11 @@ digest_file() {
 }
 
 repo="$work/repo"
-mkdir -p "$repo/scripts" "$repo/docs/developer" "$work/retained"
+mkdir -p "$repo/scripts" "$repo/docs/process" "$work/retained"
 cp "$source_root/scripts/attended-release.sh" "$repo/scripts/attended-release.sh"
 cp "$source_root/scripts/attended-pty.py" "$repo/scripts/attended-pty.py"
 cp "$source_root/scripts/attended-redact.exs" "$repo/scripts/attended-redact.exs"
-printf '# Fixture context map\n' >"$repo/docs/developer/agent-context-map.md"
+printf '# Fixture context map\n' >"$repo/docs/process/agent-context-map.md"
 printf 'fixture\n' >"$repo/README.md"
 git -C "$repo" init -q
 git -C "$repo" add .
@@ -105,7 +105,7 @@ runner="$repo/scripts/attended-release.sh"
 anchor=disposition-m6-attended-test
 
 git -C "$repo" switch -qc authority
-cat >>"$repo/docs/developer/agent-context-map.md" <<EOF
+cat >>"$repo/docs/process/agent-context-map.md" <<EOF
 
 <a id="$anchor"></a>
 ### M6 attended release authorization
@@ -114,7 +114,7 @@ Milestone: M6
 Tested SHA: $tested
 Automatic attended answers: authorized
 EOF
-git -C "$repo" add docs/developer/agent-context-map.md
+git -C "$repo" add docs/process/agent-context-map.md
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
   commit -qm 'fixture(M6): authorize exact attended candidate'
 authority=$(git -C "$repo" rev-parse HEAD)
@@ -152,7 +152,7 @@ status=0
 # A wrong tested SHA or missing explicit permission in a descendant entry is
 # not enough to authorize an answer, even when the anchor and milestone match.
 git -C "$repo" switch -qc wrong-record "$tested"
-cat >>"$repo/docs/developer/agent-context-map.md" <<EOF
+cat >>"$repo/docs/process/agent-context-map.md" <<EOF
 
 <a id="$anchor"></a>
 ### Wrong candidate
@@ -161,7 +161,7 @@ Milestone: M6
 Tested SHA: 0000000000000000000000000000000000000000
 Automatic attended answers: authorized
 EOF
-git -C "$repo" add docs/developer/agent-context-map.md
+git -C "$repo" add docs/process/agent-context-map.md
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
   commit -qm 'fixture(M6): wrong attended candidate'
 wrong_record=$(git -C "$repo" rev-parse HEAD)
@@ -174,7 +174,7 @@ expect_preflight_failure replaced_wrong_record disposition_mismatch \
 git -C "$repo" replace -d "$wrong_record" >/dev/null
 
 git -C "$repo" switch -qc missing-permission "$tested"
-cat >>"$repo/docs/developer/agent-context-map.md" <<EOF
+cat >>"$repo/docs/process/agent-context-map.md" <<EOF
 
 <a id="$anchor"></a>
 ### No automatic permission
@@ -183,7 +183,7 @@ Milestone: M6
 Tested SHA: $tested
 Automatic attended answers: discussed
 EOF
-git -C "$repo" add docs/developer/agent-context-map.md
+git -C "$repo" add docs/process/agent-context-map.md
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
   commit -qm 'fixture(M6): omit automatic permission'
 missing_permission=$(git -C "$repo" rev-parse HEAD)
@@ -287,8 +287,8 @@ git -C "$repo" switch -qc nul-secret "$tested"
   printf '\n<a id="%s"></a>\n' "$anchor"
   printf 'Milestone: M6\nTested SHA: %s\nAutomatic attended answers: authorized\n' "$tested"
   printf 'note\0%s\n' "$OPENAI_API_KEY"
-} >>"$repo/docs/developer/agent-context-map.md"
-git -C "$repo" add docs/developer/agent-context-map.md
+} >>"$repo/docs/process/agent-context-map.md"
+git -C "$repo" add docs/process/agent-context-map.md
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
   commit -qm 'fixture(M6): authority with hidden credential bytes'
 nul_secret=$(git -C "$repo" rev-parse HEAD)
@@ -300,8 +300,8 @@ git -C "$repo" switch -qc plain-secret "$tested"
   printf '\n<a id="%s"></a>\n' "$anchor"
   printf 'Milestone: M6\nTested SHA: %s\nAutomatic attended answers: authorized\n' "$tested"
   printf 'note %s\n' "$OPENAI_API_KEY"
-} >>"$repo/docs/developer/agent-context-map.md"
-git -C "$repo" add docs/developer/agent-context-map.md
+} >>"$repo/docs/process/agent-context-map.md"
+git -C "$repo" add docs/process/agent-context-map.md
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
   commit -qm 'fixture(M6): authority with visible credential bytes'
 plain_secret=$(git -C "$repo" rev-parse HEAD)
@@ -313,8 +313,8 @@ git -C "$repo" switch -qc nul-permission "$tested"
   printf '\n<a id="%s"></a>\n' "$anchor"
   printf 'Milestone: M6\nTested SHA: %s\n' "$tested"
   printf 'Automatic attended answers: authorized\0denied\n'
-} >>"$repo/docs/developer/agent-context-map.md"
-git -C "$repo" add docs/developer/agent-context-map.md
+} >>"$repo/docs/process/agent-context-map.md"
+git -C "$repo" add docs/process/agent-context-map.md
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
   commit -qm 'fixture(M6): NUL-suffixed authorization'
 nul_permission=$(git -C "$repo" rev-parse HEAD)
@@ -366,7 +366,7 @@ BASH_ENV="$work/reinject.bash" bash -c '
   fail 'attended launch passed ambient keys from a Bash startup hook'
 grep -qx 'ATTENDED_ANSWERS=2' "$work/retained/startup-hook.log" ||
   fail 'startup-hook run did not complete both authorized notices'
-expected=$(git -C "$repo" show "$authority:docs/developer/agent-context-map.md" |
+expected=$(git -C "$repo" show "$authority:docs/process/agent-context-map.md" |
   awk -v anchor="$anchor" '
     $0 == "<a id=\"" anchor "\"></a>" { in_section = 1 }
     in_section && $0 ~ /^<a id="/ && $0 != "<a id=\"" anchor "\"></a>" { exit }

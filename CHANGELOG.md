@@ -18,7 +18,7 @@ compatibility meaning.
 
 Updating this file is part of a milestone closure candidate, not an optional
 courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
-[milestone guide](docs/developer/milestones.md#concept-milestones-close).
+[milestone guide](docs/process/milestones.md#concept-milestones-close).
 
 ## [Unreleased]
 
@@ -51,7 +51,7 @@ refuse a helper child (ADR 0069).
 Add the M7 validation tooling: the fixture manifest, `mix loopex.m7_evidence`,
 the retained single-writer attempts index, `mix loopex.m7_matrix`, and the
 `m7-provider`, `m7-rollback` and attended `m7-operator` release lanes; see the
-[M7 validation runbook](docs/operator/m7-validation.md).
+[M7 validation runbook](docs/evidence/M7-validation-runbook.md).
 
 Durable provider replies refuse the exact selected key, including a key split
 across streamed deltas; a key split across separate replies or transformed is
@@ -444,13 +444,13 @@ option of the local executor, default 5 000 ms, so a test can arm the bound it
 asserts instead of waiting out the constant.
 
 Replace the milestone gates with the
-[verification guide](docs/developer/verification.md#concept) and its technical
+[verification guide](docs/process/verification.md#concept) and its technical
 companion: three stages — Change, Close, Release — with one question each, a
 table routing a changed boundary to the checks it selects in addition to the
 fast check, and the rules that keep those checks honest. There is no
 per-milestone gate runner, no locked digest table and no amendment transaction;
 the gate files under `docs/plans/` are records of what was proved at the
-revisions they name. The [milestone guide](docs/developer/milestones.md#concept)
+revisions they name. The [milestone guide](docs/process/milestones.md#concept)
 pair is now the one procedure for planning, running and closing a milestone, and
 `docs/plans/README.md` keeps the lifecycle and the register alone. A plan's
 prerequisites are read from the links in its companion's
@@ -667,7 +667,7 @@ release or full inherited-gate result.
 
 Keep durable interactions, artifact transfers and the floor refresh in the
 [M4 plan](docs/plans/M4.md#concept). The reviewed M3 cadence uses focused
-implementation checks. The later [final validation override](docs/developer/agent-context-map.md#override-disposition-m3-final-inherited-gates-waiver-2026-09-13)
+implementation checks. The later [final validation override](docs/process/agent-context-map.md#override-disposition-m3-final-inherited-gates-waiver-2026-09-13)
 required M3-only qualification on macOS and Linux, which passed at exact source
 `f45354572840636b473ad7e40e42355fdff4fc17`; M0–M2 gate reruns are waived,
 not passed. Deterministic and attended production-provider workflow proofs
@@ -1946,4 +1946,4 @@ merges.
 Founding documents, the tool-neutral development contract, portable bootstrap
 enforcement, and tested Claude Code and Codex adapters. No product code.
 Evidence is retained in
-[docs/developer/agent-adapter-smoke.md](docs/developer/agent-adapter-smoke.md).
+[docs/developer/agent-adapter-smoke.md](docs/evidence/agent-adapter-smoke.md).

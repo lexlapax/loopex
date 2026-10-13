@@ -6,7 +6,7 @@ trusted fixture wrapper, and find which test, case or demonstration owns every
 V1–V13 scenario step. The [accepted plan](../plans/M7-technical.md#technical-plan-operator-validation)
 owns the scenarios; `test/fixtures/m7/manifest.json` owns the mapping below,
 and `mix loopex.m7_evidence` fails when this page and the manifest disagree.
-Part of the [operator index](README.md).
+Part of the [operator index](../operator/README.md).
 
 No command on this page is a paid run by itself. A real-provider attempt needs
 the maintainer's separate authorization for that candidate and its case list;
@@ -16,7 +16,7 @@ any file named here.
 ## Before any attempt
 
 1. Start from a clean checkout of the exact candidate and build it as in
-   [getting started](getting-started.md).
+   [getting started](../operator/getting-started.md).
 2. Choose a fresh retained directory outside the repository, for example
    `/retained/m7`, with `markers/` and `runs/` inside it.
 3. Write the explicit configuration file the conversation will use. Its
@@ -405,7 +405,7 @@ answer never stands in for attendance.
 | `V12.5.legacy-defaults` | automated | `test:apps/loopex_cli/test/ask_ephemeral_test.exs#legacy one-shot defaults leave model, bounds and questions to the ephemeral profile` |
 | `V13.1` | attended | `case:m7.restore` |
 | `V13.2` | automated | `case:m7.rollback` |
-| `V13.3` | retired | `retired:docs/developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02` |
+| `V13.3` | retired | `retired:docs/process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02` |
 | `V13.4` | attended | `case:m7.restore` |
 | `V13.5` | attended | `case:m7.restore` |
 | `V13.6` | attended | `case:m7.restore` |

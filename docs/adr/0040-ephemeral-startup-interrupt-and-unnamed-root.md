@@ -49,4 +49,4 @@ or an accepted change to a later milestone.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m6-adr-0040-acceptance-2026-09-28) | candidate `57b0c6ab725f6502047b21fa7745fd59ccc56850`; concept `sha256:b09d673ce179fcc639cc3494e6fd641ac741d3a4ebfa3c21e17148472f17c5d4`; technical `sha256:7d612590bd3935c305ffd035fe0d2064db74faef7605c55f173ab7a69742b2aa` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m6-adr-0040-acceptance-2026-09-28) | candidate `57b0c6ab725f6502047b21fa7745fd59ccc56850`; concept `sha256:b09d673ce179fcc639cc3494e6fd641ac741d3a4ebfa3c21e17148472f17c5d4`; technical `sha256:7d612590bd3935c305ffd035fe0d2064db74faef7605c55f173ab7a69742b2aa` |

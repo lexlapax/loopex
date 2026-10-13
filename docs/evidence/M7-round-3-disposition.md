@@ -13,7 +13,7 @@ SHA-256 `cbb9cd861bad099d215d0c5a2299e3d84840e8501a513435153a9afa9824b055`.
 Its actual supplied file was `/tmp/loopex-m7-external-review-3.md`.
 
 The maintainer approved option A extending the proposed vision amendment to
-section 13.4. The [decision record](../developer/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30)
+section 13.4. The [decision record](../process/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30)
 names the scope. Other recorded choices remain: strict required model actions,
 no reroll, bounded continuation, live durable streaming, verified summaries,
 4-KiB requested artifact ranges, exact legacy inline compatibility, updated

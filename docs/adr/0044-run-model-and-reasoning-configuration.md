@@ -7,7 +7,7 @@ Technical depth: [Run model and reasoning configuration](0044-run-model-and-reas
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include a completion classification, mandatory nine-key version-2 Model-port replies and bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 amends [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) to add that charge separately while preserving ADR 0017/0025 descriptor totals. The pre-1.0 override retires request v1 and receipt revisions 2/3; only current request v2 and receipt revision 4 are admitted. Also explicitly amends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement and its monotonic v3-only writer cutover, preserving its accounting-provenance rules and the existing v2 meaning. Qualifies ADR 0011's continuation-material exclusion solely for verified provider summary text in existing transient reasoning progress. Extends [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with reasoning configuration; its buffered transport and cleanup remain unchanged.
-- **Requires:** acceptance of the labelled [vision continuation amendment](../vision.md#concept-vision-model-boundary) and [section 13.4](../vision-technical.md#technical-vision-model-boundary), under the [authorized scope](../developer/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30)
+- **Requires:** acceptance of the labelled [vision continuation amendment](../vision.md#concept-vision-model-boundary) and [section 13.4](../vision-technical.md#technical-vision-model-boundary), under the [authorized scope](../process/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30)
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0043](0043-context-compaction-checkpoint.md#concept), [ADR 0045](0045-model-originated-questions.md#concept) and [ADR 0046](0046-child-session-tool.md#concept)
 - **Requires with multi-provider use:** [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Prerequisite for:** M7 outcomes 4 and 7
@@ -174,7 +174,7 @@ Technical depth: [Compatibility mechanics](0044-run-model-and-reasoning-configur
 
 New configuration records/events, private continuation replies/settlements and
 snapshot fields require an M7 reader. Provider settlements use only v3 under
-the maintainer's [pre-1.0 current-contract rule](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+the maintainer's [pre-1.0 current-contract rule](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
 The v1/v2 readers and their cross-generation cutover bookkeeping are retired;
 current accounting, restart/replay and effect safety remain required. Private continuation is retained in recovery state, never
 in public configuration snapshots. A Model adapter must now return every
@@ -201,7 +201,7 @@ readable journal history or frozen tool definition, and adds no dual service.
 A shared genesis revision retains initial configuration, immutable tool
 definitions and policy-defer mode with the existing mandatory cleanup value.
 ADR 0046 uses this same revision; it does not create a competing session shape.
-The [pre-1.0 maintainer disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+The [pre-1.0 maintainer disposition](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 requires only complete current v3 genesis. Superseded genesis and missing
 configuration refuse recovery; no migration or startup fallback supplies
 settings to retained history. Current restart and exact retained creation
@@ -211,4 +211,4 @@ identity remain required.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:af0d0229529021f69920f5ebdaeb5a10d3dba8f351dc41d5e3ee5cc77afcf82c`; technical `sha256:8b3417a2c310e1c298c3944cecf445f9d9031f710c3151919b94e9f47114edb0` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:af0d0229529021f69920f5ebdaeb5a10d3dba8f351dc41d5e3ee5cc77afcf82c`; technical `sha256:8b3417a2c310e1c298c3944cecf445f9d9031f710c3151919b94e9f47114edb0` |

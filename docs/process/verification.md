@@ -121,7 +121,7 @@ validator; the release check refuses an M7 lane before staging while any of
 its committed cases is still pending, and the full matrix while any V1–V13
 step owner is. A refused lane is not PASS, and a new candidate SHA alone never
 authorizes repeating a failed case. The
-[M7 validation runbook](../operator/m7-validation.md) lists every case and
+[M7 validation runbook](../evidence/M7-validation-runbook.md) lists every case and
 step owner.
 
 Hosted CI's green run on the candidate is fast-check evidence for that merge.

@@ -4,7 +4,7 @@
 Concept: [M7 coding-agent proof](M7.md#concept).
 
 
-The [2026-10-02 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+The [2026-10-02 maintainer override](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes this plan's older-format/client compatibility, upgrade and
 cross-version rollback obligations. Before 1.0, remove superseded code and keep
 only current contracts. Current-format restart/replay, effect uncertainty,
@@ -20,7 +20,7 @@ Concept: [Design decisions](M7.md#concept-plan-decisions).
 
 M6 is Closed. The maintainer accepted this plan, ADRs 0041–0049 and both labelled
 vision amendments together at `2986150b878151524ecdd9bac5a9779e69e196b4` on
-2026-09-30; the [acceptance disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+2026-09-30; the [acceptance disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds the exact coordinated packet. No partially accepted subset authorizes
 implementation of these joins, regardless of abbreviated Depends-on headers.
 The tool-budget amendment gates questions/helpers; section 13.4 gates the shared
@@ -154,7 +154,7 @@ The integration owner updates the foreground `Mapping`, daemon `Request`,
 All new daemon mutations join the controller checks and succession/capacity
 inventory; merely adding a parser branch cannot bypass or omit lease fencing.
 Retained command IDs and prior refusal/unknown facts keep their original meaning.
-The [approved durable maintenance view](../developer/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03)
+The [approved durable maintenance view](../process/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03)
 adds `context.maintenance_changed` with ADR 0043's closed allowlist. Commit it
 with each changed private view and reduce it at the same public event cursor
 in snapshots; progress cannot change that view. Both owner kinds, private-field
@@ -277,7 +277,7 @@ increase can satisfy this gate. Before each provider attempt, validate its final
 staged request, including receipt revision 4 and applicable expanded-continuation
 accounting, against all configured bounds and the 65,536-byte ceiling. The earlier
 990-token prototype is a narrow arithmetic example, not this final-profile proof.
-The [2026-10-10 maintainer override](../developer/agent-context-map.md#disposition-m7-reference-profile-target-2026-10-10)
+The [2026-10-10 maintainer override](../process/agent-context-map.md#disposition-m7-reference-profile-target-2026-10-10)
 admits explicit ceilings of 1,500 for `chat-coding` and `chat-coding-appendix`
 and 2,000 for `chat-coding-helpers`; every other demonstrated profile meets
 this target at a 512-byte workspace path.
@@ -1071,7 +1071,7 @@ second truth writer. Operator timing against a
    the same subcase, after that completed assistant turn, and assert from bounded
    native-capture classification that its reply used native thinking for each
    continuation-required cell; the
-   [2026-10-12 maintainer override](../developer/agent-context-map.md#disposition-m7-review-findings-2026-10-12)
+   [2026-10-12 maintainer override](../process/agent-context-map.md#disposition-m7-review-findings-2026-10-12)
    requires that thinking only for manual cells and a native continuation for
    adaptive and omitted cells. For Haiku default and none, require the registered
    nil-continuation, no-native-thinking behavior on both requests instead. Each
@@ -1210,7 +1210,7 @@ second truth writer. Operator timing against a
 
 #### V13. Upgrade and supported rollback
 
-The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+The [pre-1.0 maintainer override](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 retires the historical upgrade, old-reader and cross-version rollback work in
 this retained specification. Current-format backup/restore, complete manifests,
 separate workspace restoration and unknown-effect nonredispatch remain required.
@@ -1474,7 +1474,7 @@ internal repairs. Its two contract mismatches and one optional clarification
 are repaired in the [round-9 disposition](../evidence/M7-round-9-disposition.md).
 The repaired packet's recheck and clean-candidate documentation validation are
 bound by the final receipt. The maintainer then accepted the exact packet in the
-[recorded disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30).
+[recorded disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30).
 These are planning reviews, not product evidence or formal independent closure
 review. The acceptance transition updates the roadmap and project README
 alongside the coordinated governance records.
@@ -2029,7 +2029,7 @@ The unchanged retained probe passes both cases on the supported floor pair
 in 0.7 seconds without observing a diagnostic. This does not resolve the
 current-pair failure; no production repair is claimed.
 
-The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+The [pre-1.0 maintainer override](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes the older-reader, upgrade and cross-version rollback bullets above.
 The old archive runner, helpers and exclusive fixtures have been removed.
 Current-format recovery preserves staged requests and resolves uncertainty
@@ -2107,5 +2107,5 @@ implicit limit. The fixture’s required proof now uses a ten-minute aggregate b
 than a one-minute bound. Every restore retains its 10,000-ms work limit, 1,000-ms fixture
 grace, original derived cleanup deadlines, exact process joins and integrity
 checks; transition 65 still refuses before physical IO. The full current/floor
-restore proof remains required. The [disposition](../developer/agent-context-map.md#disposition-m7-restore-aggregate-cutoff-2026-10-06)
+restore proof remains required. The [disposition](../process/agent-context-map.md#disposition-m7-restore-aggregate-cutoff-2026-10-06)
 records this maintainer override; approval supplies no passing evidence.

@@ -25,12 +25,12 @@ and subsystem routing in the context map.
 Start with the current task, this file, and
 [docs/plans/README.md](docs/plans/README.md) for the milestone status. Then read
 the active plan pair and the relevant code and tests. Use
-[docs/developer/agent-context-map.md](docs/developer/agent-context-map.md) to
+[docs/process/agent-context-map.md](docs/process/agent-context-map.md) to
 load constraining vision sections, accepted ADRs, and version-specific technical
 guidance. Use [DEVELOPMENT.md](DEVELOPMENT.md) for local prerequisites and the
 check commands. Read the
-[development charter](docs/developer/development-charter.md#concept) and its
-[technical companion](docs/developer/development-charter-technical.md#technical-depth)
+[development charter](docs/process/development-charter.md#concept) and its
+[technical companion](docs/process/development-charter-technical.md#technical-depth)
 before creating or restructuring project documentation. Read the full vision
 pair for architecture, trust, public contracts, cross-domain work, or a new
 plan. Do not bulk-read historical plans.
@@ -91,7 +91,7 @@ client entrypoints, README files, indexes/status registers, runbooks,
 changelogs, evidence logs, executable skills and scripts, generated references,
 licenses, source, configuration, and archive material are explicit exceptions.
 The complete classification lives in the
-[charter technical companion](docs/developer/development-charter-technical.md#technical-depth).
+[charter technical companion](docs/process/development-charter-technical.md#technical-depth).
 
 Every directory under `docs/` carries a `README.md` describing its contents and
 linking back to [docs/README.md](docs/README.md), which links back to the root
@@ -137,7 +137,7 @@ superseded code, decoders, compatibility shims and fallback paths instead of
 supporting older versions. Older-root migration, old-client compatibility and
 cross-version rollback are not required acceptance proofs. Current-format
 restart/replay, durability, authority, cleanup and backup/restore remain required.
-The [maintainer disposition](docs/developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+The [maintainer disposition](docs/process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes earlier compatibility obligations for active work; historical evidence
 remains a record of its tested revision.
 
@@ -162,7 +162,7 @@ or a version-shaped slug such as `v0.1`.
 A *release* is a separately authorized publication.
 
 A milestone runs in four steps; the
-[milestone guide](docs/developer/milestones.md#concept) has the procedure:
+[milestone guide](docs/process/milestones.md#concept) has the procedure:
 
 1. **Agree.** The plan pair names purpose, outcomes, scope, key design
    decisions, and how each outcome will be verified. The maintainer accepts it.
@@ -183,7 +183,7 @@ A milestone runs in four steps; the
    identities produced later by runs and review of that exact commit. The
    candidate commit itself moves the register and both marked status blocks
    from `In progress` to `In review`. From that candidate run the closure matrix the
-   [verification guide](docs/developer/verification.md#concept-verification-stages)
+   [verification guide](docs/process/verification.md#concept-verification-stages)
    states once: `bash scripts/check.sh` under the floor toolchain pair and
    `bash scripts/check-release.sh` once, counting a current-pair fast check of
    that exact candidate from CI or a local run with its complete output and
@@ -191,7 +191,7 @@ A milestone runs in four steps; the
    release check's fresh-source lane retains outside its extraction the exact
    NUL-delimited bytes emitted by `scripts/source-archive-manifest.sh` for the
    tested archive staged under the milestone guide's
-   [canonical archive-extraction rule](docs/developer/milestones-technical.md#technical-milestones-archive-extraction),
+   [canonical archive-extraction rule](docs/process/milestones-technical.md#technical-milestones-archive-extraction),
    retaining them under their own reference and SHA-256 digest. An independent
    reviewer
    reads the candidate; the maintainer closes it and the administrative direct
@@ -208,7 +208,7 @@ A milestone runs in four steps; the
    disposition, designated evidence-scaffold placeholders, and the root
    README's supplied marked status summary —
    which the
-   [milestone guide](docs/developer/milestones-technical.md#technical-milestones-confinement)
+   [milestone guide](docs/process/milestones-technical.md#technical-milestones-confinement)
    states once. Complete run outputs are immutable outside the repository; the
    evidence page records each retained-output reference and SHA-256 digest.
 4. **Release.** Publication, tags, and packages are separate maintainer
@@ -223,7 +223,7 @@ A milestone runs in four steps; the
    current-state page named in step 3, and the archive comparison on
    the administrative SHA. Stage that SHA into a fresh `git archive`
    extraction under the milestone guide's scoped-umask
-   [archive-extraction rule](docs/developer/milestones-technical.md#technical-milestones-archive-extraction)
+   [archive-extraction rule](docs/process/milestones-technical.md#technical-milestones-archive-extraction)
    and run
    `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
    with the output outside the extraction. Retain its exact NUL-delimited
@@ -279,7 +279,7 @@ its worktree.
 
 The rule book for checking work — the three stages, which checks a changed
 boundary selects, and what makes them trustworthy — is the
-[verification guide](docs/developer/verification.md#concept). The
+[verification guide](docs/process/verification.md#concept). The
 repository's checks are two commands, described in
 [DEVELOPMENT.md](DEVELOPMENT.md):
 

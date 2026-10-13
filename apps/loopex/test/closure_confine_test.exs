@@ -101,7 +101,7 @@ defmodule Loopex.ClosureConfineTest do
            fn files ->
              Map.update!(
                files,
-               "docs/developer/agent-context-map.md",
+               "docs/process/agent-context-map.md",
                &String.replace(&1, "unchanged earlier disposition", "changed earlier disposition")
              )
            end},
@@ -224,7 +224,7 @@ defmodule Loopex.ClosureConfineTest do
       fixture_admin(c, fn files ->
         Map.update!(
           files,
-          "docs/developer/agent-context-map.md",
+          "docs/process/agent-context-map.md",
           &String.replace(&1, "disposition-m6-closure", "disposition-other-closure")
         )
       end)
@@ -235,7 +235,7 @@ defmodule Loopex.ClosureConfineTest do
       fixture_admin(c, fn files ->
         Map.update!(
           files,
-          "docs/developer/agent-context-map.md",
+          "docs/process/agent-context-map.md",
           &(&1 <> "\n### another closure — 2026-09-27\n")
         )
       end)
@@ -246,7 +246,7 @@ defmodule Loopex.ClosureConfineTest do
       fixture_admin(c, fn files ->
         Map.update!(
           files,
-          "docs/developer/agent-context-map.md",
+          "docs/process/agent-context-map.md",
           &(&1 <> "   ### another closure — 2026-09-27\n")
         )
       end)
@@ -357,7 +357,7 @@ defmodule Loopex.ClosureConfineTest do
       "docs/plans/M6.md" =>
         "unchanged plan prose includes | Closure | — | — | — | inline\n| Decision | Authority | Authority evidence | Bound bytes |\n| --- | --- | --- | --- |\n| Closure | — | — | — |\n",
       "docs/plans/M6-technical.md" => "unchanged technical contract\n",
-      "docs/developer/agent-context-map.md" => "unchanged earlier disposition\n",
+      "docs/process/agent-context-map.md" => "unchanged earlier disposition\n",
       "docs/evidence/M6-closure-runs.md" =>
         "# Closure runs\n| Fixed label | Value |\n| --- | --- |\n| Check | Pending |\n| Core runtime comparison against `v0.2.0` | Pending |\n| Independent `v0.2.0`–candidate `mix.lock` package-key comparison | Pending |\n| Pending review | sha256:Pending |\n",
       "README.md" =>
@@ -374,7 +374,7 @@ defmodule Loopex.ClosureConfineTest do
         "unchanged register prose includes | `M6` | In review | [concept](M6.md) | [technical depth](M6-technical.md) | — | inline\n<!-- loopex:current-status:start -->\n## Current Status\nM6 Closed\n<!-- loopex:current-status:end -->\n<!-- loopex:milestone-register:start -->\n| `M6` | Closed | [concept](M6.md) | [technical depth](M6-technical.md) | — |\n<!-- loopex:milestone-register:end -->\n",
       "docs/plans/M6.md" =>
         "unchanged plan prose includes | Closure | — | — | — | inline\n| Decision | Authority | Authority evidence | Bound bytes |\n| --- | --- | --- | --- |\n| Closure | Maintainer | recorded | candidate `#{tested}`; concept `sha256:#{concept_digest}`; technical `sha256:#{technical_digest}` |\n",
-      "docs/developer/agent-context-map.md" =>
+      "docs/process/agent-context-map.md" =>
         "unchanged earlier disposition\n\n<a id=\"disposition-m6-closure-2026-09-27\"></a>\n### M6 closure — 2026-09-27\n\nThe maintainer closed M6.\n",
       "docs/evidence/M6-closure-runs.md" =>
         "# Closure runs\n| Fixed label | Value |\n| --- | --- |\n| Check | PASS |\n| Core runtime comparison against `v0.2.0` | PASS; retained=/tmp/core; sha256:#{String.duplicate("a", 64)} |\n| Independent `v0.2.0`–candidate `mix.lock` package-key comparison | PASS; candidate=#{tested}; keys=/tmp/keys; output=/tmp/out; sha256:#{String.duplicate("b", 64)} |\n| Pending review | sha256:#{String.duplicate("a", 64)} |\n",

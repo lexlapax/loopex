@@ -6,9 +6,9 @@ smoke proves only the behavior it actually exercised. Unavailable evidence is
 never promoted to a pass.
 
 The governing method is in [AGENTS.md](../../AGENTS.md), the current mapping is
-in the [context map](agent-context-map.md), and the capability classes are
-defined by the [Concept rule](development-charter.md#concept-capability-follows-consequence)
-and [Technical depth](development-charter-technical.md#technical-capability-follows-consequence).
+in the [context map](../process/agent-context-map.md), and the capability classes are
+defined by the [Concept rule](../process/development-charter.md#concept-capability-follows-consequence)
+and [Technical depth](../process/development-charter-technical.md#technical-capability-follows-consequence).
 What a new entry retains, and when a smoke is rerun, is in the context map's
 Development Client Guidance section.
 
@@ -133,7 +133,7 @@ description, or static check is routing metadata, not capability proof. Model
 selection never changes authority, scope, permissions, acceptance, or the
 evidence a check requires. The adaptive rules and the full reference list
 live with the mapping in the
-[context map](agent-context-map.md); the 2026-08-15 mapping it supersedes is
+[context map](../process/agent-context-map.md); the 2026-08-15 mapping it supersedes is
 retained there.
 
 Installed clients on 2026-09-14 reported `codex-cli 0.147.0` and Claude Code

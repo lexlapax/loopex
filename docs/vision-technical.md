@@ -15,7 +15,7 @@ their linked terminology/provenance notes in sections 5 and 12.3, bounded provid
 continuation in section 13.4 with its linked risk note in section 25 of the
 technical file, and linked decision-trigger dispositions in section 27 as part
 of M7 at `2986150b878151524ecdd9bac5a9779e69e196b4`. The
-[acceptance disposition](developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+[acceptance disposition](process/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds both historical files. These amendments govern their named scope and
 permit dependent implementation. Retained historical clauses describe the prior
 state; the opaque-continuation rule still governs formats outside ADR 0044.
@@ -2697,7 +2697,7 @@ mapping and protocol-v1 criteria; and compatibility/deprecation policy.
 
 The repository should become practical, directly inspectable learning material
 for Elixir development and the Loopex runtime. The paired
-[development charter](developer/development-charter-technical.md#technical-depth)
+[development charter](process/development-charter-technical.md#technical-depth)
 owns the exact classification, anchor, reciprocal-link, report, review, and
 code-documentation mechanics; `AGENTS.md` owns their required development
 behavior. In particular:

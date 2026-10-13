@@ -6,7 +6,7 @@ description: "Find a change to production code that breaks a stated guarantee wh
 # Hunt a Mutant the Tests Miss
 
 Follow `AGENTS.md` first; read `docs/plans/README.md` for the register, then
-use `docs/developer/agent-context-map.md` for routing and version-specific
+use `docs/process/agent-context-map.md` for routing and version-specific
 technical guidance.
 
 This is negative evidence. Tests prove that the behaviour they drive is

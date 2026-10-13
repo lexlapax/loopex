@@ -13,8 +13,8 @@ contract hashes remain historical evidence of the revisions they name.
 
 ## Concept
 
-The maintainer selected [bounded thinking continuation](../developer/agent-context-map.md#disposition-m7-thinking-continuation-2026-09-30)
-for selected Claude modes in M7, and [stop-only helper recovery](../developer/agent-context-map.md#disposition-m7-helper-recovery-2026-09-30)
+The maintainer selected [bounded thinking continuation](../process/agent-context-map.md#disposition-m7-thinking-continuation-2026-09-30)
+for selected Claude modes in M7, and [stop-only helper recovery](../process/agent-context-map.md#disposition-m7-helper-recovery-2026-09-30)
 after the helper manager crashes. Both choices are now proposed contracts.
 M7 remains Open, ADRs 0041–0049 remain Proposed, and the narrow vision amendment
 remains unaccepted. No product implementation or milestone acceptance follows
@@ -132,4 +132,4 @@ handoff. No provider call, product suite or release check is claimed here.
 | [0049-explicit-host-configuration.md](../adr/0049-explicit-host-configuration.md) | `65cfeddbeba3806f4f9e0f8df4c87da840d031a361fd4313159328282ad66137` |
 | [0038-installed-distribution-and-release-artifact-technical.md](../adr/0038-installed-distribution-and-release-artifact-technical.md) | `b4d0503d93dfd912a9dbcb9726d70f0d2010fc13f96dc12cb4fc141d2dc92bba` |
 | [0038-installed-distribution-and-release-artifact.md](../adr/0038-installed-distribution-and-release-artifact.md) | `7f85864dbc18ad9ba22e6befb847f8ce5ce3bbb103c3382eabf6334d7aaa5dac` |
-| [agent-context-map.md](../developer/agent-context-map.md) | `dfde27b6935542d2c8058ee6839bc1e7ba15bffe781d2b910f5648f5c215ef3d` |
+| [agent-context-map.md](../process/agent-context-map.md) | `dfde27b6935542d2c8058ee6839bc1e7ba15bffe781d2b910f5648f5c215ef3d` |

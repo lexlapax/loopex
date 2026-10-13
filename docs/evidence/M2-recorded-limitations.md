@@ -136,7 +136,7 @@ owned operating-system child can outlive it.
 
 **Disposition.** Maintainer, 2026-09-01: accept the ledger root as the trusted
 atomic administrative boundary and retain this limitation, as part of the
-[recorded acceptance of ADRs 0015–0018](../developer/agent-context-map.md#disposition-adrs-0015-through-0018-acceptance-2026-09-01).
+[recorded acceptance of ADRs 0015–0018](../process/agent-context-map.md#disposition-adrs-0015-through-0018-acceptance-2026-09-01).
 This records the boundary ADR 0016 already chose; it does not waive a failed
 ledger check, authorize automatic cleanup, or turn unavailable authority into a
 clean verdict.

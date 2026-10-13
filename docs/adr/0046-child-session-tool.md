@@ -158,4 +158,4 @@ embedding does not offer helpers in M7.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:029ee9cc4128d20766c79a430da9c1570ebe149ac92a818a2932e3367e1121e3`; technical `sha256:1deabc22dd44c5d4ad04cda271d62fbece7db87a6ce6b536672853413fdbfdab` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:029ee9cc4128d20766c79a430da9c1570ebe149ac92a818a2932e3367e1121e3`; technical `sha256:1deabc22dd44c5d4ad04cda271d62fbece7db87a6ce6b536672853413fdbfdab` |

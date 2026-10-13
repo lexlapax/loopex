@@ -7,7 +7,7 @@ Technical depth: [Configure request grammar](0053-current-configure-request-tech
 - **Date:** 2026-10-06
 - **Decision owner:** Maintainer
 - **Proposed amendment:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), only the exact configure request grammar in its current foreground generation 3 and daemon generation 4.
-- **Constrained by:** [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0050](0050-host-configuration-preparation.md#concept), existing transport authority and framing, and the [pre-1.0 current-contract rule](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+- **Constrained by:** [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0050](0050-host-configuration-preparation.md#concept), existing transport authority and framing, and the [pre-1.0 current-contract rule](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
 
 <a id="concept-adr-0053-decision"></a>
 ### Purpose and proposed decision
@@ -75,4 +75,4 @@ partial manifest or authorize milestone closure, publication or relaxed checks.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-configure-request-2026-10-06) | candidate `838cf0e3a9faa0fe13a8824465115a3372bad15b`; concept `sha256:4b15cd997d612b39769274c3614988f0911f2c3a804a2db8fa0541ea806691b6`; technical `sha256:faee5f4558fcc40658b601aaa107979123efb5a64cdd68279cc3abd8451e1a21` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-configure-request-2026-10-06) | candidate `838cf0e3a9faa0fe13a8824465115a3372bad15b`; concept `sha256:4b15cd997d612b39769274c3614988f0911f2c3a804a2db8fa0541ea806691b6`; technical `sha256:faee5f4558fcc40658b601aaa107979123efb5a64cdd68279cc3abd8451e1a21` |

@@ -19,7 +19,7 @@ retry allowance, budgets, terminal selection, and other rules remain in force.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0019-0021-2026-09-07) | candidate `b7f97092f7b6d6661e66bc775fd88195b92b67a0`; concept `sha256:ce25d99eb282c732a16d938d2385a7d75dffb30a9099183a8340a03b8a607bd4`; technical `sha256:7041508edcaeaa53a39647cf524fc489470f46dba08c5dfff462c297e5f010d3` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-adrs-0019-0021-2026-09-07) | candidate `b7f97092f7b6d6661e66bc775fd88195b92b67a0`; concept `sha256:ce25d99eb282c732a16d938d2385a7d75dffb30a9099183a8340a03b8a607bd4`; technical `sha256:7041508edcaeaa53a39647cf524fc489470f46dba08c5dfff462c297e5f010d3` |
 
 <a id="concept-adr-0021-context"></a>
 ## Context

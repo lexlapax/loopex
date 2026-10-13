@@ -1,7 +1,8 @@
 # Developer Documentation
 
-How Loopex is built, how to build on it, and how work on it is planned,
-checked and recorded. Part of the [documentation index](../README.md).
+How Loopex is built and how to build on it. How Loopex itself is developed is
+in the [development process](../process/README.md). Part of the
+[documentation index](../README.md).
 
 ## Start Here
 
@@ -19,12 +20,12 @@ New to the repository, in this order:
    Directing the Work section covers how development is requested.
 5. [AGENTS.md](../../AGENTS.md) — the canonical development contract: authority,
    autonomy tiers, milestones and checks.
-6. [Development charter](development-charter.md#concept) — why documentation is
+6. [Development charter](../process/development-charter.md#concept) — why documentation is
    shaped the way it is, before adding or restructuring any of it.
 
 Read the [vision pair](../vision.md#concept) when the work touches architecture,
 trust boundaries, public contracts, or a new plan. Use the
-[context map](agent-context-map.md) to load only the sections a task needs
+[context map](../process/agent-context-map.md) to load only the sections a task needs
 rather than reading documents end to end.
 
 ## Building on Loopex
@@ -45,35 +46,17 @@ works.
 
 ## Contributing
 
-For changing Loopex: which checks a change needs, how a milestone runs, and
-where to read for a given task.
-
-| Document | Purpose |
-| --- | --- |
-| [Verification](verification.md#concept) · [technical](verification-technical.md#technical-depth) | The rule book for checking work: three stages with one question each, how a changed boundary selects its checks, the rules that keep checks honest, and the measured speed plan; then what each stage runs, where each boundary's checks live, and the measurements. |
-| [Milestones](milestones.md#concept) · [technical](milestones-technical.md#technical-depth) | How to plan, run, close and release a milestone: the plan pair, small reviewed merges, the two-commit closure and the pre-tag proofs; then the exact plan sections, register row, branch conventions, closure commands, confinement rule and tag. |
-| [Agent context map](agent-context-map.md) | Task-oriented routing into Concept first and exact Technical depth second, current client facts and capability mappings, and the indexed record of maintainer dispositions. |
-
-## Governance
-
-The development method itself and the evidence that development clients follow
-it.
-
-| Document | Purpose |
-| --- | --- |
-| [Development charter](development-charter.md#concept) · [technical](development-charter-technical.md#technical-depth) | Clarity before mechanism: the two-depth documentation pairs, traceable links, report and decision-packet form, capability routing, proportional documentation, portable enforcement, and how the charter itself changes. |
-| [Adapter smoke evidence](agent-adapter-smoke.md) | Dated evidence of what the development clients actually load and enforce, including the read-only review lane. |
+Checks, milestones, the documentation charter and the context map are in the
+[development process](../process/README.md).
 
 ## Document Forms
 
-Paired documents — the getting-started, architecture, protocol, daemon,
-observability, verification, milestone and charter pairs — are a Concept file
+Paired documents — the getting-started, architecture, protocol, daemon and
+observability pairs — are a Concept file
 and a Technical depth file changed and reviewed as one authority. Runtime and
 embedding, agent loop and tools, and compatibility surfaces are subsystem
 references that carry both depths in one file, each opening with its `Concept`
-section and reaching its `Technical depth` section below it. The context map
-and the smoke evidence are routing and evidence records; they are deliberately
-unpaired and may link both depths.
+section and reaching its `Technical depth` section below it.
 
 ## Related
 

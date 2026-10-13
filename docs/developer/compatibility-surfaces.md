@@ -3,7 +3,7 @@
 <a id="concept"></a>
 ## Concept
 
-The [pre-1.0 maintainer override](agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+The [pre-1.0 maintainer override](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes this inventory's older-reader, backward-read, migration and
 cross-version rollback promises. Current boundaries retain only their current
 contracts. Historical statements below describe their named revisions;
@@ -18,12 +18,12 @@ The current preparation-failure union includes
 `maintenance_reply_reserve_unavailable` for a run that needs another summary,
 has turns remaining, and has 1–1,023 unspent tokens. Its failed outcome retains
 actual usage and any prior checkpoint, and it uses no new public bound
-([ADR 0043 amendment](agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)).
+([ADR 0043 amendment](../process/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)).
 Checkpoint events identify their actual owner with the closed
 `{kind: "run" | "compact", id}` object, whose opaque identity both the
 foreground `/3` and daemon `/4` projections encode with the base64url codec;
 there is no public owning `run_id` alias
-([owner amendment](agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)).
+([owner amendment](../process/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)).
 Literal vectors cover both kinds, malformed shapes and the complete identity
 ceiling.
 Breaking an experimental API in a minor release carries an explicit migration
@@ -77,7 +77,7 @@ The command boots standard input in byte mode so OTP 27 cannot decode an
 `ask` prompt before admission. The other subcommands restore Unicode output and keep
 ASCII `y`/`yes` confirmations. A prefetched confirmation padded with Unicode
 whitespace may be rejected, an explicitly
-[accepted compatibility limit](agent-context-map.md#disposition-m6-stdio-2026-09-29).
+[accepted compatibility limit](../process/agent-context-map.md#disposition-m6-stdio-2026-09-29).
 Use plain ASCII confirmation input; persistent state is unchanged.
 
 Operator-facing consequences:

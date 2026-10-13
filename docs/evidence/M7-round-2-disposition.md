@@ -21,20 +21,20 @@ helper, configuration and credential checks. Findings and reread conclusions
 are recorded [below](#whole-packet-review). They are not formal acceptance reviews.
 No product implementation, provider call or milestone acceptance is claimed.
 
-The maintainer selected [option A: marked bounded excerpts](../developer/agent-context-map.md#disposition-m7-compaction-excerpts-2026-09-30)
+The maintainer selected [option A: marked bounded excerpts](../process/agent-context-map.md#disposition-m7-compaction-excerpts-2026-09-30)
 for oversized older content, retaining complete originals, and
-[option B: a separately configured summarizer](../developer/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30).
+[option B: a separately configured summarizer](../process/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30).
 The maintainer subsequently selected
-[option A: local references and initial thinking reserve](../developer/agent-context-map.md#disposition-m7-thinking-capacity-2026-09-30).
+[option A: local references and initial thinking reserve](../process/agent-context-map.md#disposition-m7-thinking-capacity-2026-09-30).
 The maintainer also selected
-[option A: live streaming](../developer/agent-context-map.md#disposition-m7-thinking-streaming-2026-09-30).
+[option A: live streaming](../process/agent-context-map.md#disposition-m7-thinking-streaming-2026-09-30).
 The maintainer selected
-[option A: verified public reasoning summaries](../developer/agent-context-map.md#disposition-m7-reasoning-summary-2026-09-30).
+[option A: verified public reasoning summaries](../process/agent-context-map.md#disposition-m7-reasoning-summary-2026-09-30).
 The maintainer also selected
-[up to 4 KiB per requested artifact read](../developer/agent-context-map.md#disposition-m7-artifact-range-size-2026-09-30)
-and [legacy inline reuse when the full request fits](../developer/agent-context-map.md#disposition-m7-legacy-inline-2026-09-30).
-The latest selections are [updated wire clients only](../developer/agent-context-map.md#disposition-m7-wire-client-upgrade-2026-09-30)
-and [one helper per conversation](../developer/agent-context-map.md#disposition-m7-helper-concurrency-2026-09-30),
+[up to 4 KiB per requested artifact read](../process/agent-context-map.md#disposition-m7-artifact-range-size-2026-09-30)
+and [legacy inline reuse when the full request fits](../process/agent-context-map.md#disposition-m7-legacy-inline-2026-09-30).
+The latest selections are [updated wire clients only](../process/agent-context-map.md#disposition-m7-wire-client-upgrade-2026-09-30)
+and [one helper per conversation](../process/agent-context-map.md#disposition-m7-helper-concurrency-2026-09-30),
 allowing helpers in independent conversations to overlap.
 All nine choices are drafted, including source projection, omission provenance,
 captured maintenance-model selection, expanded continuation accounting and
@@ -439,7 +439,7 @@ request with no tools produces text only. That needs its own verified adapter
 mapping; it is not generic support for `disabled`.
 
 These API facts do not establish support in pinned ReqLLM. The maintainer selected
-[B: configure a separate summarizer](../developer/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30)
+[B: configure a separate summarizer](../process/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30)
 for always-on conversation models, retaining the small thinking-off maintenance
 budget. Restricting long-session support to thinking-off-capable conversation
 models and increasing the maintenance reasoning allowance were not selected.

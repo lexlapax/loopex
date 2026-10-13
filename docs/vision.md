@@ -15,7 +15,7 @@ their linked terminology/provenance notes in sections 5 and 12.3, bounded provid
 continuation in section 13.4 with its linked risk note in section 25 of the
 technical file, and linked decision-trigger dispositions in section 27 as part
 of M7 at `2986150b878151524ecdd9bac5a9779e69e196b4`. The
-[acceptance disposition](developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+[acceptance disposition](process/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds both historical files. These amendments govern their named scope and
 permit dependent implementation. Retained historical clauses describe the prior
 state; the opaque-continuation rule still governs formats outside ADR 0044.
@@ -506,7 +506,7 @@ its paired companion. The pair is one authority: neither depth may hide a
 decision or contradict the other. Public code and important boundaries explain
 their concept before technical depth; private commentary is reserved for
 non-obvious invariants, effects, failure modes, and decisions. The
-[development charter](developer/development-charter.md#concept) owns the shared
+[development charter](process/development-charter.md#concept) owns the shared
 form and proportional exceptions.
 
 <a id="concept-vision-delivery-strategy"></a>

@@ -20,9 +20,9 @@ rebasing or squashing bound history. M3 subsequently Closed on `main` at
 `72c0a30`, and the M4 branch absorbed that Closed product base in `e1b37b1`.
 The M0–M2 Closed aggregate was proved green once at the opening candidate.
 Before the M3 refresh, under the reviewed
-[planning-revision aggregate override](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
+[planning-revision aggregate override](../process/agent-context-map.md#override-disposition-m4-planning-aggregate-2026-09-11)
 and its reviewed
-[widened scope](../developer/agent-context-map.md#override-disposition-m4-planning-aggregate-scope-2026-09-11),
+[widened scope](../process/agent-context-map.md#override-disposition-m4-planning-aggregate-scope-2026-09-11),
 later planning revisions of the Open lineage relied on that result: plan and gate
 documents, manifests, runner and support work, prerequisite ADR proposals,
 documentation, and repository-status enforcement with its tests, provided the
@@ -50,7 +50,7 @@ M4 accepts five decisions before dependent work:
 | [**ADR 0024**](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Maintainer, before M4 acceptance; must fix the exact maximum of successive answer → defer rounds per tool decision | Durable policy `defer`/answer lifecycle owned by the session with host-policy authority preserved |
 | [**ADR 0026**](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M4 acceptance; holder transactions below settle after M3 closes | Explicit floor/current validation pairs replacing the derived pin rule |
 | [**ADR 0028**](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M4 acceptance; carries the transfer design below | Bounded artifact transfer through the facade and ArtifactStore with distinct object/chunk digests |
-| [**ADR 0030**](../adr/0030-observability-tracing-and-telemetry.md#concept) | Maintainer, before M4 acceptance; the core dependency is admitted by the recorded [vision change](../developer/agent-context-map.md#disposition-m4-vision-core-telemetry-2026-09-13), supersedes only the two ADR 0001 empty-dependency clauses for `apps/loopex`, and lands through the M1 dependency-oracle transaction in phase B | Runtime-owned isolated OTP trace sessions with identity-only default capture and exact limits; `:telemetry` spans at every port callback and transaction cut in a bound arity-exact inventory; the `loopex_telemetry` edge owning the only Loopex-attached handler; dispatcher-owned bounded diagnostics admission with counted drops |
+| [**ADR 0030**](../adr/0030-observability-tracing-and-telemetry.md#concept) | Maintainer, before M4 acceptance; the core dependency is admitted by the recorded [vision change](../process/agent-context-map.md#disposition-m4-vision-core-telemetry-2026-09-13), supersedes only the two ADR 0001 empty-dependency clauses for `apps/loopex`, and lands through the M1 dependency-oracle transaction in phase B | Runtime-owned isolated OTP trace sessions with identity-only default capture and exact limits; `:telemetry` spans at every port callback and transaction cut in a bound arity-exact inventory; the `loopex_telemetry` edge owning the only Loopex-attached handler; dispatcher-owned bounded diagnostics admission with counted drops |
 
 **Artifact transfer design (decided).** The earlier draft admitted
 1–16,384-byte ranges while the local store admits 64 MiB objects and verified

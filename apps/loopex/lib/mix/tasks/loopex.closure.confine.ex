@@ -167,7 +167,7 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
     [
       "docs/plans/README.md",
       "docs/plans/#{c.name}.md",
-      "docs/developer/agent-context-map.md",
+      "docs/process/agent-context-map.md",
       "docs/evidence/#{c.name}-closure-runs.md",
       "README.md"
     ]
@@ -346,7 +346,7 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
   end
 
   defp context_append(c) do
-    path = "docs/developer/agent-context-map.md"
+    path = "docs/process/agent-context-map.md"
     escaped_name = Regex.escape(String.downcase(c.name))
     heading_name = Regex.escape(c.name)
 

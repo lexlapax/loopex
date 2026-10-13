@@ -192,7 +192,7 @@ before those mutations resume. The ledger retains:
   options and an explicit closed input map `{genesis_version,
   runtime_configuration, initial_configuration, tool_selection,
   policy_defer_mode}` for current v3. Superseded genesis refuses under the
-  [pre-1.0 disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+  [pre-1.0 disposition](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
   Values are already resolved startup data, including actual cleanup grace and
   exact definitions; tool_selection omits artifact_read, which the resolver derives
   under ADR 0041; it performs no catalog, registry, Store or clock lookup.
@@ -579,7 +579,7 @@ in braces below denote closed plain maps; tagged API results are tuples.
   Keep `/3`'s existing result union: `{:ok, {:historical, session_id} | :absent |
   :conflict | :store_unavailable | :unexpected}` or
   `{:error, :runtime_unavailable}`. Invalid supplied genesis returns unexpected;
-  a different retained binding returns conflict. Implicit `/3` uses the [captured runtime template](../developer/agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04);
+  a different retained binding returns conflict. Implicit `/3` uses the [captured runtime template](../process/agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04);
   parent/child binding recovery uses `/4` with retained current genesis. This is the narrow
   ADR 0016 amendment for exact-genesis live creation and historical lookup,
   not permission to

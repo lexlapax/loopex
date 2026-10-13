@@ -37,7 +37,7 @@ reject duplicates/unused mappings. Validate `artifact_read` under ADR 0041
 against those exact retained definitions and its fixed table. This derived field
 is not a create/configure option or a grant. Preserve mandatory committed cleanup.
 Preflight the complete genesis against 65,536 bytes before create commits.
-Under the [pre-1.0 maintainer disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02),
+Under the [pre-1.0 maintainer disposition](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02),
 the decoder accepts only complete v3 genesis. Superseded kinds, missing cleanup
 or missing captures refuse; no historical selection inference, empty-session
 migration or startup default can authorize dispatch. Current-format restart,
@@ -496,7 +496,7 @@ reply compaction. A maintenance settlement is ADR 0043's separate maintenance
 settlement kind; it carries the same v3 reply, result and accounting members
 under `episode_id` and summary ordinal. This explicitly amends ADR 0021's
 v2-only writer clause. Under the maintainer's
-[pre-1.0 current-contract rule](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02),
+[pre-1.0 current-contract rule](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02),
 only `model_attempt_settled_v3` is admitted. Retired v1/v2 kinds refuse at the
 record decoder and in recovered private history, whether first or later in that
 history. Their validators, ambiguity-only accounting branches and monotonic

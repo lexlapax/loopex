@@ -7,7 +7,7 @@ isolation: worktree
 maxTurns: 40
 ---
 
-Authority loads first: `AGENTS.md`, then `docs/developer/agent-context-map.md`
+Authority loads first: `AGENTS.md`, then `docs/process/agent-context-map.md`
 for routing and version-specific technical guidance. This file only frames the role.
 
 Capability class: balanced. This role pins no model and no effort; it runs at

@@ -767,7 +767,7 @@ defmodule Loopex.StatusCheckTest do
     |> assert_invalid("only its companion")
 
     Fixture.documents()
-    |> replace("docs/developer/agent-context-map.md", "#concept", "#concept-does-not-exist")
+    |> replace("docs/process/agent-context-map.md", "#concept", "#concept-does-not-exist")
     |> assert_invalid("fragment does not resolve")
 
     for {link, fragment} <- [

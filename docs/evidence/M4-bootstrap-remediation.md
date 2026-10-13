@@ -1,7 +1,7 @@
 # M4 Bootstrap Remediation
 
 Retained as the replacement evidence named by the M4 bootstrap-at-rebind
-disposition in the [context map](../developer/agent-context-map.md#override-disposition-m4-bootstrap-at-rebind-2026-09-15).
+disposition in the [context map](../process/agent-context-map.md#override-disposition-m4-bootstrap-at-rebind-2026-09-15).
 The Amendment 7 rebind could not pass `scripts/check-bootstrap.sh` at its own
 bytes; this is a complete green run of that aggregate on the `m4`
 branch after the commit-title exception landed, taken inside the full M4 gate

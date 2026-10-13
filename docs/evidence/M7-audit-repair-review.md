@@ -2,7 +2,7 @@
 
 Historical checkpoint: `4c2d1c9ff93accc4161697f83f87487d14266dd7`.
 The disposition and hashes below describe that revision. The later maintainer
-[thinking-continuation choice](../developer/agent-context-map.md#disposition-m7-thinking-continuation-2026-09-30)
+[thinking-continuation choice](../process/agent-context-map.md#disposition-m7-thinking-continuation-2026-09-30)
 selects bounded provider continuation for the next M7 revision; it does not
 change this checkpoint's recorded findings or hashes.
 

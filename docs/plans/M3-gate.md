@@ -4,10 +4,10 @@ Open candidate for project skills and core repairs. No plan or ADR is accepted
 by this revision. The runner binds a real behavioral opening probe, executable
 closure lanes and exact future witness identities. Under the independently
 reviewed maintainer
-[preparation-rule ratification](../developer/agent-context-map.md#override-disposition-m3-incremental-witness-ratification-2026-09-10),
+[preparation-rule ratification](../process/agent-context-map.md#override-disposition-m3-incremental-witness-ratification-2026-09-10),
 future test bodies are written during implementation; every named witness must
 pass before closure. The independently reviewed
-[acceptance aggregate override](../developer/agent-context-map.md#override-disposition-m3-acceptance-aggregate-2026-09-10)
+[acceptance aggregate override](../process/agent-context-map.md#override-disposition-m3-acceptance-aggregate-2026-09-10)
 replaces only the new M0–M2 aggregate at this plan-acceptance transition;
 candidate validation and independent review remain required.
 
@@ -93,7 +93,7 @@ identities and required state are fixed in `scripts/m3-outcomes.exs`. Existing
 Closed gate and bound-artifact bytes remain unchanged except for the exact
 shared selector diagnostic repair and named M1/M2/M3 replacement bindings in
 [Amendment 2](#amendment-2), under the
-[approved successor exception](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12).
+[approved successor exception](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12).
 The M3 gate-support tests follow the same witness rule; their whole-file bytes
 are not frozen. The inherited M1 harness corpus remains digest-bound, including
 its Amendment 2 replacement below.
@@ -273,7 +273,7 @@ cases through the existing required suite. Missing APIs/tests or setup failures
 are not that red; no new locked witness name is introduced by this amendment.
 
 For these documentation-only A/R revisions, the approved
-[Amendment 1 gate-cadence override](../developer/agent-context-map.md#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
+[Amendment 1 gate-cadence override](../process/agent-context-map.md#override-disposition-m3-amendment1-gate-cadence-2026-09-11)
 defers full M0–M3 execution to the completed implementation candidate, including
 Linux serenity. Those A/R commands are **unrun**, never PASS. Keep focused
 status, artifact/envelope binding, documentation and bootstrap checks, plus
@@ -293,12 +293,12 @@ and explicit acceptance of this actual A SHA by the recorded delegate, its
 immediate one-parent child R records one fresh disposition and rebinds Acceptance
 to A's Concept envelope, Technical envelope and gate digests.
 
-The [approved repair](../developer/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) binds the exact shared runner/corpus patch
+The [approved repair](../process/agent-context-map.md#override-disposition-m3-selector-diagnostics-2026-09-12) binds the exact shared runner/corpus patch
 `sha256:d2bfe33c46ff83c97fb80ff4406c78c37e1d878739854af03f26cc65a8e7c1c8`. This proposal changes only their two M3 Bound Artifacts
 rows, this amendment and the plan pair's explanation of approved diagnostic and
 validation scope. M1 and M2 already own their script digest replacements; M3's
 gate script reads this table and needs no byte change. The plan also records
-the separately approved [sequential binding checker correction](../developer/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12).
+the separately approved [sequential binding checker correction](../process/agent-context-map.md#override-disposition-m3-sequential-binding-checker-2026-09-12).
 
 Failure-only records retain mode/seed, bounded case identifiers and attributable
 source locations, and closed failure categories and operand types. Limits remain
@@ -338,7 +338,7 @@ delegate, its immediate one-parent child records a fresh acceptance disposition
 and rebinds Acceptance to the proposal's unchanged envelope digests and new gate
 digest.
 
-The [approved checksum repair](../developer/agent-context-map.md#override-disposition-m3-checksum-portability-2026-09-12)
+The [approved checksum repair](../process/agent-context-map.md#override-disposition-m3-checksum-portability-2026-09-12)
 authorizes exact patch
 `sha256:0468bc9e55adca559d37351257076c1dbd7cbb5f491b36cf66464193e1dd5b57`.
 This proposal changes only `scripts/check-m3-gate.sh`, that runner's Bound
@@ -382,10 +382,10 @@ Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) chose
 the validation pairs explicitly: floor Elixir 1.18.5 with OTP 27.3.4 and
 current Elixir 1.20.3 with OTP 29.0.5. M0, M1 and M2 settled the shared
 `.tool-versions` bytes through their
-[generation 7](../developer/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13),
-[generation 10](../developer/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14)
+[generation 7](../process/agent-context-map.md#disposition-m0-gate-generation-7-2026-09-13),
+[generation 10](../process/agent-context-map.md#disposition-m1-gate-generation-10-2026-09-14)
 and
-[generation 11](../developer/agent-context-map.md#disposition-m2-gate-generation-11-2026-09-14);
+[generation 11](../process/agent-context-map.md#disposition-m2-gate-generation-11-2026-09-14);
 M3 is the last Closed holder in register order, and Open M4 then refreshes
 its own table directly. This proposal rebinds only the `.tool-versions` row
 above and adds this amendment; the M3 runner reads its Bound Artifacts table
@@ -424,7 +424,7 @@ and generation-4 row remain unchanged. The new row carries this gate's digest
 and leaves authority, evidence and candidate unset until exact-proposal
 acceptance.
 
-[The chain disposition](../developer/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
+[The chain disposition](../process/agent-context-map.md#override-disposition-closed-gate-repair-chain-v2-2026-09-17)
 orders this generation fourth. It changes three bound artifacts and repairs
 three defects that each stopped the gate before it observed anything.
 

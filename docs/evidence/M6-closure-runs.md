@@ -29,7 +29,7 @@ Each complete run records its exact source revision, platform, OTP/Elixir
 pair, result, measured duration, retained-output reference and SHA-256.
 The default closure rule takes a current-pair CI run of the exact candidate,
 or a clean local run of the same fast check. For M6 only, the
-[approved reuse disposition](../developer/agent-context-map.md#disposition-m6-evidence-reuse-2026-09-29)
+[approved reuse disposition](../process/agent-context-map.md#disposition-m6-evidence-reuse-2026-09-29)
 allows a successful earlier run to cover unchanged code after the intervening
 diff and affected or missing checks are verified. Every cell names its actual
 revision; no reused run is represented as an exact-candidate execution.
@@ -64,7 +64,7 @@ lane's complete output are retained separately; a failed full run is never
 relabeled `PASS`.
 
 For M6 only, the maintainer's
-[evidence-reuse disposition](../developer/agent-context-map.md#disposition-m6-evidence-reuse-2026-09-29)
+[evidence-reuse disposition](../process/agent-context-map.md#disposition-m6-evidence-reuse-2026-09-29)
 replaces the single exact-candidate full-run `PASS` requirement with successful
 unchanged-code evidence, a verified intervening diff, and affected or missing
 checks at their actual revisions. The rows below record both the original run

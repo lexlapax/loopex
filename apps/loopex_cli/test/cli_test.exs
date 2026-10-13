@@ -3201,7 +3201,7 @@ defmodule LoopexCliTest do
   # The test name below remains the historical locked selector identity.
   #
   # Technical depth: the explicit scoped override is recorded at
-  # docs/developer/agent-context-map.md#override-disposition-m3-cli-extension-ratification-2026-09-10.
+  # docs/process/agent-context-map.md#override-disposition-m3-cli-extension-ratification-2026-09-10.
   # Skill is optional before implementation. Ordinary and guarded literal heads
   # count once per command; guarded dynamic heads and dispatch-to-dispatch remaps
   # are refused because either could hide a command from the inventory.

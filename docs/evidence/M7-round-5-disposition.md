@@ -12,8 +12,8 @@ the failed attempt, require independent causal classification and permit the
 affected case on a new candidate. The earlier evidence-loss correction rule
 continues. The maintainer also selected ordinary thinking availability at M7
 closure: register the cells in the tested bytes, then require their counted live
-witnesses before closure. The [outage choice](../developer/agent-context-map.md#disposition-m7-round5-outage-2026-09-30)
-and [thinking choice](../developer/agent-context-map.md#disposition-m7-round5-thinking-support-2026-09-30)
+witnesses before closure. The [outage choice](../process/agent-context-map.md#disposition-m7-round5-outage-2026-09-30)
+and [thinking choice](../process/agent-context-map.md#disposition-m7-round5-thinking-support-2026-09-30)
 record these decisions. Optional extra live calibration remains unselected.
 
 M7 remains Open, ADRs 0041–0049 Proposed, and both labelled vision amendments
@@ -83,7 +83,7 @@ obligations before affected code is integrated; naming one does not prove it.
 | 47 | Proposal repaired | [M7](../plans/M7-technical.md#technical-plan-evidence): Both plan files bind all nine ADRs and both amendments as one exact-byte acceptance packet; headers name direct dependencies and no subset grants authority. |
 | 48 | Proposal repaired | [M7](../plans/M7-technical.md#technical-plan-evidence): Prerequisite rows/ADR headers name exact-create, standalone admission/abort, abandonment, scoped failures, completion and v3-only writer amendments. |
 | 49 | Proposal repaired | [0049](../adr/0049-explicit-host-configuration-technical.md#technical-adr-0049-decision): Concept owns pipe control lines, exit/refusal behavior and unknown-admission observation; ADR 0043 Concept owns unavailable-session recovery. |
-| 50 | Clarified | [routing](../developer/agent-context-map.md#area-routing): Context-map amendment pointer, complete prompt-cost statement, evidence table continuity, labelled risk note and successor config/ledger scope agree. |
+| 50 | Clarified | [routing](../process/agent-context-map.md#area-routing): Context-map amendment pointer, complete prompt-cost statement, evidence table continuity, labelled risk note and successor config/ledger scope agree. |
 
 ### Root adversarial pass
 

@@ -7,7 +7,7 @@ description: "Prepare, revise, or record a governed Loopex architecture decision
 
 Follow `AGENTS.md` authority and decision tiers first; read
 `docs/plans/README.md` for canonical status, then use
-`docs/developer/agent-context-map.md` for routing and version-specific technical
+`docs/process/agent-context-map.md` for routing and version-specific technical
 guidance. Read the development charter pair for Concept/Technical depth
 ownership, anchors, reciprocal links, and review form.
 

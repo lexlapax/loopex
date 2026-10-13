@@ -7,10 +7,10 @@ disable-model-invocation: true
 # Close a Milestone
 
 Follow `AGENTS.md` first; read `docs/plans/README.md` for the register, then
-use `docs/developer/agent-context-map.md` for routing and version-specific
+use `docs/process/agent-context-map.md` for routing and version-specific
 technical guidance. The process is the
-[milestone guide](../../../docs/developer/milestones.md); the checks are the
-[verification guide](../../../docs/developer/verification.md).
+[milestone guide](../../../docs/process/milestones.md); the checks are the
+[verification guide](../../../docs/process/verification.md).
 
 1. In the plan's progress section, map every purpose outcome to the tests,
    retained evidence, or demonstration that proves it. An outcome with no proof
@@ -34,7 +34,7 @@ technical guidance. The process is the
    block bytes and run `mix loopex.status` to validate them. From that **tested
    implementation SHA** —
    run the closure matrix in the
-   [verification guide](../../../docs/developer/verification.md#concept-verification-stages):
+   [verification guide](../../../docs/process/verification.md#concept-verification-stages):
    `bash scripts/check.sh` under the floor toolchain pair and
    `bash scripts/check-release.sh` once. The current pair's fast check is the
    CI run the candidate already produced; count it rather than repeating it.
@@ -42,7 +42,7 @@ technical guidance. The process is the
    retained-output reference, SHA-256 digest, tested implementation SHA,
    platform, and toolchain. The release check's M5-delivered fresh-source lane
    stages its tree under the milestone guide's
-   [canonical archive-extraction rule](../../../docs/developer/milestones-technical.md#technical-milestones-archive-extraction),
+   [canonical archive-extraction rule](../../../docs/process/milestones-technical.md#technical-milestones-archive-extraction),
    including the hostile caller-umask proof, then runs
    `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
    before building, with the retained output outside
@@ -60,7 +60,7 @@ technical guidance. The process is the
 5. Present the packet to the maintainer: outcomes and their proof, check
    results, review findings, and what remains. The maintainer closes it; then
    make the **administrative closure commit**, which is
-   [confined to five paths and the exact allowed region in each](../../../docs/developer/milestones-technical.md#technical-milestones-confinement):
+   [confined to five paths and the exact allowed region in each](../../../docs/process/milestones-technical.md#technical-milestones-confinement):
    the register row moved only from `In review` to `Closed` together with the
    complete supplied Current Status block in `docs/plans/README.md`, the plan's
    Closure row naming the
@@ -86,7 +86,7 @@ five-path and allowed-region confinement, then run
 the documentation check, the final semantic documentation gate over every
 current-state page, and the archive comparison on the administrative SHA.
 For that comparison, stage a fresh `git archive` extraction under the same
-[canonical archive-extraction rule](../../../docs/developer/milestones-technical.md#technical-milestones-archive-extraction),
+[canonical archive-extraction rule](../../../docs/process/milestones-technical.md#technical-milestones-archive-extraction),
 including the hostile caller-umask proof, then run the
 M5-delivered producer
 `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`

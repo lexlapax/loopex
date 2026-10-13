@@ -2108,7 +2108,7 @@ time — the other two of the thirteen stay serial on reasons of their own, a
 process-wide environment sentinel and a shared build artifact — each kept only after the application's suite stays green across several
 seeds, exactly as the M4 speed work converted the other twenty-one modules.
 The result is recorded against the baseline in the
-[verification companion](../developer/verification-technical.md#technical-verification-speed):
+[verification companion](../process/verification-technical.md#technical-verification-speed):
 that application was the fast check's critical path at M4 closure, with 96% of
 its time in those thirteen modules. Any module that stays serial keeps its
 reason recorded beside it.

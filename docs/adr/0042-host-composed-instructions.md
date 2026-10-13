@@ -55,7 +55,7 @@ trust decision; a filename alone never promotes project content.
 
 Technical depth: [Compatibility mechanics](0042-host-composed-instructions-technical.md#technical-adr-0042-compatibility).
 
-The [pre-1.0 maintainer disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+The [pre-1.0 maintainer disposition](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 retires the Core instruction fallback and superseded request/receipt readers.
 Current genesis requires exact instruction captures; current staged requests
 remain immutable, and restart uses retained configuration without rereading
@@ -66,4 +66,4 @@ option selects its own captured default and 1,000-token system ceiling.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:c1c9f9f6d37467cf111d1799d0fc709c73ccb035aa09dd5f609e53a65e2ea928`; technical `sha256:2c7704100a54c413b17c3171797e643557573f5a3589eb43422b1cc81b786e33` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:c1c9f9f6d37467cf111d1799d0fc709c73ccb035aa09dd5f609e53a65e2ea928`; technical `sha256:2c7704100a54c413b17c3171797e643557573f5a3589eb43422b1cc81b786e33` |

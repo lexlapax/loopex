@@ -7,7 +7,7 @@ Technical depth: [Host helper ledger byte recipe](0056-host-helper-ledger-recipe
 - **Date:** 2026-10-06
 - **Decision owner:** Maintainer
 - **Completes:** [ADR 0046](0046-child-session-tool.md#concept)'s private host persistence recipe; its helper authority, allowance, recovery and cancellation decisions remain unchanged.
-- **Constrained by:** [ADR 0049](0049-explicit-host-configuration.md#concept), [ADR 0051](0051-current-format-physical-restore.md#concept) and the [current-contract disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+- **Constrained by:** [ADR 0049](0049-explicit-host-configuration.md#concept), [ADR 0051](0051-current-format-physical-restore.md#concept) and the [current-contract disposition](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
 
 <a id="concept-adr-0056-purpose"></a>
 ### Purpose and boundary
@@ -136,4 +136,4 @@ remain open.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-helper-ledger-recipe-2026-10-07) | candidate `2dba3e7a2d574a7a07d5b77b35064da94ff17317`; concept `sha256:4fb1b01845e836fa65374e1d9d2ff28303af52930d8d9d1c0a0cf6f03303035d`; technical `sha256:1a6611055a708f35a91db8a5bda7452136eaec385283beffef0ca3e1e0529e77` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-helper-ledger-recipe-2026-10-07) | candidate `2dba3e7a2d574a7a07d5b77b35064da94ff17317`; concept `sha256:4fb1b01845e836fa65374e1d9d2ff28303af52930d8d9d1c0a0cf6f03303035d`; technical `sha256:1a6611055a708f35a91db8a5bda7452136eaec385283beffef0ca3e1e0529e77` |

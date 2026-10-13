@@ -70,4 +70,4 @@ a new serialized member implicitly.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:0111ef2009b04b2d3b90628fe520458f568dccdc30e5fd0c602ada403a002745`; technical `sha256:59b8f57fe876bd4edcdd9db77465861a923e0d1422db39a30607cd8fa61a2887` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:0111ef2009b04b2d3b90628fe520458f568dccdc30e5fd0c602ada403a002745`; technical `sha256:59b8f57fe876bd4edcdd9db77465861a923e0d1422db39a30607cd8fa61a2887` |

@@ -65,4 +65,4 @@ remain valid. Downgrade of roots with M7 configuration follows ADR 0044.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:26602eb1948ca9034940fa52adef8f027bb43056522cda27aec54e97a76d9233`; technical `sha256:dac68afe1dc995b17783439577020ca69ea41dd3ce209d88689c203c721fb81a` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:26602eb1948ca9034940fa52adef8f027bb43056522cda27aec54e97a76d9233`; technical `sha256:dac68afe1dc995b17783439577020ca69ea41dd3ce209d88689c203c721fb81a` |

@@ -136,10 +136,10 @@ M6 closed as the source release `v0.3.0`, which freezes no public surface.
 
 The [M7 coding-agent proof](plans/M7.md#concept) closed on 2026-10-13 and is
 the source release `v0.4.0`; its
-[closure disposition](developer/agent-context-map.md#disposition-m7-closure-2026-10-13)
+[closure disposition](process/agent-context-map.md#disposition-m7-closure-2026-10-13)
 records the evidence. Its coordinated plan, ADRs 0041–0049 and paired vision amendments
 were accepted at `2986150b878151524ecdd9bac5a9779e69e196b4`; the
-[disposition](developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+[disposition](process/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds those bytes. M7 owns continuity, instructions, compaction, model control,
 questions, conversational chat, bounded helpers and operator validation;
 later accepted ADRs through 0070 settle its implementation boundaries.

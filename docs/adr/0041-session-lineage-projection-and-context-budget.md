@@ -104,4 +104,4 @@ refuses unsupported identities instead of translating an old generation.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:2cb885b1ea791d48720333a52e5dcb9c6d03b7c9dbfd557b8cdad7662c4a8387`; technical `sha256:71c965437f8759c38095fc68f4a8c7420bdab3beb6933404f13c6c7c85574e20` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:2cb885b1ea791d48720333a52e5dcb9c6d03b7c9dbfd557b8cdad7662c4a8387`; technical `sha256:71c965437f8759c38095fc68f4a8c7420bdab3beb6933404f13c6c7c85574e20` |

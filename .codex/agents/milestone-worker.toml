@@ -7,7 +7,7 @@ model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Authority loads first: `AGENTS.md`, then
-`docs/developer/agent-context-map.md` for routing and version-specific technical guidance.
+`docs/process/agent-context-map.md` for routing and version-specific technical guidance.
 This profile only frames the assigned role.
 
 Implement only the bounded workstream assigned by the parent, inside its

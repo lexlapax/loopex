@@ -89,7 +89,7 @@ valid_title() {
 # The eight immutable titles listed here have a scoped maintainer exception
 # covering title grammar and length. A separate, narrower length-only exception
 # follows below. Every commit body is still scanned under both.
-# Authority: docs/developer/agent-context-map.md
+# Authority: docs/process/agent-context-map.md
 #   #override-disposition-m3-commit-titles-2026-09-11
 has_title_exception() {
   case "$1" in
@@ -112,7 +112,7 @@ has_title_exception() {
 # falsify a recorded binding. Every commit body is still scanned, every other
 # commit remains subject to the full policy, and every future commit remains
 # subject to the 72-character limit.
-# Authority: docs/developer/agent-context-map.md
+# Authority: docs/process/agent-context-map.md
 #   #override-disposition-m4-commit-titles-2026-09-15
 has_length_exception() {
   case "$1" in

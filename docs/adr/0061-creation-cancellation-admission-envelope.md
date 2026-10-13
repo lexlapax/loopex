@@ -61,4 +61,4 @@ partial generation, close M7, merge or publish a release.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-creation-cancellation-envelope-2026-10-07) | candidate `9ba346fe8784ee69d33132300522521e348291bc`; concept `sha256:e86f697a10e5568f22a66d666380b2ef2a74b754cfd20244f7e2c3c29aa0e9ec`; technical `sha256:41a89917cdffb5ca40187c42326abb9e2b9557075ef90d632df49b1ec8dd57b8` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-creation-cancellation-envelope-2026-10-07) | candidate `9ba346fe8784ee69d33132300522521e348291bc`; concept `sha256:e86f697a10e5568f22a66d666380b2ef2a74b754cfd20244f7e2c3c29aa0e9ec`; technical `sha256:41a89917cdffb5ca40187c42326abb9e2b9557075ef90d632df49b1ec8dd57b8` |

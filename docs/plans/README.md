@@ -9,7 +9,7 @@ Future capability rungs in
 This file is the canonical current-status register and plan index for the
 checked-out revision. The root README carries only the derived summary below.
 A milestone's work lands on `main` in small reviewed changes as the
-[milestone guide](../developer/milestones.md#concept-milestones-develop)
+[milestone guide](../process/milestones.md#concept-milestones-develop)
 describes, so the register states one product fact the checked-out bytes carry:
 its last `Closed` row identifies the last closed product baseline.
 
@@ -33,11 +33,11 @@ The maintainer accepted M7, ADRs 0041–0049, the
 [vision tool amendment](../vision.md#concept-vision-tools) and
 [continuation amendment](../vision.md#concept-vision-model-boundary) together at
 `2986150b878151524ecdd9bac5a9779e69e196b4` on 2026-09-30. The
-[acceptance disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+[acceptance disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds every historical pair's digests and records the integration instruction.
 The founding prerequisites are accepted and implementation may begin. The maintainer
 accepted ADRs 0065, 0067 and 0068 on 2026-10-09 in the
-[disposition](../developer/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09). M7 closed on
+[disposition](../process/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09). M7 closed on
 2026-10-13 and is the source release `v0.4.0`; its
 [closure runs](../evidence/M7-closure-runs.md) record the matrix and the
 independent reviews.
@@ -246,11 +246,11 @@ candidate before acceptance and before closure. The tested implementation
 commit itself owns `In progress` to `In review`; the reviewer then reads that
 exact commit. Only its administrative direct child's `In review` to `Closed`
 administrative transition is confined to
-[the five paths the milestone guide names](../developer/milestones-technical.md#technical-milestones-confinement);
+[the five paths the milestone guide names](../process/milestones-technical.md#technical-milestones-confinement);
 acceptance also updates the prerequisite ADR governance records it accepts.
 
 The sections a plan pair carries, and what each states, are defined once in
-the [milestone guide](../developer/milestones-technical.md#technical-milestones-agree);
+the [milestone guide](../process/milestones-technical.md#technical-milestones-agree);
 this index does not repeat the skeleton. Neither file has an H1, because the
 filename and the register own identity, and the Concept file's `## Governance
 Records` table stays outside every other section. The `loopex:plan-*-envelope`
@@ -276,11 +276,11 @@ Documentation drift blocks closure like any other unmet outcome.
 ## How a Milestone Runs
 
 The four steps are named in [AGENTS.md](../../AGENTS.md#milestones-and-checks)
-and carried out by the [milestone guide](../developer/milestones.md#concept)
+and carried out by the [milestone guide](../process/milestones.md#concept)
 and its
-[technical companion](../developer/milestones-technical.md#technical-depth);
+[technical companion](../process/milestones-technical.md#technical-depth);
 which checks a change must pass is the
-[verification guide](../developer/verification.md#concept). That procedure is
+[verification guide](../process/verification.md#concept). That procedure is
 written once, there. This register owns the lifecycle alone, and each
 transition records exactly this:
 
@@ -333,9 +333,9 @@ Ask for the outcome in ordinary words. These verbs belong to the repository, not
 to any tool. A development client may offer a shortcut for one — a named skill,
 a menu entry, a slash command — and those shortcuts are adapter conveniences
 recorded in the context map's
-[development client guidance](../developer/agent-context-map.md#development-client-guidance),
+[development client guidance](../process/agent-context-map.md#development-client-guidance),
 with their tested loading in
-[the adapter smoke evidence](../developer/agent-adapter-smoke.md). A shortcut
+[the adapter smoke evidence](../evidence/agent-adapter-smoke.md). A shortcut
 never changes what a request authorizes, and a client that has no shortcut
 changes nothing about how the work is directed.
 
@@ -353,7 +353,7 @@ Opening and closing a milestone are the two rows the maintainer invokes
 directly, because no actor may accept or close its own work. Both clients
 require that invocation to be explicit; the current per-client keystrokes are
 recorded in the
-[context map](../developer/agent-context-map.md). Every other row is ordinary
+[context map](../process/agent-context-map.md). Every other row is ordinary
 language.
 
 Some things stop regardless of how a request is phrased: self-acceptance,

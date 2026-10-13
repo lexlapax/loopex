@@ -37,7 +37,7 @@ and its finite ceilings: run, standalone-maintenance and question/tool-hold
 counts at their per-unit ceilings, plus cleanup. Cases and owners marked `pending:` name what still blocks them;
 a lane holding one cannot run. The catalog authorizes no provider attempt;
 actual identities and outcomes live in retained execution records and the
-attempts index. The [M7 validation runbook](../../../docs/operator/m7-validation.md)
+attempts index. The [M7 validation runbook](../../../docs/evidence/M7-validation-runbook.md)
 shows the same mapping.
 
 `execution_manifest.profiles` declares the closed set of demonstrated
@@ -45,7 +45,7 @@ reference profile keys, each with its `system_class_tokens` ceiling, and each
 case lists the keys it stages: none for a case without a provider call. The
 runner sets the attempt's session ceiling to the largest of its case's profile
 ceilings and an enabled helper catalog's to the smallest. The plan target is
-below 1,000; the [maintainer override](../../../docs/developer/agent-context-map.md#disposition-m7-reference-profile-target-2026-10-10)
+below 1,000; the [maintainer override](../../../docs/process/agent-context-map.md#disposition-m7-reference-profile-target-2026-10-10)
 admits 1,500 for `chat-coding` and `chat-coding-appendix` and 2,000 for
 `chat-coding-helpers`. A staged fixture case also carries the harness
 appendix naming its approved test invocation and seeded files, so it stages

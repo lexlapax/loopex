@@ -15,8 +15,9 @@ is the index of what exists.
 
 | Directory | Contents |
 | --- | --- |
-| [operator/](operator/README.md) | Runbooks for running Loopex: getting started, coding sessions and chat, project skills, tools and policy, the daemon, the app server, observability, how a run works, and the M7 validation runbook. |
-| [developer/](developer/README.md) | Building on Loopex and contributing to it: getting started, architecture, embedding, the agent loop, protocols, the daemon, observability, compatibility, and the development method. |
+| [operator/](operator/README.md) | Runbooks for running Loopex: getting started, coding sessions and chat, project skills, tools and policy, the daemon, the app server, observability, and how a run works. |
+| [developer/](developer/README.md) | Building on Loopex: getting started, architecture, embedding, the agent loop, protocols, the daemon, observability and compatibility. |
+| [process/](process/README.md) | How Loopex is developed: verification, milestones, the development charter and the agent context map. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
 | [evidence/](evidence/README.md) | Retained check-run and demonstration evidence, named by the revision it was taken at. |
@@ -28,9 +29,9 @@ linking back here; this file links back to the
 [root README](../README.md). The repository status check enforces that chain, so
 a new document cannot be reachable only by knowing it exists.
 
-The [development charter](developer/development-charter.md#concept) explains this
+The [development charter](process/development-charter.md#concept) explains this
 structure. Its
-[technical companion](developer/development-charter-technical.md#technical-depth) defines the
+[technical companion](process/development-charter-technical.md#technical-depth) defines the
 pairing, link, review, code-documentation, and enforcement contracts.
 
 ## Founding Direction
@@ -41,12 +42,12 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | Capability guidance | [Roadmap](roadmap.md#concept) | [Roadmap technical depth](roadmap-technical.md#technical-depth) | Non-normative projection; accepted plans authorize work. |
 | Developer getting started | [Getting started](developer/getting-started.md#concept) | [Getting started technical depth](developer/getting-started-technical.md#technical-depth) | Two tracks: building on Loopex (embedding a runtime, driving the session protocol) and contributing (toolchain, checks, milestones). |
 | System architecture | [Architecture](developer/architecture.md#concept) | [Architecture technical depth](developer/architecture-technical.md#technical-depth) | Descriptive: applications, ports, truth planes, and invariants as implemented; accepted ADRs remain the deciding authority. |
-| Development method | [Development charter](developer/development-charter.md#concept) | [Charter technical depth](developer/development-charter-technical.md#technical-depth) | Shared development form and review expectations. |
+| Development method | [Development charter](process/development-charter.md#concept) | [Charter technical depth](process/development-charter-technical.md#technical-depth) | Shared development form and review expectations. |
 | Public session protocol | [App server protocol](developer/app-server-protocol.md#concept) | [Protocol technical depth](developer/app-server-protocol-technical.md#technical-depth) | The experimental wire generation; accepted ADR 0023 remains the deciding authority. |
 | Daemon | [The daemon](developer/daemon.md#concept) | [Daemon technical depth](developer/daemon-technical.md#technical-depth) | The host that keeps a root's sessions alive between processes; ADRs 0031–0034 carry its decisions. |
 | Observability | [Observability](developer/observability.md#concept) | [Observability technical depth](developer/observability-technical.md#technical-depth) | Trace sessions and the telemetry inventory as the diagnostics plane; accepted ADR 0030 fixes the inventory. |
-| Verification | [Verification](developer/verification.md#concept) | [Verification technical depth](developer/verification-technical.md#technical-depth) | The rule book for checking work now that the milestone gates are retired: three stages, check selection by changed boundary, the honesty rules, and the measured speed plan. |
-| Milestones | [Milestones](developer/milestones.md#concept) | [Milestones technical depth](developer/milestones-technical.md#technical-depth) | How to plan, run and close a milestone under the post-M4 structure, and the skills that carry the procedures. |
+| Verification | [Verification](process/verification.md#concept) | [Verification technical depth](process/verification-technical.md#technical-depth) | The rule book for checking work now that the milestone gates are retired: three stages, check selection by changed boundary, the honesty rules, and the measured speed plan. |
+| Milestones | [Milestones](process/milestones.md#concept) | [Milestones technical depth](process/milestones-technical.md#technical-depth) | How to plan, run and close a milestone under the post-M4 structure, and the skills that carry the procedures. |
 
 ## Decisions
 
@@ -171,9 +172,6 @@ whose path or explicit fragment does not resolve.
   foreground session-protocol server and driving it from a client.
 - [Observability](operator/observability.md#concept) — starting a trace session
   and reading bounded, redacted telemetry.
-- [M7 validation runbook](operator/m7-validation.md) — running the M7 coding-task
-  validation lanes and finding which test, case or demonstration owns each
-  scenario step.
 - [Agent loop and tools](developer/agent-loop-and-tools.md#concept) — the
   multi-turn loop, tool contract and registry, bounds, stream domains, host
   authority, artifacts, and project resources.
@@ -183,9 +181,9 @@ whose path or explicit fragment does not resolve.
 - [Runtime and embedding](developer/runtime-and-embedding.md#concept) —
   application shape, ports, composition, commit ordering, embedded API, and
   recovery mechanics.
-- [Context map](developer/agent-context-map.md) — task-oriented routing into
+- [Context map](process/agent-context-map.md) — task-oriented routing into
   Concept first and exact Technical depth second.
-- [Adapter smoke evidence](developer/agent-adapter-smoke.md) — retained
+- [Adapter smoke evidence](evidence/agent-adapter-smoke.md) — retained
   client-loading and parity evidence.
 - [Changelog](../CHANGELOG.md) — notable repository and release changes.
 

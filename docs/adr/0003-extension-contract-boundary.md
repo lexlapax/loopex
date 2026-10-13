@@ -16,7 +16,7 @@ Technical depth: [Boundary mechanics and deferrals](0003-extension-contract-boun
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-founding-adrs-2026-08-15) | candidate `c703a65b665a5e64159e98833c63d29ff521cd2b`; concept `sha256:571d939bd84bc61c33eca6be34ed0b1647adf813a40ebf4cccf71d3695316724`; technical `sha256:80b070b259f5b132e51a62b92bf063410762ea9b92e0e7ae32d62ab2cffafdfa` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-founding-adrs-2026-08-15) | candidate `c703a65b665a5e64159e98833c63d29ff521cd2b`; concept `sha256:571d939bd84bc61c33eca6be34ed0b1647adf813a40ebf4cccf71d3695316724`; technical `sha256:80b070b259f5b132e51a62b92bf063410762ea9b92e0e7ae32d62ab2cffafdfa` |
 
 <a id="concept-adr-0003-context"></a>
 ## Context

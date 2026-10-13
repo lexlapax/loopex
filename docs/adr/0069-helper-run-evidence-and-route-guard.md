@@ -69,4 +69,4 @@ route. Acceptance authorizes implementation only.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-adr-0069-2026-10-09) | candidate `31a93aa2aa26f7ac78724f21461741fa1d56b823`; concept `sha256:a810b514c38872cc7eb4d537d8435bffa92a7ba878948ea161b557aaed7abf37`; technical `sha256:c0097fa7f95121041da84c1abd9782413789dfe56a94fc848a721ceaa0f94f01` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-adr-0069-2026-10-09) | candidate `31a93aa2aa26f7ac78724f21461741fa1d56b823`; concept `sha256:a810b514c38872cc7eb4d537d8435bffa92a7ba878948ea161b557aaed7abf37`; technical `sha256:c0097fa7f95121041da84c1abd9782413789dfe56a94fc848a721ceaa0f94f01` |

@@ -45,8 +45,8 @@ defmodule Loopex.Checks.Status do
     "docs/vision-technical.md",
     "docs/roadmap.md",
     "docs/roadmap-technical.md",
-    "docs/developer/development-charter.md",
-    "docs/developer/development-charter-technical.md"
+    "docs/process/development-charter.md",
+    "docs/process/development-charter-technical.md"
   ]
 
   @rejoin_source_heading "## 22. Ownership and serial barriers"
@@ -223,10 +223,11 @@ defmodule Loopex.Checks.Status do
   # still describe it as unfinished; the marked blocks are checked above, and
   # this covers the prose around them that closure and release leave behind.
   # Technical depth: current-state pages are the root README, the docs index,
-  # the roadmap pair and the operator and developer pages; plans, evidence,
+  # the roadmap pair and the operator, developer and process pages; plans,
+  # evidence,
   # ADRs, drafts, the changelog and the context map record history. Link
   # targets are dropped first so a sentence is read as its visible text.
-  @current_prose ~r{\A(README\.md|docs/README\.md|docs/roadmap(-technical)?\.md|docs/(operator|developer)/.+\.md)\z}
+  @current_prose ~r{\A(README\.md|docs/README\.md|docs/roadmap(-technical)?\.md|docs/(operator|developer|process)/.+\.md)\z}
   @unfinished ~S"(?:is|remains|stays)(?: still)? (?:in review|in progress|open|not closed)"
 
   defp require_closed_prose!(documents, rows) do
@@ -234,7 +235,7 @@ defmodule Loopex.Checks.Status do
 
     for {path, text} <- documents,
         Regex.match?(@current_prose, path),
-        path != "docs/developer/agent-context-map.md",
+        path != "docs/process/agent-context-map.md",
         visible = Regex.replace(~r/\]\([^)]*\)/, text, "]"),
         name <- closed,
         Regex.match?(~r/\b#{name}\b[^.|\n]{0,100}\b#{@unfinished}\b/, visible) do

@@ -101,7 +101,7 @@ Concept: [Selection](verification.md#concept-verification-selection).
 | Dependency direction | `mix loopex.deps_budget` and `apps/loopex/test/deps_budget_test.exs` |
 | Documentation chain | `mix loopex.status`, `mix loopex.docs_check` |
 | Operating-system process boundaries | The executor: `apps/loopex_executor_local/test/coding_tools_test.exs` launch-guard, cleanup and frame cases. The provider child: `apps/loopex_llm_reqllm/test/provider_startup_boundaries_test.exs`, `provider_retainer_boundaries_test.exs`, `provider_bridge_test.exs`, `credential_plane_test.exs` and `provider_companion_entry_test.exs`. Both reproduced under contention by the procedure below |
-| The daemon | `apps/loopex_daemon/test/` (see the [daemon technical page](daemon-technical.md#technical-daemon-evidence)); `apps/loopex_cli/test/multi_client_workflow_test.exs`, `live_daemon_test.exs`; the release lanes `node_client`, `long_bound`, `real_provider` and, on Linux, `cross_uid` |
+| The daemon | `apps/loopex_daemon/test/` (see the [daemon technical page](../developer/daemon-technical.md#technical-daemon-evidence)); `apps/loopex_cli/test/multi_client_workflow_test.exs`, `live_daemon_test.exs`; the release lanes `node_client`, `long_bound`, `real_provider` and, on Linux, `cross_uid` |
 
 Before merging provider or credential, wire-protocol, or daemon changes, run
 the union of their applicable unattended release lanes with

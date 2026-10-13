@@ -24,7 +24,7 @@ termination. The decision preserves that topology and the existing authenticated
 control protocol rather than redesigning either.
 
 The maintainer explicitly approved this runtime prerequisite and directed the
-repair in the [implementation disposition](../developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07).
+repair in the [implementation disposition](../process/agent-context-map.md#disposition-local-executor-bash-2026-09-07).
 That current instruction authorizes implementation; it does not accept the
 unseen bytes of this Proposed pair. Exact-pair acceptance remains separate.
 
@@ -72,4 +72,4 @@ Technical depth: [Verification and rollback](0022-local-executor-supervision-she
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0022-acceptance-2026-09-08) | candidate `4c75ae3f81f3caefe7745c40a5b24e9133255e57`; concept `sha256:d76b4996903e60a99bffcc35d31a0b0226f7123ce502b7e9a54ee7a8cd303edd`; technical `sha256:5822d3fc93548a7d3c707fb82fc1d62d1a9932d9668c8d6e28defb28fda23467` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-adr-0022-acceptance-2026-09-08) | candidate `4c75ae3f81f3caefe7745c40a5b24e9133255e57`; concept `sha256:d76b4996903e60a99bffcc35d31a0b0226f7123ce502b7e9a54ee7a8cd303edd`; technical `sha256:5822d3fc93548a7d3c707fb82fc1d62d1a9932d9668c8d6e28defb28fda23467` |

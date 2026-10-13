@@ -283,11 +283,11 @@ to `main` without a green candidate check, either in hosted CI or in a clean
 local run whose complete output and exact SHA are retained, and an independent
 review of its diff.
 
-The [verification guide](docs/developer/verification.md#concept) and its
-[technical companion](docs/developer/verification-technical.md#technical-depth)
+The [verification guide](docs/process/verification.md#concept) and its
+[technical companion](docs/process/verification-technical.md#technical-depth)
 are the rule book: three stages, how a changed boundary selects its checks, and
-what keeps them honest. The [milestone guide](docs/developer/milestones.md#concept)
-and its [technical companion](docs/developer/milestones-technical.md#technical-depth)
+what keeps them honest. The [milestone guide](docs/process/milestones.md#concept)
+and its [technical companion](docs/process/milestones-technical.md#technical-depth)
 are how a milestone is planned, run and closed. There are no per-milestone gate
 runners; the gate files under `docs/plans/` are historical records.
 
@@ -308,16 +308,16 @@ The roadmap is guidance. The commitment is an accepted plan.
   Loopex (embedding, the session protocol) and contributing to it.
 - [DEVELOPMENT.md](DEVELOPMENT.md) — current bootstrap prerequisites and the
   two check commands.
-- [docs/developer/verification.md](docs/developer/verification.md#concept) and
-  its [technical companion](docs/developer/verification-technical.md#technical-depth)
+- [docs/process/verification.md](docs/process/verification.md#concept) and
+  its [technical companion](docs/process/verification-technical.md#technical-depth)
   — the rule book for checking work: stages, selection, and the honesty rules.
-- [docs/developer/milestones.md](docs/developer/milestones.md#concept) and its
-  [technical companion](docs/developer/milestones-technical.md#technical-depth)
+- [docs/process/milestones.md](docs/process/milestones.md#concept) and its
+  [technical companion](docs/process/milestones-technical.md#technical-depth)
   — how a milestone is planned, run, closed and released.
 - [docs/](docs/) — documentation index, including every active Concept and
   Technical depth pair.
-- [docs/developer/development-charter.md](docs/developer/development-charter.md#concept)
-  and its [technical companion](docs/developer/development-charter-technical.md#technical-depth)
+- [docs/process/development-charter.md](docs/process/development-charter.md#concept)
+  and its [technical companion](docs/process/development-charter-technical.md#technical-depth)
   — clarity, traceability, and development form.
 - [docs/vision.md](docs/vision.md#concept) and
   [docs/vision-technical.md](docs/vision-technical.md#technical-depth) — the paired founding
@@ -326,7 +326,7 @@ The roadmap is guidance. The commitment is an accepted plan.
   [docs/roadmap-technical.md](docs/roadmap-technical.md#technical-depth) — candidate capability
   sequencing and exact evidence projection. Non-normative guidance.
 - [AGENTS.md](AGENTS.md) — the repository's tool-neutral development contract.
-- [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md)
+- [docs/process/agent-context-map.md](docs/process/agent-context-map.md)
   — routing map by area.
 - `docs/adr/` — architectural decisions, as they land.
 - [docs/plans/](docs/plans/) — canonical milestone status plus the accepted,

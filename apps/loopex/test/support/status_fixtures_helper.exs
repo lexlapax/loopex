@@ -415,8 +415,9 @@ defmodule Loopex.StatusFixtures do
       [Vision technical](vision-technical.md#technical-depth)
       [Roadmap](roadmap.md#concept)
       [Roadmap technical](roadmap-technical.md#technical-depth)
-      [Development charter](developer/development-charter.md#concept)
-      [Development charter technical](developer/development-charter-technical.md#technical-depth)
+      [Process](process/README.md)
+      [Development charter](process/development-charter.md#concept)
+      [Development charter technical](process/development-charter-technical.md#technical-depth)
       [ADR 0001](adr/0001-repository-and-application-layout.md#concept)
       [ADR 0001 technical](adr/0001-repository-and-application-layout-technical.md#technical-depth)
       [ADR 0002](adr/0002-bootstrap-runtime-floor.md#concept)
@@ -427,6 +428,7 @@ defmodule Loopex.StatusFixtures do
       "docs/adr/README.md" => "# Decisions\n\n[Documentation](../README.md)\n",
       "docs/developer/README.md" =>
         "# Developer documentation\n\n[Documentation](../README.md)\n",
+      "docs/process/README.md" => "# Development process\n\n[Documentation](../README.md)\n",
       "docs/vision.md" =>
         "# Vision\n\n<a id=\"concept\"></a>\n## Concept\n\n" <>
           "Technical depth: [Vision details](vision-technical.md#technical-depth)\n",
@@ -443,15 +445,15 @@ defmodule Loopex.StatusFixtures do
           "## Technical depth\n\nConcept: [Roadmap](roadmap.md#concept)\n\n" <>
           "## The Enduring Rejoin Order\n\n" <>
           "<!-- loopex:rejoin-copy:start -->\n#{rejoin()}\n<!-- loopex:rejoin-copy:end -->\n",
-      "docs/developer/development-charter.md" =>
+      "docs/process/development-charter.md" =>
         "# Development charter\n\n<a id=\"concept\"></a>\n" <>
           "## Concept\n\nTechnical depth: [Charter mechanics]" <>
           "(development-charter-technical.md#technical-depth)\n",
-      "docs/developer/development-charter-technical.md" =>
+      "docs/process/development-charter-technical.md" =>
         "# Development charter: Technical depth\n\n" <>
           "<a id=\"technical-depth\"></a>\n## Technical depth\n\n" <>
           "Concept: [Development charter](development-charter.md#concept)\n",
-      "docs/developer/agent-context-map.md" =>
+      "docs/process/agent-context-map.md" =>
         "# Context map\n\n[Product definition](../vision.md#concept)\n"
     }
 

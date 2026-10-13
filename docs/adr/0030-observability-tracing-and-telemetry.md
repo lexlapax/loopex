@@ -40,7 +40,7 @@ Two mechanisms, chosen by the maintainer on 2026-09-12:
   lifecycle). Metadata carries identities, kinds and outcome categories, never
   content, credentials or arguments. `:telemetry` becomes core's sole external
   dependency under the maintainer's recorded
-  [vision change](../developer/agent-context-map.md#disposition-m4-vision-core-telemetry-2026-09-13)
+  [vision change](../process/agent-context-map.md#disposition-m4-vision-core-telemetry-2026-09-13)
   of 2026-09-13; this decision supersedes only the two ADR 0001 clauses that
   require an empty `apps/loopex` dependency list (its Decision bullet for
   `apps/loopex` and implementation constraint 1 as it applies to
@@ -96,4 +96,4 @@ Technical depth: [Compatibility mechanics](0030-observability-tracing-and-teleme
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0030-acceptance-2026-09-13) | candidate `3503992cbc0de02ef98ba261e7a19fdb7123e220`; concept `sha256:8e81e197816afa79aa1f43d69837c9f1ed4235a5fbf64dc7588056f1a4ddb65d`; technical `sha256:f7b24467fef2d326d2eb12eece87662b775586a0813fc958d78b82e0f5735eac` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-adr-0030-acceptance-2026-09-13) | candidate `3503992cbc0de02ef98ba261e7a19fdb7123e220`; concept `sha256:8e81e197816afa79aa1f43d69837c9f1ed4235a5fbf64dc7588056f1a4ddb65d`; technical `sha256:f7b24467fef2d326d2eb12eece87662b775586a0813fc958d78b82e0f5735eac` |

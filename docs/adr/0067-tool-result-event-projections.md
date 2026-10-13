@@ -107,4 +107,4 @@ Technical depth: [Current-contract replacement mechanics](0067-tool-result-event
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09) | candidate `805df2c2107bee43b81d266f520935c7b9cb4b89`; concept `sha256:fd19c8e175c35abec19a168638146d8f630c3270c23dd01003f788271b6bc995`; technical `sha256:b04e5e2706aad4f695e71eada2ac4d0b7c61e729f097301ac02cb868d9417e7f` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09) | candidate `805df2c2107bee43b81d266f520935c7b9cb4b89`; concept `sha256:fd19c8e175c35abec19a168638146d8f630c3270c23dd01003f788271b6bc995`; technical `sha256:b04e5e2706aad4f695e71eada2ac4d0b7c61e729f097301ac02cb868d9417e7f` |

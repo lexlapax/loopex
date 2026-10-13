@@ -10,9 +10,9 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) and [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Also extends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with explicit maintenance instructions and model selection; its one-shot interface, credential audience and cleanup guarantees remain unchanged
 - **Maintenance resource receipts:** Narrowly amends [ADR 0017](0017-durable-context-admission-budget.md#concept) and [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) so a successful maintenance request can explicitly record that optional resource intake was skipped; ordinary admission and older receipt validation remain unchanged
-- **Reply-reserve amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03); retained decision packet `sha256:781a4f41a08564326c3dceba2660aa5f871cf436611bce8fd06f4c961047453d`
-- **Checkpoint-owner amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03); retained decision packet `sha256:1b16d7d5fc31f5b42a6c807ac46b7ec2064f55e76683993bb5a8353f8601c9d5`
-- **Maintenance-view amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03); retained decision packet `sha256:25cfb3719f9c1811b54c4b37c5d75234d0ef712dfcf62b6d862fba4b31b9401c`
+- **Reply-reserve amendment:** Maintainer-approved [disposition](../process/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03); retained decision packet `sha256:781a4f41a08564326c3dceba2660aa5f871cf436611bce8fd06f4c961047453d`
+- **Checkpoint-owner amendment:** Maintainer-approved [disposition](../process/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03); retained decision packet `sha256:1b16d7d5fc31f5b42a6c807ac46b7ec2064f55e76683993bb5a8353f8601c9d5`
+- **Maintenance-view amendment:** Maintainer-approved [disposition](../process/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03); retained decision packet `sha256:25cfb3719f9c1811b54c4b37c5d75234d0ef712dfcf62b6d862fba4b31b9401c`
 - **Prerequisite for:** M7 outcome 3
 
 <a id="concept-adr-0043-decision"></a>
@@ -126,7 +126,7 @@ run-bound outcome. When turns remain but only 1–1,023 tokens remain, the fixed
 `maintenance_reply_reserve_unavailable`, preserving its actual spending and
 any useful checkpoint. No summary is dispatched; a new run with a larger
 budget is the remedy. This is the
-[maintainer-approved amendment](../developer/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
+[maintainer-approved amendment](../process/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
 to the closed preparation-failure causes.
 Run-owned source preparation before each episode's first maintenance request
 also has its own fixed 60-second cutoff, independent of the run's declared
@@ -185,4 +185,4 @@ matching binary, not removal of checkpoint records.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:bd2f617feb030ac6c91df204ce08535c2679be26cdf2df61578ebd663da5d240`; technical `sha256:c093342142ed0b1fc089436a8755eb178b7e6661d765c6dfd8e8ad377545b9df` |
+| Acceptance | Maintainer | [disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:bd2f617feb030ac6c91df204ce08535c2679be26cdf2df61578ebd663da5d240`; technical `sha256:c093342142ed0b1fc089436a8755eb178b7e6661d765c6dfd8e8ad377545b9df` |

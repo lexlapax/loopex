@@ -287,7 +287,7 @@ the option combines submitted options with the runtime's captured
 `session_creation_defaults`. An unconfigured runtime refuses implicit creation;
 Core manufactures no instructions or model facts. Explicit exact genesis
 remains available without runtime defaults. This follows the
-[centralized configuration decision](agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04).
+[centralized configuration decision](../process/agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04).
 Creation refuses `store_unavailable` until the runtime's original creation
 startup completes; `creation_startup_status/2` reports `state: :ready` once it
 has, without reserving the creation slot.

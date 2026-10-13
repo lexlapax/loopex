@@ -15,7 +15,7 @@ values.
 
 | Field | Value |
 | --- | --- |
-| Tested implementation SHA | `fe020e24b62504f6f2fbc6c81711f399803b6fa9`; its runs below are of `9045835d8847a1c8a557e985a9a014e6b213f323`, which it changes only in Markdown, reused under the maintainer's documentation-only decision ([closure disposition](../developer/agent-context-map.md#disposition-m5-closure-2026-09-26)) |
+| Tested implementation SHA | `fe020e24b62504f6f2fbc6c81711f399803b6fa9`; its runs below are of `9045835d8847a1c8a557e985a9a014e6b213f323`, which it changes only in Markdown, reused under the maintainer's documentation-only decision ([closure disposition](../process/agent-context-map.md#disposition-m5-closure-2026-09-26)) |
 | Source `VERSION` | `0.2.0` |
 | Administrative closure SHA | Not recorded on this page: a commit cannot contain its own hash. It is located by the plans register's `Closed` transition and by the tag |
 
@@ -72,7 +72,7 @@ line; `PASS (closure-incomplete: cross_uid not run)` is not that. The two
 attended cases were answered by the implementing session's terminal driver on
 the maintainer's instruction, not by a person watching, which the maintainer
 accepted as the closure run of record
-([disposition](../developer/agent-context-map.md#disposition-m5-driver-attendance-2026-09-23)).
+([disposition](../process/agent-context-map.md#disposition-m5-driver-attendance-2026-09-23)).
 
 | Field | Value |
 | --- | --- |
