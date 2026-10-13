@@ -46,7 +46,6 @@ or alternate loop.
 | Capability | State |
 | --- | --- |
 | Run the complete loop from this source tree | Available |
-| Use a deterministic model for a credential-free demonstration | Available |
 | Use the ReqLLM adapter with a real provider | Available |
 | Run an ephemeral session with an in-memory Store and an in-VM model call | Available: `LoopexComposition.Ephemeral` |
 | Run `bash` jobs in separate operating-system process groups. Run file and read-only tools in the VM | Available |
