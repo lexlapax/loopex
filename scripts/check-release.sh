@@ -240,7 +240,7 @@ if [ -n "$release_attempts_index" ] && { [ "$release_mode" = full ] || release_s
     release_matrix_lanes=(fresh-source)
     for row in 1 2 3 4 5 6 7 8 9 10 11; do release_matrix_lanes+=("real-provider-$row"); done
     for app in loopex_app_server loopex_protocol loopex_daemon loopex_cli; do release_matrix_lanes+=("node-client-$app"); done
-    for app in loopex loopex_executor_local loopex_daemon loopex_composition loopex_llm_reqllm; do
+    for app in loopex loopex_executor_local loopex_daemon loopex_composition loopex_store_local loopex_llm_reqllm; do
       release_matrix_lanes+=("long-bound-$app")
     done
     [ "$platform" != Linux ] || release_matrix_lanes+=(cross-uid)
@@ -407,7 +407,7 @@ fi
 
 # The long-duration bound proofs: cases whose claim is a real wait, tagged
 # long_bound and excluded from the fast check.
-long_bound_apps="loopex loopex_executor_local loopex_daemon loopex_composition"
+long_bound_apps="loopex loopex_executor_local loopex_daemon loopex_composition loopex_store_local"
 if release_selected long_bound; then
   for app in $long_bound_apps; do
     lane "long-bound-$app" "$app" nonzero without_credential mix test --only long_bound

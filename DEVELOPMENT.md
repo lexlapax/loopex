@@ -176,7 +176,7 @@ applications, and proves the build changed nothing outside its declared
 outputs; it then
 requires the extraction's source identity to be the staged commit and its
 `VERSION` to be `0.3.0`, and prints both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
-`loopex_executor_local`, `loopex_daemon`, `loopex_composition` and the in-process ReqLLM transport-drain witness runs the real-duration proofs the
+`loopex_executor_local`, `loopex_daemon`, `loopex_composition`, `loopex_store_local` and the in-process ReqLLM transport-drain witness runs the real-duration proofs the
 fast check excludes. On Linux the cross-UID lane runs the daemon's two
 `--only cross_uid` cases and requires exactly two to execute; it needs a second
 unprivileged user named in `LOOPEX_CROSS_UID_USER` that you may run a command

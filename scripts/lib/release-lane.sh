@@ -12,7 +12,7 @@ release_select() {
   release_m7_config=""
   release_operator=""
   release_pins=""
-  local usage='check-release: usage: check-release.sh [--only NAME ...] [--attempts-index FILE --writer ID --host ID --markers DIR] [--resume-matrix ID] [--m7-config FILE --operator NAME]'
+  local usage='check-release: usage: check-release.sh [--only NAME ...] [--attempts-index FILE --writer ID --host ID --markers DIR] [--resume-matrix ID] [--m7-config FILE --operator NAME] [--pins FILE]'
   while [ "$#" -gt 0 ]; do
     [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "$usage" >&2; return 2; }
     case "$1" in

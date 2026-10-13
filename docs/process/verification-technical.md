@@ -133,7 +133,7 @@ group plus one of its rows is an ordinary union. `m7-provider` requires
 | `real_provider` | Manifest rows 3 through 11, all nine current unattended real-provider cases |
 | `real-provider-3` through `real-provider-11` | Exactly the named current manifest row |
 | `node_client` | The Node client cases in app server, protocol, daemon and CLI |
-| `long_bound` | The current long-bound cases in core, local executor, daemon and composition, plus the ReqLLM transport-drain case |
+| `long_bound` | The current long-bound cases in core, local executor, daemon, composition and the local Store, plus the ReqLLM transport-drain case |
 | `cross_uid` | The daemon's two Linux cross-UID cases |
 | `m7-provider` | The unattended paid M7 cases, each recorded in the attempts index |
 | `m7-rollback` | The credential-free M7 rollback cases, recorded when an index is given |

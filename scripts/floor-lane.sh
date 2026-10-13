@@ -246,7 +246,7 @@ if [[ $# -eq 4 ]]; then
   long_log=$output_dir/long-bound.log
   (set -C; : > "$long_log") || exit 1
   retained_logs+=("$long_log")
-  for app in loopex loopex_executor_local loopex_daemon; do
+  for app in loopex loopex_executor_local loopex_daemon loopex_composition loopex_store_local; do
     app_log=$output_dir/long-bound-$app.log
     (set -C; : > "$app_log") || exit 1
     retained_logs+=("$app_log")

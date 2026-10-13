@@ -19,4 +19,9 @@ end
 
 System.at_exit(fn _status -> File.rm_rf(root) end)
 
-ExUnit.start()
+# Concept: a real-duration bound proof belongs to the release check's
+# long-bound lane, not the fast check.
+# Technical depth: as in the other applications, the ordinary suite excludes
+# the `long_bound` tag; `check-release.sh` and `floor-lane.sh --long-bound`
+# run it with `--only long_bound`.
+ExUnit.start(exclude: [:long_bound])
