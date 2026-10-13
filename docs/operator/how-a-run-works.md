@@ -312,10 +312,10 @@ is not blocked.
 refuses against a live owner and names the process, rather than reconciling a
 session out from under something still running.
 
-Moving a state root back to an older Loopex build is not always possible: once a
-newer build has written certain records, an older one refuses that history
-rather than misreading it. Stop every owner and back up the whole state root
-before any rollback; the technical companion lists the boundaries.
+A state root is read only in the current format. An older Loopex build is not a
+supported reader of a root a newer build wrote, and no rollback procedure is
+provided; a complete offline backup is the recovery path. The technical
+companion lists the boundaries.
 
 <a id="concept-run-daemon"></a>
 ## When a Daemon Holds the Root

@@ -21,8 +21,8 @@ project resource contains can start, change or stop either one.
 
 Constraints: both are reached only by a host that holds the runtime reference —
 an embedding program, or code running inside the same VM as the runtime. The
-`loopex ask` owner can enable its own runtime trace at startup and send
-diagnostics to standard error. The daemon and app server expose no trace
+`loopex ask` and `loopex chat` owners can enable their own runtime trace at
+startup and send diagnostics to standard error. The daemon and app server expose no trace
 command or telemetry output. Read durable events to see what a session did
 (see [how a run works](how-a-run-works.md#concept)) or, under a daemon, its status
 (see [listing and status](daemon.md#operator-daemon-listing)).
@@ -48,8 +48,10 @@ loopex ask --policy shell-allowlist --model ollama:llama3.2 \
   --trace-module 'Loopex.*' 'Explain the session lifecycle'
 ```
 
-The same flags apply to durable `ask --state-root DIR`. Trace entries go to
-standard error; JSON standard output remains one result object. Explicit trace
+The same flags apply to durable `ask --state-root DIR` and to `loopex chat`,
+whose configuration file can also select them under `trace`. Trace entries go to
+standard error; standard output carries only the command's own output, so an
+`ask --output json` result remains one object. Explicit trace
 startup failure refuses the question. Command completion, failure and signals
 stop its trace and diagnostic actors before confirmed cleanup. A lost cleanup
 proof remains a lifecycle failure.
@@ -208,11 +210,14 @@ outcome.
 | Boundary | Events |
 | --- | --- |
 | Model | `[:loopex, :model, :complete]` |
-| Store | `[:loopex, :store, …]` with `transact`, `transaction_status`, `runtime_command`, `ownership_head`, `load_records`, `load_events` |
+| Store | `[:loopex, :store, …]` with `transact`, `transaction_status`, `runtime_command`, `ownership_head`, `load_records`, `load_events`; plus `creation_provenance` and `creation_recovery` for a Store that implements those optional callbacks |
 | Artifact store | `[:loopex, :artifact, …]` with `put`, `fetch`, `stat`, `describe`, `open_transfer`, `read_transfer`, `close_transfer` |
 | Executor | `[:loopex, :executor, …]` with `execute`, `cancel`, `retained_receipt` |
 | Policy | `[:loopex, :policy, :decide]` |
 | Coordinator cuts | `[:loopex, :command, :admit]`, `[:loopex, :commit]`, `[:loopex, :effect, :intent]`, `[:loopex, :events, :publish]`, `[:loopex, :interaction]`, `[:loopex, :artifact, :transfer]` |
+
+The `loopex_telemetry` handler attaches to every name above except the two
+optional Store creation spans; a host that wants those attaches its own handler.
 
 ### What a span carries, and what it does not
 

@@ -94,8 +94,8 @@ such as `loopex run` and `loopex chat` record each session they create there
 while they hold the root, so `loopex sessions` and `sessions --daemon` list the
 same sessions and a daemon started on the root later needs no import step.
 
-Before 1.0 the offline `sessions/` directory earlier builds wrote is retired.
-A root whose sessions exist only there is refused rather than imported: the
+A `sessions/` directory at the state root is a retired catalogue format. A root
+that has one and no daemon index is refused rather than imported: the
 daemon will not start on it and exits `session_catalog_retired` (85), and
 offline listing and recording refuse with the same reason. Start such work in a
 fresh state root.
@@ -256,12 +256,14 @@ Policies are `allow-all` and `shell-allowlist`.
 ### Wire
 
 The socket speaks generation `loopex.experimental/4`: one compact JSON object per
-LF, the generation-1 framing, initialize handshake, admission, snapshot, event,
-progress and artifact-transfer records, plus `session.list`, `daemon.status`,
-`session.acquire_control`, `session.release_control`, a `writer_epoch` on every
-change to an existing session, and the `daemon.stopping` and `daemon.notice`
-records. A client offering only generation 1 is refused at initialize. The
-[protocol reference](../developer/app-server-protocol-technical.md#technical-depth)
+LF, the app server's framing, initialize handshake, admission, snapshot, event,
+progress and artifact-transfer records and methods, plus `session.list`,
+`daemon.status`, `session.acquire_control`, `session.release_control`, a
+`writer_epoch` on every change to an existing session, and the `daemon.stopping`
+and `daemon.notice` records. The daemon selects only `/4`; a client that does
+not offer it, including one offering only the app server's
+`loopex.experimental/3`, is refused at initialize with `unsupported_generation`.
+The [protocol reference](../developer/app-server-protocol-technical.md#technical-depth)
 specifies both generations.
 
 <a id="operator-daemon-limits"></a>
@@ -359,7 +361,7 @@ later startup failure reports only its exit status.
 - [Coding sessions](coding-sessions.md#concept) — the offline commands.
 - [How a run works](how-a-run-works.md#concept-run-daemon) — what changes for one run when a daemon holds the root.
 - [The daemon for developers](../developer/daemon.md#concept) — its processes, orders and evidence.
-- [App server operations](app-server.md#concept) — the generation-1 foreground server.
+- [App server operations](app-server.md#concept) — the generation-3 foreground server.
 - [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept),
   [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept),
   [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept)

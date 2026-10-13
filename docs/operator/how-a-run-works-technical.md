@@ -142,7 +142,7 @@ to treat that directory is set out under
 
 Concept: [Where Ctrl-C enters](how-a-run-works.md#concept-run-interrupt).
 
-Five numbers bound a run. The `loopex` command exposes two of them as flags, and
+Five numbers bound a run. `loopex run` exposes two of them as flags, and
 `loopex daemon` exposes the cleanup grace; the other three take the runtime's
 declared defaults, which a host embedding Loopex sets when it starts the runtime.
 
@@ -151,7 +151,7 @@ declared defaults, which a host embedding Loopex sets when it starts the runtime
 | Max turns | runtime bounds | 16 | `run.finished` `bound_reached`, bound `max_turns` |
 | Token budget | runtime bounds | 1,000,000 | `run.finished` `bound_reached`, bound `token_budget` |
 | Deadline | runtime bounds | 600,000 ms | `run.finished` `bound_reached`, bound `deadline` |
-| Context token budget | `--context-token-budget` | 8,192 | `run.finished` `failed`, category `context_budget_exceeded` |
+| Context token budget | `--context-token-budget` | the model's context window minus the reply's `max_tokens`; 8,192 when the window is unknown | `run.finished` `failed`, category `context_budget_exceeded` |
 | Cleanup grace | `--cleanup-grace-ms` | 5,000 ms | bounds how long stopping may take; ends no run by itself |
 
 The first three are checked in a fixed order between turns, and the order

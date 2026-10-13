@@ -104,7 +104,7 @@ MIX_ENV=test mix test apps/loopex_reference_client/test/reference_client_test.ex
 
 It starts an isolated runtime and durable local Store in temporary directories,
 submits a prompt through the reference client, receives a deterministic model
-tool call, runs the controlled workspace-write tool in a child process, consumes
+tool call, runs the controlled `write` tool beneath its workspace lease, consumes
 the durable event sequence through `run.finished`, checks the resulting file,
 and removes its temporary state. Success is every case in the file passing with
 none excluded.
