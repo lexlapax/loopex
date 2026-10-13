@@ -1,10 +1,12 @@
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Artifact contents, companion placement and smoke proofs](0038-installed-distribution-and-release-artifact-technical.md#technical-depth).
+Technical depth: [Build recipe, artifact contents, install and smoke proofs](0038-installed-distribution-and-release-artifact-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-21; reconciled with the delivered M7 baseline and the maintainer's 2026-10-13 host and label decisions
+- **Date:** 2026-09-21; reconciled with the delivered M7 baseline and the
+  maintainer's 2026-10-13 host and label decisions; build recipe, manifest,
+  linkage inventory, install contract and failure names detailed on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; it applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
@@ -19,84 +21,92 @@ Technical depth: [Artifact contents, companion placement and smoke proofs](0038-
 
 Technical depth: [Artifact contents](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-decision).
 
-Loopex is a source-tree surface. The operator index says it is not packaged or
-published for consumers; the coding-sessions guide says the CLI is not
-packaged or installed. Running it needs Git, Mix and an Elixir/OTP pair; after
-M5 it needs Mix and the pair from a source archive. The reference CLI is an
-escript named `loopex` (`apps/loopex_cli/mix.exs:24`) started through a small
-POSIX launcher (`apps/loopex_cli/bin/loopex`) that exists for one reason: the
-emulator reserves `SIGINT`, so the launcher catches the terminal interrupt
-outside the emulator and forwards `SIGTERM`, which the CLI turns into the
-public abort. The launcher already finds the escript beside itself and works
-for a checkout, a copied pair and an installed pair. The provider companion
-is built as a separate escript whose launch configuration records absolute
-`worker_path` and `interpreter_path` values taken from the build machine
-(`apps/loopex_llm_reqllm/lib/mix/tasks/loopex.provider.build.ex:56-70`), so
-the companion is not relocatable today.
+Technical depth: [Build recipe](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-build).
+
+Technical depth: [Failure modes and refusals](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-failures).
+
+Loopex is a source-tree surface. Running it needs Git, Mix and an Elixir/OTP
+pair, or Mix and the pair from an M5 source archive. The reference CLI is an
+escript named `loopex` (`apps/loopex_cli/mix.exs`) started through a small
+POSIX launcher (`apps/loopex_cli/bin/loopex`). The launcher exists because the
+emulator reserves `SIGINT`: it catches the terminal interrupt outside the
+emulator and forwards `SIGTERM`, which the CLI turns into the public abort.
+The provider companion is a second escript, built by the same command. Its
+launch configuration records absolute `worker_path` and `interpreter_path`
+values from the build machine
+(`apps/loopex_llm_reqllm/lib/mix/tasks/loopex.provider.build.ex`), so the
+companion is not relocatable today.
 
 The vision's release governance is explicit: a binary release records its
 exact source, artifact, toolchain, platform, contents, install proof and
-rollback procedure; what a package contains is a compatibility decision,
+recovery procedure; what a package contains is a compatibility decision,
 because a consumer pins the package rather than the surfaces inside it; and a
 minimal runtime distribution carries no compiler.
 
 **The decision.**
 
-1. **A binary release is one platform-specific OTP release archive** built by
-   `mix release` from the umbrella, containing the compiled applications, the
-   Erlang runtime system (ERTS) of the toolchain pair it was built with, the
-   reference CLI, the daemon, the runtime and the protected provider
-   companion. No compiler, no Mix and no Hex are inside it. "No Erlang or
-   Elixir installation required" is claimed only because ERTS is bundled, and
-   "no other installation required" is claimed only because every native
-   library ERTS and its NIFs need either links statically, ships inside the
-   archive, or belongs to the platform's base system named in the companion.
-   The Elixir release documentation states the contract plainly: a release
-   runs on the same operating-system distribution and version it was
-   assembled on. The ordinary development toolchain does not satisfy this:
-   measured on 2026-09-21, the current pair's Homebrew OTP links its crypto
-   NIF to Homebrew's OpenSSL, and the Linux host's OTP links glibc 2.44,
-   OpenSSL, brotli, zstd and ncurses from its distribution.
-2. **The build environment is part of the decision.** Each platform's release
-   is built by a retained recipe from a release toolchain built for that
-   purpose, inside a build environment whose base system is the oldest the
-   release supports; the companion names the recipe, the environment and the
-   allowed base-library set per platform, and the install lane refuses an
-   archive whose shared objects resolve anywhere else.
-3. **One installed command, the existing launcher, promoted.** The archive
-   extracts to one directory; `bin/loopex` is the launcher, relocated with the
-   directory, and it finds the release beside itself as it finds the escript
-   today. There is no second command, no shell wrapper generated per
-   installation and no single native executable.
+1. **A binary release is one platform-specific archive that runs the two
+   existing escripts on a bundled Erlang runtime.** `mix release` assembles
+   the Erlang runtime system (ERTS) and the seven OTP library applications the
+   escripts load. The reference CLI escript (which carries the runtime, the
+   daemon and every reference application) and the provider companion escript
+   are placed beside it. The bytes the operator runs are the same escript
+   bytes the release check's real-provider lanes already exercise; only the
+   runtime underneath them is bundled. The archive carries no build tool: no
+   Mix, Hex, `erlc`, `elixirc`, source or dependency tree. The Erlang
+   `compiler` library and Elixir's own modules are present only because the
+   Elixir runtime declares and loads them; nothing in the archive builds or
+   fetches code. "No Erlang or Elixir installation required" is claimed only
+   because ERTS is bundled, and "no other installation required" only because
+   every native object links nothing outside the platform base named below.
+2. **The build environment is part of the decision.** On macOS the runtime is
+   the precompiled Erlang/OTP 29.0.5 that mise installs for Apple silicon. It
+   targets macOS 15.0, links its crypto library to OpenSSL statically, and
+   links only system libraries. On Linux the runtime is built from source
+   inside an Ubuntu 22.04 container, with OpenSSL 3 linked statically into the
+   crypto library. The Linux build host's own runtime (a newer glibc with a
+   dynamic system OpenSSL) is never used. A build refuses a toolchain or an
+   output that links anything outside the platform's allowed base set.
+3. **One installed command, the existing launcher, extended.** The archive
+   extracts to one directory. `bin/loopex` is the launcher. When a manifest
+   sits beside it, it runs the CLI escript with the bundled runtime, with the
+   same interrupt forwarding as today. There is no second command, no wrapper
+   generated per installation and no single native executable. The source
+   tree's launcher behavior is unchanged.
 4. **The provider companion stays a separate protected process inside the
-   release**, discovered relative to the release root and verified by digest
-   before every launch, as its launch configuration verifies it today. The
-   absolute paths in that configuration become paths relative to the release
-   root, resolved once at launch. ADR 0019's process, Port, OS-guard and
+   release.** Its launch configuration names the companion and its
+   interpreter by paths relative to the release root. The CLI resolves them
+   once against its own location and verifies the companion's digest before
+   every launch, as today. ADR 0019's process, Port, OS-guard and
    private-channel topology is unchanged.
-5. **Every archive ships with a manifest** naming the source commit, the
-   toolchain pair, the platform and its minimum base system, every file with
-   its size and SHA-256 and the `SOURCE_IDENTITY` M5 defines. The archive
-   digest belongs only in its external checksum or attestation. An installation can be
-   verified against the manifest without the source tree.
+5. **Every archive ships with a manifest and a verifier that needs nothing
+   from the archive's runtime.** The manifest names the release version, the
+   platform and its minimum base, the source commit, the Elixir, OTP, ERTS
+   and OpenSSL versions, and every file with its mode class, size and SHA-256.
+   The verifier is a POSIX shell script that uses only base-system tools, so
+   it runs before anything in the archive is executed, including before the
+   macOS quarantine step. The archive's own digest lives only in its external
+   checksum file.
 6. **Supported platforms for `0.5.0` are the two the maintainer selected on
-   2026-10-13:** macOS on Apple silicon (arm64), and Linux on x86-64 with a
-   glibc 2.35 base built in an Ubuntu 22.04 container, on the current
-   toolchain pair. The macOS minimum version is fixed at acceptance from the
-   retained build. A platform without a retained install smoke is not
-   supported, whatever the archive builds on.
-7. **The install and recovery contract is explicit.** Install is extract and
-   run. A release opens only roots in its own current format and refuses any
-   other root before writing to it, under ADR 0072. Before 1.0 there is no
-   upgrade of an older root and no switching back to an earlier release over
-   a root this release wrote. Recovery is a backup restored under the build
-   whose format the root is in, with ADR 0072's commands. Uninstall is
-   delete the directory; the home is the operator's and is never deleted.
+   2026-10-13:** `darwin-arm64`, macOS 15.0 or later on Apple silicon; and
+   `linux-x86_64`, glibc 2.35 or later on x86-64, with `ps` and a system
+   certificate bundle present. A platform without a retained installed-artifact
+   lane is not supported, whatever the archive builds on.
+7. **The install and recovery contract is explicit.** Install is verify,
+   extract and put `bin` on the `PATH`. Upgrade to a later build is replacing
+   the install directory while the service is stopped. Uninstall is deleting
+   the directory. The release never writes into its install directory, and no
+   install, upgrade or uninstall step touches the home, a state root, a
+   workspace or a backup. A release opens only roots in its own current format
+   and refuses any other root before writing to it, under ADR 0072. Before 1.0
+   there is no upgrade of an older root and no switching back to an earlier
+   release over a root this release wrote. Recovery is a backup restored under
+   the build whose format the root is in, with ADR 0072's commands.
 8. **macOS uses a documented quarantine-removal step, not signing.** The
    maintainer chose on 2026-10-13 that the macOS archive is neither signed nor
-   notarized. The operator guide verifies the archive against its checksum
-   and manifest, then removes the quarantine attribute with a documented
-   command.
+   notarized. The operator verifies the archive against its checksum file,
+   extracts it, verifies the extraction against its manifest, and only then
+   removes the quarantine attribute with one documented command.
 9. **Publication is a separate maintainer decision** after closure, gated on
    the public-name clearance the vision's name section already requires.
    Building and retaining the artifact is M8 scope; publishing it is not.
@@ -104,17 +114,26 @@ minimal runtime distribution carries no compiler.
 <a id="concept-adr-0038-consequences"></a>
 ### Observable Consequences
 
-Technical depth: [Smoke proofs and manifest](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-smoke).
+Technical depth: [Install, upgrade and removal](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-install).
 
-An operator on a supported platform downloads one archive and its checksum,
-verifies, extracts, on macOS removes the quarantine attribute as documented,
-runs `bin/loopex init`, and has a working daemon and CLI
-with no toolchain and no third-party OpenSSL installed. `loopex version`
-prints the release version, the source commit, the toolchain pair and the
-platform from the manifest. The
-same source archive M5 produces still builds the same release from source on
-either supported pair. The source tree keeps working exactly as before: the
-escript build and the launcher's checkout mode are unchanged.
+Technical depth: [Smoke proofs](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-smoke).
+
+An operator on a supported platform downloads one archive and its checksum
+file, checks the checksum, extracts, runs the verifier, on macOS removes the
+quarantine attribute, moves the directory into place and adds its `bin` to the
+`PATH`. `loopex init` then gives a working daemon and CLI with no toolchain
+and no third-party OpenSSL installed. `loopex version` prints the release
+version, platform, source commit and toolchain from the manifest.
+
+A refused archive or install names its reason: a checksum or manifest
+mismatch, an unexpected file, a file writable by others, the wrong platform or
+a base system older than the minimum. Nothing runs from the archive until the
+verifier has passed.
+
+The same source archive M5 produces still builds the escript pair from source
+on either supported toolchain pair. The source tree keeps working exactly as
+before: the ordinary escript build and the launcher's checkout mode are
+unchanged.
 
 <a id="concept-adr-0038-compatibility"></a>
 ### Compatibility and Rollback
@@ -122,14 +141,19 @@ escript build and the launcher's checkout mode are unchanged.
 Technical depth: [Compatibility mechanics](0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-compatibility).
 
 This creates the vision's surface 7, released package contents, which is inert
-until publication and permanent afterward. The archive's contents are
-therefore fixed by this decision, not by convenience: one archive contains the
-whole reference host and nothing that is a separately versioned library. Hex
-packages are not published by M8. Before 1.0 there is no binary rollback over
-a newer root, and no earlier build is claimed to refuse one safely. Recovery
-restores a backup under the matching build with ADR 0072's commands.
-The installed demonstration proves the refusal and the same-build restore
-together, so that "restart the old binary" is never mistaken for a plan.
+until publication and permanent afterward. The archive's name, layout,
+manifest format and verifier are therefore fixed by this decision, not by
+convenience: one archive contains the whole reference host and nothing that is
+a separately versioned library. Hex packages are not published by M8.
+
+Before 1.0 there is no binary rollback over a newer root, and no earlier build
+is claimed to refuse one safely. Replacing an install leaves every root
+untouched. If a later build refuses a root by name, the root is byte-identical
+and the previous install directory, kept until the new build serves, still
+opens it. Recovery from an unservable root restores a backup under the
+matching build with ADR 0072's commands. The installed demonstration proves the
+refusal and the same-build restore together, so that "restart the old binary"
+is never mistaken for a plan.
 
 ## Governance Record
 

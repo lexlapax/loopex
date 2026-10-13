@@ -8,179 +8,557 @@ Concept: [Installed distribution and release artifact](0038-installed-distributi
 
 Concept: [Context and decision](0038-installed-distribution-and-release-artifact.md#concept-adr-0038-decision).
 
-**Build.** `mix release loopex` at the umbrella root, with `include_erts`
-naming the release toolchain's ERTS, `include_executables_for: [:unix]`, and
-the release's application list drawn from the umbrella's role table so that
-every `:client`, `:store`, `:model` and `:executor` application the reference
-host composes is included and nothing else. The build runs only from a clean
-source extraction under the canonical archive-extraction rule the milestone
-guide fixes, on the current toolchain pair's versions, and it is refused on a
-dirty tree. Cross-compilation is not used: each platform builds on a host of
-that platform, which is why the supported set is the two the project can run.
+**Names.** The release label is the content of `VERSION` (`0.5.0` for M8).
+`<platform>` is `darwin-arm64` or `linux-x86_64`. The archive is
+`loopex-<label>-<platform>.tar.gz`, gzip-compressed tar, with one top-level
+directory `loopex-<label>-<platform>/`. Its checksum file is
+`loopex-<label>-<platform>.tar.gz.sha256`, one line in the format
+`shasum -a 256 -c` and `sha256sum -c` both read:
+`<64 lowercase hex><two spaces>loopex-<label>-<platform>.tar.gz<LF>`.
 
-**Build environment.** The development toolchain is not the release
-toolchain. Measured on 2026-09-21: on the Mac, Homebrew `erlang 29.0.5` links
-`crypto.so` to `/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib`, which a
-clean Mac does not have; on the Linux host, `/usr/lib/erlang` links
-`crypto.so` to the distribution's `libcrypto.so.3`, `libbrotli*` and
-`libzstd`, `beam.smp` to `libncursesw.so.6` and `libstdc++`, on glibc 2.44,
-which is newer than Debian 12 (2.36) and Ubuntu 24.04 (2.39). A release built
-from either would fail at its first provider call on the very host the smoke
-lane describes. Therefore:
-
-| Platform | Release toolchain | Build environment | Allowed base set |
-| --- | --- | --- | --- |
-| `darwin-arm64` | OTP of the current pair built by the retained recipe with OpenSSL linked statically into the crypto NIF and without a terminal library | The Mac, with the recipe's own OpenSSL source build; Homebrew is not on the build `PATH` | `/usr/lib/libSystem.B.dylib` and the system frameworks under `/System/Library/Frameworks`; nothing under `/opt` or `/usr/local` |
-| `linux-x86_64` | The same recipe on Linux | A container of the oldest supported distribution, whose glibc is the platform's minimum base, fixed at acceptance; the Linux host's own OTP is never used | The dynamic loader, glibc's `libc`, `libm`, `libdl`, `libpthread`, `librt`, and `libgcc_s`; `libstdc++` only if the recipe cannot avoid it, recorded either way |
-
-The recipes live under `scripts/release/`, one per platform, invoke the
-toolchain's own configure and build with the flags that disable dynamic
-OpenSSL and termcap, and record the OpenSSL version they embed in the
-manifest. `scripts/release/assert-linkage.sh` runs `otool -L` or `ldd` over
-every shared object and every executable in the archive and refuses any
-resolution outside the archive or the allowed base set; it runs at build time
-and as the smoke lane's first step. The Linux minimum base is glibc 2.35 from
-an Ubuntu 22.04 container, selected by the maintainer on 2026-10-13. The macOS
-minimum is the version the Mac's SDK targets, fixed from the retained build at
-acceptance.
-
-**macOS distribution.** A downloaded archive carries the quarantine
-attribute, and Gatekeeper refuses an unsigned or un-notarized `beam.smp`
-extracted from it. Ad hoc signing does not clear a download. The maintainer
-chose on 2026-10-13 that `0.5.0` is neither signed nor notarized. The operator
-guide verifies the downloaded archive against its external checksum with
-the system's own `shasum`, extracts it, removes the attribute recursively with
-`xattr -dr com.apple.quarantine` on the extracted directory, and then runs
-`bin/loopex version --verify` against the manifest before any other command.
-The smoke lane simulates the quarantined download and proves that documented
-path. The exact command sequence is fixed with the recipe at acceptance.
-
-**Layout of the extracted archive.**
+**Layout of the extracted archive.** Exactly these entries; every directory
+is mode `0755`, every file `0755` or `0644`, owner and group recorded as `0`.
 
 ```text
 loopex-0.5.0-<platform>/
-  bin/loopex                 the promoted launcher (POSIX sh)
-  bin/loopex-release         the mix release start script the launcher invokes
-  erts-<version>/            the bundled runtime system
-  lib/<app>-<version>/       every included application
-  releases/0.5.0/            the release's boot and configuration files
-  companion/                 the protected provider companion and its launch file
-  MANIFEST.json              see below
-  SOURCE_IDENTITY            the M5-defined source identity of the tree it was built from
+  bin/loopex                  launcher (POSIX sh), from apps/loopex_cli/bin/loopex
+  bin/loopex-verify           verifier (POSIX sh), from apps/loopex_cli/bin/loopex-verify
+  bin/no_dot_erlang.boot      boot file the escript runner loads from <root>/bin
+  libexec/loopex              CLI escript, built with --relocatable
+  libexec/loopex_provider     provider companion escript
+  erts-17.0.5/bin/            beam.smp erl erlexec escript erl_child_setup inet_gethost
+  lib/kernel-11.0.3/ebin/     and stdlib, compiler, crypto, asn1, public_key, ssl
+  lib/crypto-5.9.2/priv/lib/crypto.so
+  lib/asn1-5.5/priv/lib/asn1rt_nif.so
+  releases/29/OTP_VERSION     read by ProviderWorker.otp_version/0
+  SOURCE_IDENTITY             the export-substituted commit and committer date
+  LICENSE                     the repository licence
+  MANIFEST                    see below
 ```
 
-**Launcher promotion.** `bin/loopex` keeps its interrupt contract verbatim.
-Its escript-location step gains one branch: when `../releases` exists beside
-it, it runs the release start script with `eval`-free argument passing and the
-same asynchronous child, saved stdin and forwarded `SIGTERM`. `LOOPEX_ESCRIPT`
-keeps working for the checkout arrangement. The checkout mode is unchanged and
-its existing tests keep passing.
+The ERTS and application versions are those of OTP 29.0.5 and are recorded
+in the manifest; a different OTP patch release changes them only through an
+amendment of the pins below. The seven OTP applications are the closure of
+every OTP application the two escripts' embedded `.app` files declare
+(`kernel`, `stdlib`, `compiler`, `crypto`, `ssl`, `public_key`) plus
+`asn1`, which `public_key` requires. No dependency in `mix.lock` contributes
+native code, so the native objects are exactly the five ERTS executables and
+the two NIF libraries named above. `apps/loopex_cli/bin/loopex-verify` is a
+new file in the source tree; everything else is built or copied.
 
-**Companion placement.** The provider build task writes the launch
-configuration with `worker_path` and `interpreter_path` relative to a
-`release_root` key instead of absolute values; `ProviderConfiguration` resolves
-them against the release root the launcher exports in one environment
-variable at start and verifies the digest as today. The companion's escript
-and its `.launch` and `.manifest` files live under `companion/`. In the
-checkout arrangement the release root is the application directory, so the
-same code serves both.
+**Launcher.** `bin/loopex` keeps its interrupt contract verbatim: saved
+standard input, asynchronous child, trapped `INT TERM HUP QUIT` forwarded as
+`SIGTERM`, the `ask` crash-dump settings and the `kill -0` wait loop. It
+changes in two places only.
 
-**Manifest.**
+1. It resolves `$0` through symbolic links (a `readlink` loop, relative
+   targets joined to the link's directory) before computing its own
+   directory with `pwd -P`, so a link from a `PATH` directory works.
+2. Command selection: `LOOPEX_ESCRIPT` when set, as today; otherwise, when
+   `$here/../MANIFEST` is a regular file, the installed mode; otherwise the
+   checkout mode, unchanged. The installed mode sets
+   `root=$(cd "$here/.." && pwd -P)`, requires exactly one
+   `$root/erts-*/bin/escript` and an executable `$root/libexec/loopex`, unsets
+   `ERL_LIBS ERL_ROOTDIR ESCRIPT_EMULATOR ERL_FLAGS ERL_AFLAGS ERL_ZFLAGS`,
+   and starts the child as `"$runner" "$root/libexec/loopex" "$@"`. The
+   runner, `erl`, `erlexec` and `beam.smp` exec one another, so the child
+   process identifier the launcher signals is the emulator, exactly as with
+   today's `#!/usr/bin/env escript` chain.
 
-```json
-{
-  "release": "0.5.0",
-  "source_commit": "<40-hex>",
-  "source_identity_sha256": "<64-hex>",
-  "toolchain": {"elixir": "1.20.3", "otp": "29.0.5", "openssl": "<embedded version>"},
-  "platform": "darwin-arm64",
-  "platform_minimum": "<macOS version | glibc version>",
-  "files": [{"path": "bin/loopex", "size": 1234, "sha256": "<64-hex>"}]
-}
+**Companion relocation.** `mix loopex.provider.build` accepts
+`--relocatable` beside `--force` and `--warnings-as-errors`; `build_pair/1`
+already forwards its arguments. The task builds, validates and verifies the
+companion at its absolute build paths as today, then writes the `.launch`
+file with `worker_path: "libexec/loopex_provider"` and
+`interpreter_path: "erts-<:erlang.system_info(:version)>/bin/escript"`, both
+relative, and the unchanged `worker_sha256` and `build_manifest_sha256`. The
+CLI embeds that file at compilation as today. `LoopexCli.ProviderLaunch.options/0`
+returns it with both paths joined to the release root,
+`Path.expand(:escript.script_name())` with two directory levels removed, when
+both paths are relative; it returns absolute paths unchanged; a mixed pair is
+returned unchanged and `ProviderConfiguration.validate/1` refuses it. The
+root therefore comes from the location of the code already running, never
+from the environment. `ProviderConfiguration` is unchanged: it still requires
+absolute paths, and `verify_artifact/1` still checks the companion's digest
+and the interpreter's execute bit before every launch. The companion runs on
+the bundled runtime because the carrier executes `"$interpreter" "$worker"`
+under `env -i PATH=/usr/bin:/bin`, the runner finds `erl` beside itself, and
+Mix's `erl` derives `ROOTDIR` from its own location. The worker's identity
+check compares its build manifest's Elixir and OTP versions with
+`System.version()` and `releases/29/OTP_VERSION`, which is why that file is
+placed. The archive ships no `.launch` file. The daemon's
+`--provider-launch FILE` keeps requiring absolute paths; which launch source
+the installed service uses when that flag is absent is ADR 0071's cell, and
+this ADR provides `options/0` for it. A `--relocatable` CLI run from a
+checkout finds no companion and refuses as `provider_artifact_unavailable`;
+only the release step uses that build.
+
+**Version command.** `loopex version` takes no arguments. In the installed
+mode it prints one line from the manifest header,
+`loopex <release> <platform> commit <source-commit> elixir <v> otp <v> openssl <v>`,
+and exits `0`, or exits `1` with `manifest_unreadable`. From a checkout it
+prints `loopex <VERSION> source`. It verifies nothing; the verifier does.
+
+**Manifest.** `MANIFEST` is ASCII text, one LF-terminated line per entry,
+fields separated by one space:
+
+```text
+loopex-manifest 1
+release 0.5.0
+platform darwin-arm64
+minimum macos 15.0
+source-commit <40 lowercase hex>
+elixir 1.20.3
+otp 29.0.5
+erts 17.0.5
+openssl 3.5.7
+runtime mise-precompiled
+files <decimal count>
+<mode> <size> <sha256> <path>
+...
 ```
 
-`files` lists every file in the archive except `MANIFEST.json` itself, sorted
-by raw path bytes, one entry per regular file with symbolic links recorded as
-`{"path": "...", "link": "<target>"}`. The archive SHA-256 appears only in
-the external `loopex-0.5.0-<platform>.tar.gz.sha256` checksum or
-attestation, never inside the archive whose digest it names.
-`loopex version --verify` recomputes every file digest against the manifest
-and reports the first mismatch.
+On Linux the variable lines read `platform linux-x86_64`,
+`minimum glibc 2.35` and `runtime ubuntu-22.04-source`. `openssl` is the
+version `crypto:info_lib()` reports for the bundled runtime. Each file record
+has `mode` `755` when any execute bit is set and `644` otherwise (the class
+the source-archive manifest already uses, so an operator's umask cannot fail
+verification), the decimal byte size, the lowercase SHA-256 and the path
+relative to the top directory. Records cover every regular file except
+`MANIFEST`, sorted by path bytes (`LC_ALL=C`). Paths use only
+`A-Z a-z 0-9 . _ + @ - /`, have no empty, `.` or `..` component and never
+name a symbolic link or any other non-regular file. The writer refuses
+anything else, so the verifier never parses an ambiguous line.
+
+**Verifier.** `/bin/sh <root>/bin/loopex-verify [<root>]` defaults `<root>`
+to the parent of its own directory. It uses only `sh`, `uname`, `find`,
+`sort`, `awk`, `stat`, `wc`, and `shasum -a 256` on macOS or `sha256sum` on
+Linux, plus `sw_vers` or `getconf GNU_LIBC_VERSION`; it hashes in batches
+through `find ... -exec ... {} +`. In order, it checks: the operating system
+and `uname -m` match `platform` (`Darwin arm64` or `Linux x86_64`); the host
+meets `minimum` (`sw_vers -productVersion` at least `15.0`, or glibc at least
+`2.35`); the header's grammar; that no entry under the root is other than a
+regular file or directory; that no file or directory is group- or
+world-writable; and that the recomputed record list equals the manifest's,
+byte for byte, naming the first differing path. Success prints
+`loopex-verify: PASS <release> <platform> <count> files` and exits `0`; a
+refusal prints its name and exits `1`; a usage error exits `2`.
+`--inventory <root>` prints only the record lines for the writer, so one walk
+implementation serves both. The trust anchor is the external checksum: the
+verifier proves the extraction is complete and unmodified, not that an
+archive whose checksum was never checked is authentic.
+
+**Allowed native-library inventory.** Every one of the seven native objects
+must satisfy its platform's rules; any other Mach-O or ELF file in the tree is
+refused.
+
+| Platform | Allowed dependencies | Also required |
+| --- | --- | --- |
+| `darwin-arm64` | Exactly these install names: `/usr/lib/libSystem.B.dylib`, `/usr/lib/libutil.dylib`, `/usr/lib/libncurses.5.4.dylib`, `/usr/lib/libz.1.dylib`, `/usr/lib/libc++.1.dylib`, `/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon`, `/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa` | No `LC_RPATH`; no `@rpath`, `@loader_path` or `@executable_path` name; `LC_BUILD_VERSION` platform `1` with `minos` at most `15.0`; architecture `arm64` only; `codesign --verify --strict` passes, so no step may rewrite a Mach-O after the toolchain produced it |
+| `linux-x86_64` | `NEEDED` entries only from `libc.so.6`, `libm.so.6`, `libpthread.so.0`, `libdl.so.2`, `librt.so.1`, `libutil.so.1`, `ld-linux-x86-64.so.2`, all provided by glibc | No `RPATH` or `RUNPATH`; executables request `/lib64/ld-linux-x86-64.so.2`; the highest `GLIBC_` symbol version is at most `2.35`; no `GLIBCXX_`, `CXXABI_` or `GCC_` symbol version, because `libstdc++` and `libgcc` link statically |
+
+The macOS list is the measured linkage of the mise OTP 29.0.5 objects the
+archive carries (2026-10-13): `beam.smp` uses all seven names, the helpers
+`libSystem` and `libutil`, and `crypto.so` and `asn1rt_nif.so` only
+`libSystem`. `scripts/release/assert-linkage.sh <platform> <tree>` enforces
+the table with these commands:
+
+```sh
+# darwin-arm64, per object f
+otool -L "$f" | tail -n +2 | awk '{print $1}'      # each name in the allowed list
+otool -l "$f" | grep -c LC_RPATH                    # 0
+otool -l "$f" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit}'   # <= 15.0
+lipo -archs "$f"                                    # arm64
+codesign --verify --strict "$f"
+# linux-x86_64, per object f (build environment, binutils present)
+objdump -p "$f" | awk '$1=="NEEDED"{print $2}'      # each name in the allowed list
+objdump -p "$f" | awk '$1=="RPATH"||$1=="RUNPATH"'  # empty
+objdump -T "$f" | grep -oE '\((GLIBC|GLIBCXX|CXXABI|GCC)_[0-9.]+\)' | sort -u
+readelf -l "$f" | sed -n 's/.*program interpreter: \(.*\)]/\1/p'
+# linux-x86_64 smoke mode (clean container, no binutils)
+ldd "$f"    # every line resolves under /lib/x86_64-linux-gnu, /usr/lib/x86_64-linux-gnu or /lib64, or is linux-vdso; no "not found"
+```
+
+The script runs on the toolchain's own objects before a build, on the staged
+tree before the archive is written, and in the smoke lane on the extraction.
+
+<a id="technical-adr-0038-build"></a>
+### Build Recipe
+
+Concept: [Context and decision](0038-installed-distribution-and-release-artifact.md#concept-adr-0038-decision).
+
+**Pins.** `scripts/release/toolchain.env` holds the release pins as shell
+assignments: `ELIXIR=1.20.3`, `OTP=29.0.5`, `ERTS=17.0.5`,
+`OPENSSL=3.5.7`, `MACOS_MINIMUM=15.0`, `GLIBC_MINIMUM=2.35`, the Ubuntu base
+image as `ubuntu:22.04@sha256:<digest>`, and the SHA-256 of
+`otp_src_29.0.5.tar.gz`, `openssl-3.5.7.tar.gz` and Elixir's
+`elixir-otp-29.zip`. The digests are the values upstream publishes for those
+exact versions and the image digest is the one pulled when the file is
+written; changing any of them is a recipe change reviewed like code. The build
+refuses when `ELIXIR` and `OTP` differ from the current pair in
+`.tool-versions`, so the release always uses the current supported pair.
+OpenSSL 3.5.7 is the version the macOS runtime embeds, so both platforms
+carry the same OpenSSL.
+
+**Release definition.** The umbrella `mix.exs` gains `releases: releases()`:
+
+```elixir
+defp releases do
+  [
+    loopex: [
+      applications: [
+        elixir: :none,
+        sasl: :none,
+        compiler: :load,
+        crypto: :load,
+        asn1: :load,
+        public_key: :load,
+        ssl: :load
+      ],
+      include_erts: true,
+      include_executables_for: [],
+      runtime_config_path: false,
+      strip_beams: true,
+      steps: [:assemble, &installed_layout/1]
+    ]
+  ]
+end
+```
+
+`kernel` and `stdlib` keep Mix's `:permanent` default. `elixir` must be
+`:none` or `:load` when `compiler` is `:load`, and Mix always adds `elixir`,
+`sasl` and `iex`. The release version is `VERSION`. No runtime configuration,
+`sys.config`, `vm.args` or start script is used, because nothing boots the
+release as a release: the escripts boot ERTS with their own embedded
+arguments. `installed_layout/1` is a private function in the umbrella
+`mix.exs` that returns the release after, in order:
+
+1. removing `lib/elixir-*`, `lib/iex-*`, `lib/sasl-*` (the escripts embed
+   their own Elixir), every `lib/*/include`,
+   `lib/crypto-*/priv/lib/otp_test_engine.so` and the whole of `releases/`,
+   whose boot scripts, configuration and per-build random `COOKIE` are unused;
+2. reducing `erts-*/bin` to `beam.smp`, `erl`, `erlexec`, `escript`,
+   `erl_child_setup` and `inet_gethost`;
+3. copying from the toolchain root (`:code.root_dir()`)
+   `bin/no_dot_erlang.boot` and `releases/<otp_release>/OTP_VERSION` to the
+   same relative paths;
+4. copying from the source tree `apps/loopex_cli/bin/loopex` and
+   `apps/loopex_cli/bin/loopex-verify` to `bin/`, `apps/loopex_cli/loopex`
+   and `<build path>/loopex_provider` to `libexec/`, and `SOURCE_IDENTITY` and
+   `LICENSE` to the root;
+5. setting directory modes to `0755` and file modes to `0755` or `0644`, and
+   raising `release_layout_unexpected: <path>` for a symbolic link, a path
+   outside the manifest character set, an executable file outside `bin/`,
+   `libexec/` and `erts-*/bin/`, or a native object outside the inventory.
+
+It writes no manifest and no archive. A probe of this definition on
+2026-10-13, with the M7 escript pair and the mise toolchain on the Mac, gave a
+22 MiB runtime on which, under `env -i PATH=/usr/bin:/bin`, the CLI printed
+its usage, the companion booted to its bootstrap refusal and
+`crypto:info_lib()` reported OpenSSL 3.5.7. Without `bin/no_dot_erlang.boot`
+the runner cannot boot, and without `compiler` Elixir does not start.
+
+**Scripts.**
+
+| Script | Runs | Inputs | Outputs |
+| --- | --- | --- | --- |
+| `scripts/release/build.sh <commit> <out-dir>` | On the build host | A commit and an existing empty directory outside the checkout | In `<out-dir>`: the archive, its `.sha256`, a copy of `MANIFEST` named `loopex-<label>-<platform>.MANIFEST`, `build.log`, `linkage.log` |
+| `scripts/release/assemble.sh <src> <out-dir>` | Inside the build environment | A fresh source extraction | The same outputs |
+| `scripts/release/write-manifest.sh <platform> <tree>` | Inside the build environment | A staged tree | `<tree>/MANIFEST` |
+| `scripts/release/assert-linkage.sh <platform> <tree> [--smoke]` | Build and smoke | A tree of native objects | A report on standard output; exit `1` on refusal |
+| `scripts/release/smoke.sh <out-dir>` | The installed-artifact lane | Build outputs | The lane's retained evidence |
+| `scripts/release/linux/Dockerfile`, `Dockerfile.smoke` | Linux build host | `toolchain.env` | The build and smoke images |
+
+`build.sh` refuses an unsupported host (`Darwin arm64` and `Linux x86_64`
+with Docker are the two supported), stages `git archive <commit>` into a
+fresh extraction under the milestone guide's scoped-umask
+[archive-extraction rule](../process/milestones-technical.md#technical-milestones-archive-extraction),
+and requires the extraction's `SOURCE_IDENTITY` to name `<commit>`. It then
+runs `assemble.sh` in the platform's build environment.
+
+`assemble.sh` prints each step with its elapsed time and:
+
+1. asserts the toolchain: `elixir` reports `1.20.3`, `OTP_VERSION` reads
+   `29.0.5`, `:erlang.system_info(:version)` is `17.0.5`, `crypto:info_lib()`
+   reports OpenSSL `3.5.7`, and `assert-linkage.sh` passes on the toolchain's
+   copies of the seven native objects;
+2. runs `mix deps.get`, which verifies every package against `mix.lock`;
+3. runs `MIX_ENV=prod mix cmd --app loopex_cli mix escript.build --relocatable`
+   with no provider credential in the environment, then
+   `elixir scripts/escript-inventory.exs` on the two escripts;
+4. runs `MIX_ENV=prod mix release loopex --no-compile --path <stage>/loopex-<label>-<platform>`;
+5. runs `assert-linkage.sh` on the staged tree, `write-manifest.sh`, and then
+   the staged `bin/loopex-verify`, which must pass;
+6. writes the archive with ownership `0:0` and no extended attributes
+   (macOS: `COPYFILE_DISABLE=1 tar --no-mac-metadata --uid 0 --gid 0 -czf`;
+   Linux: `tar --owner=0 --group=0 --numeric-owner -czf`), lists it with
+   `tar -tzf`, requires its entry set to equal the manifest's paths plus
+   `MANIFEST` and their directories, and writes the `.sha256` file.
+
+Archive bytes are not claimed to be reproducible; the manifest's file digests
+are what two builds of one commit are compared by.
+
+**macOS build environment.** The Mac itself, with the runtime that
+`mise install erlang@29.0.5` provides for Apple silicon (the precompiled
+build) and `elixir@1.20.3-otp-29`. Measured on 2026-10-13: its `beam.smp`
+declares `LC_BUILD_VERSION` `minos 15.0`, `sdk 15.5`; its `crypto.so` embeds
+OpenSSL 3.5.7 and links only `libSystem`. `build.sh` runs `assemble.sh` under
+`env -i HOME=<temporary> LANG=C.UTF-8
+PATH=<mise where erlang>/bin:<mise where elixir>/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
+so no Homebrew or other prefix is reachable by name. No C code is compiled on
+macOS.
+
+**Linux build environment.** A container from `scripts/release/linux/Dockerfile`,
+run on the Linux build host (Docker 29.8 on `serenity`); the host's own Arch
+runtime (glibc 2.44, dynamic `libcrypto.so.3` 3.4) is never used. The image:
+
+```text
+FROM <pinned ubuntu:22.04 digest>
+apt-get install --no-install-recommends build-essential autoconf m4 perl \
+  curl ca-certificates unzip git binutils
+# OpenSSL, static, no loadable modules; every tarball checked with sha256sum -c
+./Configure linux-x86_64 no-shared no-module no-tests no-docs -fPIC \
+  --prefix=/opt/openssl --libdir=lib --openssldir=/etc/ssl
+make -j"$(nproc)" && make install_sw
+# Erlang/OTP 29.0.5 from otp_src_29.0.5.tar.gz
+./configure --prefix=/opt/erlang --with-ssl=/opt/openssl --disable-dynamic-ssl-lib \
+  --without-termcap --enable-builtin-zlib --without-javac --without-jinterface \
+  --without-wx --without-odbc --without-observer --without-debugger --without-et \
+  --without-megaco LDFLAGS="-static-libstdc++ -static-libgcc"
+make -j"$(nproc)" && make install
+# Elixir 1.20.3 from elixir-otp-29.zip, unzipped into /opt/elixir
+MIX_HOME=/opt/mix mix local.hex --force
+ENV PATH=/opt/elixir/bin:/opt/erlang/bin:$PATH LANG=C.UTF-8 MIX_HOME=/opt/mix
+```
+
+`--without-termcap` removes the terminal library (the escripts run without the
+interactive shell), `--enable-builtin-zlib` removes `libz`, and the static
+`libstdc++` and `libgcc` remove the C++ runtime the JIT would otherwise
+need. `build.sh` runs the image as the invoking user's UID and GID, with the
+extraction and `<out-dir>` bind-mounted read-write and no credential in the
+environment. Hex is a build-only tool; its version appears in `build.log`.
+
+<a id="technical-adr-0038-install"></a>
+### Install, Upgrade and Removal
+
+Concept: [Observable consequences](0038-installed-distribution-and-release-artifact.md#concept-adr-0038-consequences).
+
+**Install, macOS.** In the download directory:
+
+```sh
+shasum -a 256 -c loopex-0.5.0-darwin-arm64.tar.gz.sha256
+tar -xzf loopex-0.5.0-darwin-arm64.tar.gz
+/bin/sh loopex-0.5.0-darwin-arm64/bin/loopex-verify
+xattr -dr com.apple.quarantine loopex-0.5.0-darwin-arm64
+mkdir -p "$HOME/.local/opt" && mv loopex-0.5.0-darwin-arm64 "$HOME/.local/opt/loopex"
+export PATH="$HOME/.local/opt/loopex/bin:$PATH"     # and in the shell profile
+loopex version
+```
+
+Nothing from the archive executes before the `xattr` line: the verifier is
+read by the base system's `/bin/sh`. A downloaded archive carries the
+quarantine attribute, extraction may propagate it, and Gatekeeper refuses the
+ad hoc-signed `beam.smp` while it is present; the recursive removal clears it
+whether or not it was propagated.
+
+**Install, Linux.** The same sequence with `sha256sum -c` in place of
+`shasum -a 256 -c` and without the `xattr` line. The base system must provide
+glibc 2.35 or later, `/bin/sh`, `/bin/ps` (`procps`), `/usr/bin/awk`,
+`/usr/bin/env`, `tar`, `gzip`, `sha256sum` and a certificate bundle at one of
+the paths `public_key:cacerts_get/0` reads, such as
+`/etc/ssl/certs/ca-certificates.crt`. macOS 15 provides every corresponding
+tool and reads trust from the system keychain.
+
+**Location.** The release runs from any directory the operator owns that is
+not group- or world-writable; `$HOME/.local/opt/loopex` is the documented
+default. It must not be inside the Loopex home (`$HOME/.loopex` under ADR
+0037) or a state root. The release never writes into its install directory.
+
+**Upgrade to a later build.** With the service stopped by ADR 0037's stop
+command: verify and extract the new archive as above (on macOS including the
+`xattr` line), then
+
+```sh
+mv "$HOME/.local/opt/loopex" "$HOME/.local/opt/loopex.previous"
+mv loopex-<new>-<platform> "$HOME/.local/opt/loopex"
+loopex version
+```
+
+and start the service. If it serves, delete `loopex.previous`. If the new
+build refuses the root by name under ADR 0072, the root is byte-identical;
+swap the two directories back and the previous build serves it again. No
+command upgrades a root.
+
+**Uninstall.** Stop the service, delete the install directory, and remove the
+`PATH` line. There is no uninstall command.
+
+**Never touched.** No install, upgrade or uninstall step reads or writes the
+home, its configuration, any state root, any workspace or any backup.
+Deleting the home is the operator's separate act and no documented step
+performs it.
 
 <a id="technical-adr-0038-smoke"></a>
 ### Smoke Proofs
 
 Concept: [Observable consequences](0038-installed-distribution-and-release-artifact.md#concept-adr-0038-consequences).
 
-The release check gains one lane per supported platform, run on a host of that
-platform with **no** Git, Mix, Elixir or Erlang on the `PATH` and no OpenSSL
-outside the base system (on macOS, nothing under `/opt/homebrew/opt/openssl*`
-or `/usr/local/opt/openssl*`; on Linux, inside a container of the minimum
-base with no OpenSSL package), asserted by the lane before it starts, from an
-empty temporary home:
+`scripts/check-release.sh` gains the lane `installed-artifact`, selectable
+with `--only installed-artifact`. It runs `build.sh` for the candidate into the
+retained-output directory, then `smoke.sh`. On a `Darwin arm64` host it
+proves `darwin-arm64`; on a `Linux x86_64` host with Docker it proves
+`linux-x86_64`. The closure matrix runs the full release check on one host
+and `--only installed-artifact` on the other, retaining both outputs.
 
-1. Verify the archive against its checksum file; extract as a quarantined
-   download would be; `scripts/release/assert-linkage.sh` over the extraction
-   exits `0`; `bin/loopex version --verify` exits `0`.
-2. Initialize the home with the accepted successor grammar over ADR 0049's
-   schema. Configure two admitted provider env references and exact model
-   choices; validate, inspect origins and run `doctor`. No file credential or
-   unaccepted provider-selection grammar is assumed.
-3. Run `loopex run` through the home's socket with no daemon running: it
-   starts the daemon on demand under ADR 0037 and completes one real provider
-   session; detach, attach as observer with `attach --observe`, take control,
-   and stop the service with ADR 0037's lifecycle command; every step uses
-   the installed command.
-4. Start again on demand; list and resume the session; complete it; ADR
-   0037's status and diagnostic commands report readiness without resolving a
-   credential.
-5. Stop the service, take a backup with `loopex store backup`, restore it into
-   an empty root with `loopex store restore`, point the home at the restored
-   root, start the service and validate its sessions. Point the installed
-   command at a copy of an unmarked root written by the M7 source build and
-   prove the named refusal and an unchanged root.
-6. Delete the directory; the home is intact; `ls` proves nothing was written
-   outside the home, the workspace and the lane's temporary directory, which
-   the lane proves by a before-and-after inventory of the filesystem roots
-   the process could reach.
+**Clean host.** On macOS the lane runs as the invoking user under
+`env -i HOME=<empty temporary> LANG=C.UTF-8 PATH=/usr/bin:/bin:/usr/sbin:/sbin`
+and the provider credential variables the lane names. Before it starts it
+asserts that `command -v erl erlc escript elixir mix iex` finds nothing and
+that no `ERL_*`, `ELIXIR_*`, `MIX_*` or `DYLD_*` variable is set. Libraries
+that exist on the machine but that no object names cannot load, which the
+linkage and loaded-image steps prove. On Linux the lane runs in a container of
+`Dockerfile.smoke`: the pinned `ubuntu:22.04` image plus `procps` only, run as
+an unprivileged UID with a temporary home, network enabled for the provider,
+the host's certificate bundle bind-mounted read-only at
+`/etc/ssl/certs/ca-certificates.crt` (installing `ca-certificates` would pull
+in an OpenSSL), and the credential passed by variable name. It asserts the
+same absent commands, records `dpkg -l`, and finds no `beam.smp` or `erl`
+outside the install. The attended outcome-6 record on macOS uses a separate
+macOS user account whose shell profile loads no mise or Homebrew.
 
-Every lane retains its complete output, the manifest and the archive digest
-outside the repository under a stable reference and SHA-256 digest, and the
-closure evidence page records them.
+**Steps**, each printing its elapsed time:
+
+1. **Download and verify.** Check the archive with its `.sha256`. On macOS,
+   set `com.apple.quarantine` (`0083;<hex now>;Safari;`) on the archive and,
+   after `tar -xzf`, on every extracted entry, as a browser download and
+   Archive Utility would leave them. Run `/bin/sh bin/loopex-verify`. On
+   macOS run the documented `xattr -dr` and assert that `xattr -lr` shows no
+   quarantine attribute. Move the tree to the documented location.
+2. **Linkage and loaded images.** Run `assert-linkage.sh <platform> <root>
+   --smoke`. Run a lane-written escript through the bundled
+   `erts-*/bin/escript` that loads `crypto`, starts `ssl` and calls
+   `public_key:cacerts_get/0`, under `DYLD_PRINT_LIBRARIES=1` on macOS or
+   `LD_DEBUG=files` on Linux. Every loaded image must lie under the install,
+   `/usr/lib/` or `/System/Library/` on macOS, or `/lib/x86_64-linux-gnu/`,
+   `/usr/lib/x86_64-linux-gnu/` or `/lib64/` on Linux, and the reported
+   OpenSSL must equal the manifest's. `loopex version` must equal the
+   manifest header.
+3. **Home and configuration.** Initialize the home with ADR 0037's `init`,
+   configure two admitted provider environment references and exact model
+   choices over ADR 0049's schema, validate, inspect origins and run the
+   diagnostic command. No file credential or unaccepted provider-selection
+   grammar is assumed.
+4. **Converse through the service.** `loopex run` through the home's socket
+   with no daemon running starts the service on demand under ADR 0037 and
+   completes one real provider session. Detach, attach as observer with
+   `attach --observe`, take control, and stop the service with ADR 0037's stop
+   command. Start again on demand; list and resume the session; complete it.
+   The status and diagnostic commands report readiness without resolving a
+   credential. Every step uses the installed command.
+5. **Backup, restore and refusal.** Stop the service, take a backup with
+   `loopex store backup`, restore it into an empty root with
+   `loopex store restore`, point the home at the restored root, start the
+   service and list its sessions. Point the installed command at a copy of an
+   unmarked root written by the M7 source build and prove ADR 0072's named
+   refusal and a byte-identical root.
+6. **Replace and remove.** Run the verifier again: it passes, proving that
+   nothing wrote into the install. Stop the service, replace the install
+   with a fresh verified extraction of the same archive by the upgrade
+   sequence, start it and list the same sessions. Stop it, delete the install
+   directory, and prove the home and roots are intact. A before-and-after
+   inventory proves that nothing was written outside the home, the workspace,
+   the lane's temporary directory and the provider's transient `/tmp/lxp-*`
+   namespaces, which must be gone. On Linux the inventory is `find / -xdev`
+   in the container less `/proc`, `/sys` and `/dev`; on macOS it is the
+   invoking user's home, `/private/tmp`, `$TMPDIR` and `/Users/Shared`.
+
+**Evidence retained** outside the repository, each with its SHA-256 on the
+closure evidence page: the archive, its `.sha256` file and manifest copy,
+`build.log`, `linkage.log`, the smoke transcript, the loaded-image report, the
+clean-host assertions, the two inventories and their difference, and the
+`dpkg -l` list on Linux.
+
+<a id="technical-adr-0038-failures"></a>
+### Failure Modes and Refusals
+
+Concept: [Context and decision](0038-installed-distribution-and-release-artifact.md#concept-adr-0038-decision).
+
+| Name | Raised when | Owner | Effect |
+| --- | --- | --- | --- |
+| `release_platform_unsupported` | The build host is not `Darwin arm64`, or not `Linux x86_64` with Docker | `scripts/release/build.sh` | No build |
+| `release_output_exists` | `<out-dir>` is missing, not empty, or inside the checkout | `scripts/release/build.sh` | No build |
+| `release_source_mismatch` | The extraction's `SOURCE_IDENTITY` does not name the requested commit | `scripts/release/build.sh` | No build |
+| `release_input_digest_mismatch` | A downloaded OTP, OpenSSL or Elixir input differs from its pinned digest | `scripts/release/linux/Dockerfile` | No image |
+| `release_toolchain_mismatch` | Elixir, OTP, ERTS or OpenSSL differ from the pins, or the pins differ from `.tool-versions`' current pair | `scripts/release/assemble.sh` | No build |
+| `release_layout_unexpected` | A symbolic link, a path outside the character set, a misplaced executable or an unknown native object in the staged tree | `installed_layout/1` in the umbrella `mix.exs` | `mix release` fails |
+| `linkage_outside_base` | A dependency outside the platform's allowed list, or a `ldd` line that is `not found` or resolves elsewhere | `scripts/release/assert-linkage.sh` | Build or lane fails |
+| `linkage_search_path` | An `LC_RPATH`, `RPATH`, `RUNPATH` or `@`-relative install name | `scripts/release/assert-linkage.sh` | Build or lane fails |
+| `linkage_minimum_exceeded` | A Mach-O `minos` above `15.0`, a `GLIBC_` version above `2.35`, or any `GLIBCXX_`, `CXXABI_` or `GCC_` version | `scripts/release/assert-linkage.sh` | Build or lane fails |
+| `linkage_signature_invalid` | `codesign --verify --strict` fails on a Mach-O | `scripts/release/assert-linkage.sh` | Build or lane fails |
+| `release_archive_mismatch` | The written archive's entry set differs from the manifest | `scripts/release/assemble.sh` | No archive |
+| `platform_mismatch` | Operating system or architecture differs from `platform` | `bin/loopex-verify` | Exit `1`; nothing runs |
+| `platform_minimum_unmet` | macOS below `15.0` or glibc below `2.35` | `bin/loopex-verify` | Exit `1` |
+| `manifest_unreadable` | `MANIFEST` is absent or its header or a record is malformed | `bin/loopex-verify`, `loopex version` | Exit `1` |
+| `install_entry_unexpected` | An entry under the root is neither a regular file nor a directory | `bin/loopex-verify` | Exit `1` |
+| `install_writable_by_others` | A file or directory is group- or world-writable | `bin/loopex-verify` | Exit `1` |
+| `manifest_mismatch` | A record is missing, extra, or differs in mode class, size or digest; the first path is named | `bin/loopex-verify` | Exit `1` |
+| `install_incomplete` | Installed mode without exactly one `erts-*/bin/escript` or an executable `libexec/loopex` | `bin/loopex` | Exit `127` |
+| `provider_artifact_unavailable` | The companion is missing, its digest differs, or the interpreter is not an executable file | `ProviderConfiguration.verify_artifact/1` (existing) | The provider call is refused before launch |
+| `invalid_provider_configuration` | The embedded launch pair mixes relative and absolute paths | `ProviderConfiguration.validate/1` (existing) | The provider call is refused |
+| `clean_host_violation` | A toolchain command or variable is present in the smoke environment | `scripts/release/smoke.sh` | Lane fails |
+| `loaded_image_outside_base` | The loaded-image probe shows an image outside the allowed locations | `scripts/release/smoke.sh` | Lane fails |
+| `install_written` | The verifier fails after the workflow | `scripts/release/smoke.sh` | Lane fails |
+| `outside_write` | The inventories differ outside the permitted locations | `scripts/release/smoke.sh` | Lane fails |
+
+A refused, unmarked or unknown root is ADR 0072's refusal and keeps its names
+there. Deleting or replacing the install while the service runs is an operator
+error the documentation forbids; the store's commit rules keep durable truth,
+and restarting under the installed build recovers the service.
 
 <a id="technical-adr-0038-compatibility"></a>
 ### Compatibility Mechanics
 
 Concept: [Compatibility and rollback](0038-installed-distribution-and-release-artifact.md#concept-adr-0038-compatibility).
 
-**Surface 7.** The archive is the package. Its name, its contents and the
-version it declares become permanent at first publication. Nothing in it is a
-separately versioned library; the applications inside are not published to
-Hex and their versions are the release's. A later change that splits the
-archive is a compatibility decision under the vision's rule.
+**Surface 7.** The archive is the package. Its name pattern, top directory,
+layout, `loopex-manifest 1` format, verifier behavior, launcher selection and
+the version it declares become permanent at first publication. Nothing in it
+is a separately versioned library; the applications inside are not published
+to Hex and their versions are the release's. A later change that splits the
+archive or changes the manifest format is a compatibility decision under the
+vision's rule.
 
-**ADR 0003.** The release carries no compiler, no Mix and no build path, which
-is the minimal runtime distribution ADR 0003's clause 4 describes. Extension
-acquisition and installation remain deferred; nothing in the archive is an
-extension source.
+**ADR 0003.** The archive carries no build path: no Mix, Hex, `erlc`,
+`elixirc`, `rebar3`, source or dependency tree, and nothing that fetches,
+builds or loads an extension. The Erlang `compiler` library and Elixir's own
+modules ship because the Elixir application declares and loads them; this ADR
+reads clause 4's "no compiler" as no build toolchain, and the release check
+proves the archive starts nothing but the two escripts. Extension acquisition
+and installation remain deferred.
 
 **ADR 0019 and ADR 0034.** The companion remains a separate OS process behind
 the Port and OS guard; the credential still crosses the private channel; the
 composition-bound token resolved through host custody is unchanged. Only the
 path resolution changes, and the digest verification before launch is kept.
 
-**Recovery.** Follow step 5 of the installed smoke above. Before 1.0 there is
-no binary rollback or older-root upgrade, under the maintainer's pre-1.0
-current-contract rule. An unsupported root is refused before any write, and
-recovery restores a backup under the build whose format the root is in. No
-earlier build is assumed to contain a restore command, an installed layout or
-the marker check.
+**Recovery.** Before 1.0 there is no binary rollback or older-root upgrade,
+under the maintainer's pre-1.0 current-contract rule. An unsupported root is
+refused before any write, and recovery restores a backup under the build
+whose format the root is in. Keeping the previous install directory until a
+replacement serves is the only "switch back", and it is safe only because the
+refused root was never written. No earlier build is assumed to contain a
+restore command, an installed layout or the marker check.
 
 **Rejected alternatives.**
 
+- *Running the CLI as release code* through the release's `eval` entry would
+  replace the artifact the real-provider lanes test, move the standard-I/O
+  encoding and signal handling off the escript path, and leave two copies of
+  every application on the code path.
+- *Copying the toolchain root by hand* would reimplement what `mix release`
+  already does: the application closure from `.app` metadata, NIF `priv`
+  copying, beam stripping and a relocatable `erl`.
 - *A single native executable* (Burrito-style) adds a packer dependency, a
-  self-extraction step at first run and a second launcher; the OTP release
-  already is a self-contained directory and the launcher already exists.
+  self-extraction step at first run and a second launcher.
 - *Hex publication* creates seven package surfaces at once and welds their
   versions; no consumer justifies it.
 - *Service-manager installation* is host policy and a later milestone.
@@ -188,19 +566,25 @@ the marker check.
   clearance; it is not `0.5.0` scope.
 - *A release without ERTS* would require an installed Erlang of the exact
   version and could not claim "no toolchain required".
-- *Building the release from the development toolchain* was the first draft
-  and is refused by the measurements above; it would have produced an
-  archive that passes every fast check and fails on the first clean host.
-- *A curl-piped install script*, which pi, Hermes Agent and OpenClaw all
-  lead with, is a publication-time convenience and follows name clearance.
+- *Building from the development toolchain* is refused by measurement:
+  Homebrew's OTP links its crypto library to Homebrew's OpenSSL (2026-09-21),
+  and the Linux host's runtime links glibc 2.44 and dynamic OpenSSL, brotli,
+  zstd and ncurses.
+- *A JSON manifest checked by the release's own runtime* cannot run before the
+  macOS quarantine step; a line format a shell script can check can.
+- *A curl-piped install script* is a publication-time convenience and follows
+  name clearance.
 
-**Decided on 2026-10-13 by the maintainer.** The release label `0.5.0`, the
-two platforms `darwin-arm64` and `linux-x86_64`, the Linux base of glibc 2.35
-from Ubuntu 22.04, and the macOS quarantine-removal path without signing or
-notarization.
+**Decided on 2026-10-13 by the maintainer.** The release label `0.5.0` with
+`VERSION` advanced in the M8 candidate before its tested runs; the two
+platforms; macOS 15.0 on Apple silicon using the precompiled Erlang/OTP 29.0.5
+runtime mise installs; Linux x86-64 with a glibc 2.35 base built from source
+in an `ubuntu:22.04` container with OpenSSL 3 linked statically, never from
+the build host's runtime; the macOS quarantine-removal step after manifest
+verification, without signing or notarization; and current-format roots only,
+with recovery by backup and restore under the matching build.
 
-**Open before acceptance.** The macOS minimum version, fixed from the retained
-recipe build; the allowed base-library set per platform, including whether
-`libstdc++` is in it; the exact verification and quarantine-removal command
-sequence; the public-name clearance status, which gates publication rather
-than this decision.
+**Open for the maintainer.** None for M8. Publication, which this ADR does not
+authorize, additionally needs public-name clearance and the third-party licence
+notices for ERTS, Elixir, OpenSSL and the Hex dependencies that redistribution
+requires.
