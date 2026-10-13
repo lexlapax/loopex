@@ -8,25 +8,24 @@ supersedes this inventory's older-reader, backward-read, migration and
 cross-version rollback promises. Current boundaries retain only their current
 contracts. Historical statements below describe their named revisions;
 current-format restart/replay, authority, uncertainty and backup/restore remain
-required. Compatibility-only archive and accounting probes have been removed.
+required.
 
-Every surface Loopex exposes is unfrozen. M6's new embedding and command
-contracts and the exact wire-protocol generations are experimental; the other
-reachable source interfaces in this inventory are described as unstable.
+Every surface Loopex exposes is unfrozen. The ephemeral embedding and `ask`
+command contracts and the exact wire-protocol generations are experimental; the
+other reachable source interfaces in this inventory are described as unstable.
 None claims release-candidate or stable status or a deprecation window.
-The current v2 preparation-failure union includes
+The current preparation-failure union includes
 `maintenance_reply_reserve_unavailable` for a run that needs another summary,
 has turns remaining, and has 1–1,023 unspent tokens. Its failed outcome retains
-actual usage and any prior checkpoint. It uses no new public bound. The
-[approved ADR 0043 amendment](agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
-changes the current schemas, Elixir codec and independent Node decoder together.
-Checkpoint events now identify their actual owner with the closed
-`{kind: "run" | "compact", id}` object; foreground and daemon projections
-encode its opaque identity with the existing base64url codec. The
-[approved owner amendment](agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
-removes the public owning `run_id` alias. Literal vectors cover both kinds,
-malformed shapes and the complete identity ceiling. The foreground `/3` and
-daemon `/4` schemas include it.
+actual usage and any prior checkpoint, and it uses no new public bound
+([ADR 0043 amendment](agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)).
+Checkpoint events identify their actual owner with the closed
+`{kind: "run" | "compact", id}` object, whose opaque identity both the
+foreground `/3` and daemon `/4` projections encode with the base64url codec;
+there is no public owning `run_id` alias
+([owner amendment](agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)).
+Literal vectors cover both kinds, malformed shapes and the complete identity
+ceiling.
 Breaking an experimental API in a minor release carries an explicit migration
 note under the vision's 0.x policy. This page lists what an embedder, a client
 author, or an operator can reach today, what each surface consists of, which
@@ -39,12 +38,11 @@ surface only when its own consumers, schemas, vectors, migration, rollback, and
 operational evidence justify the claim. No surface has all of those yet, so
 labelling one stable would be a promise with nothing behind it.
 
-**Versions name source, not contracts.** The closed M5 source is `v0.2.0` and
-the closed M6 source is `v0.3.0`, with an ephemeral embedding profile and
-`loopex ask`. The closed M7 source is `v0.4.0`, whose `VERSION` still reads
-`0.3.0` because M7 did not advance it.
-The older `v0.0.0-m2` and `v0.1.0` tags also name source snapshots. None is a
-package or a compatibility freeze. No installed binary or package is published,
+**Versions name source, not contracts.** The tags `v0.1.0`, `v0.2.0`, `v0.3.0`
+and `v0.4.0` name source releases: `v0.3.0` adds the ephemeral embedding
+profile and `loopex ask`, and `v0.4.0` is the current source, whose `VERSION`
+file still reads `0.3.0`. The older `v0.0.0-m2` tag also names a source
+snapshot. None is a package or a compatibility freeze. No installed binary or package is published,
 so the vision's package surface — released names, contents, and constraints —
 has not been created. The session protocol's generations are negotiated
 independently of the source version, as accepted
@@ -59,11 +57,9 @@ partial match, no nearest neighbour, and no version comparison that could round
 the word `experimental` up to a released contract. A generation has schemas,
 vectors, and an independent consumer; it has no migration path and no freeze.
 
-**Durable data grows by new record kinds, and older readers refuse.** M6's
-ephemeral profile writes no durable session data; its added durable composition
-options and named-skill helper use existing record kinds. A reader
-replays every history a later revision can still interpret, and a session that
-contains a record kind an older reader does not know is refused by that reader
+**Durable data grows by new record kinds, and older readers refuse.** The
+ephemeral profile writes no durable session data. A reader replays the current
+record formats, and a session that contains a record kind an older reader does not know is refused by that reader
 at load, before any model or executor work. There is no in-place migration and
 none is owed. Rollback means returning to a retained old binary with a complete
 backup of the state root it wrote; removing a feature's files or its server
@@ -77,8 +73,8 @@ reach you through the facade you call. Internal process topology, process
 messages, supervision structure, and private structs are not a surface at all
 and are not listed.
 
-The M6 command boots standard input in byte mode so OTP 27 cannot decode an
-`ask` prompt before admission. Legacy commands restore Unicode output and keep
+The command boots standard input in byte mode so OTP 27 cannot decode an
+`ask` prompt before admission. The other subcommands restore Unicode output and keep
 ASCII `y`/`yes` confirmations. A prefetched confirmation padded with Unicode
 whitespace may be rejected, an explicitly
 [accepted compatibility limit](agent-context-map.md#disposition-m6-stdio-2026-09-29).
@@ -101,7 +97,7 @@ surface it belongs to under
 | --- | --- | --- | --- |
 | Embedded facade | `Loopex` and its start options | 5, embedded Elixir API | Unstable |
 | Ephemeral composition | `LoopexComposition.Ephemeral.run/2`, session and observation functions | 5, embedded Elixir API | Experimental; in-VM lifetime only |
-| Durable reference composition | `LoopexComposition.start/1`, `with_runtime/2`, `start_edges/2`, `artifacts/1`, and the named-skill helper | 5, embedded Elixir API | Unstable; M6 `read_directories/2` is experimental |
+| Durable reference composition | `LoopexComposition.start/1`, `with_runtime/2`, `start_edges/2`, `artifacts/1`, and the named-skill helper | 5, embedded Elixir API | Unstable; `ResourcePacks.read_directories/2` is experimental |
 | Store port | `Loopex.Store` behaviour and handle | 1, private journal and store schema | Unstable |
 | Model port | `Loopex.Model` behaviour, request and reply shapes, delta contract | 2, public protocol semantics | Unstable |
 | Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2`, optional `retained_receipt/2` | 3, executor protocol | Unstable |
@@ -117,8 +113,8 @@ surface it belongs to under
 | Public protocol schemas and vectors | `apps/loopex_protocol/priv/schema/` and `priv/vectors/`, reported as a schema digest at initialization | 2, public protocol semantics | Experimental |
 | Telemetry events | the `[:loopex, …]` span inventory, `Loopex.Telemetry.attach/1` and `detach/1` | not a listed surface; transient diagnostics | Experimental |
 | Trace sessions | `Loopex.trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` | 5, embedded Elixir API; transient diagnostics | Experimental |
-| Operator command | the `loopex` escript, its subcommands, flags, exit statuses, and the compact JSON of daemon queries | not a listed surface | Unstable; M6 `ask` and its JSON contract are experimental |
-| Model selection strings | the `provider:model` values admitted by M6 embedded and command entrypoints | 5, embedded Elixir API | Experimental |
+| Operator command | the `loopex` escript, its subcommands, flags, exit statuses, and the compact JSON of daemon queries | not a listed surface | Unstable; `ask` and its JSON contract are experimental |
+| Model selection strings | the `provider:model` values admitted by the embedded and command entrypoints | 5, embedded Elixir API | Experimental |
 
 Surface 4, the extension manifest and lifecycle API, does not exist yet.
 Surface 7, released package names and their contents, is inert: no package is
@@ -274,7 +270,7 @@ one exists. Delivery is fenced by resolution as well as commit; cursors,
 sequences, and gap semantics are otherwise plain. Progress items and
 diagnostics are transient, are not this surface, and carry no compatibility
 expectation.
-The shared `ContextFailure` codec pins the new reserve cause in the terminal
+The shared `ContextFailure` codec pins the reply-reserve cause in the terminal
 and compact-result schema union. The runtime admits it only for eligible
 run-owned maintenance. Literal current vectors and their exact-byte assertions
 retain it with null measurement scope; replay derives the unspent interval and
@@ -294,15 +290,13 @@ exactly as before; anything else changes every retained digest.
 and [durable contract](runtime-and-embedding.md#technical-embedding-composition).
 The durable composition names four concrete implementations, so an embedder
 that depends on it acquires their external dependencies whether or not every
-one is used. M6 adds validated `:model`, `:bounds`, `:sampling` and
-`:active_tools` options; those four keys were ignored in `0.2`, so supplying
-an invalid value now refuses. Defaults preserve M5, including the original
-four active coding tools and policy revision `"0.2.0"` for pending-interaction
-rollback. `LoopexComposition.ResourcePacks.read_directories/2` turns up to
+one is used. It validates its `:model`, `:bounds`, `:sampling` and
+`:active_tools` options, and an invalid value refuses. Its defaults keep the
+four coding tools active and name policy revision `"0.2.0"`. `LoopexComposition.ResourcePacks.read_directories/2` turns up to
 four named project or user skill directories into the existing manifest path;
 the project copy wins a shared name. The ephemeral composition instead uses a
 memory Store and an in-VM model edge and has no recovery or artifact store.
-The M7 source adds optional ephemeral `:trace` startup under
+The ephemeral composition accepts an optional `:trace` startup map under
 [ADR 0049](../adr/0049-explicit-host-configuration.md#concept). Omission or a
 disabled map preserves startup without diagnostic actors. Invalid maps refuse
 before composition effects; requested trace startup and cleanup failures are
@@ -406,32 +400,23 @@ Neither changes a durable format, and removing either needs no migration.
 | `interaction_requested_v1`, `policy_interaction_answer_admitted_v1`, `interaction_resolved_v1` | Replayed | A reader without interaction records refuses the session before any effect |
 | A root whose sessions exist only in the retired offline `sessions/` directory | Refused as `session_catalog_retired` by the daemon and by offline listing, recording and resume (ADR 0070); start on a fresh state root | — |
 
-M6's ephemeral sessions have no row in this table: they leave no durable
-session root to migrate or roll back. Its durable defaults preserve the M5
-record formats and policy revision `"0.2.0"`, so a `0.2` reader can resume a
-`0.3` root, with three observable limits. A pending M6-only read-only tool
-call becomes `unknown_tool` under `0.2` if it was not dispatched; a dispatched
-effect follows the existing reconciliation fence. An admitted user skill's
-retained snapshot can be reloaded by `0.2` offline resume, but its daemon
-cannot rediscover that external directory and withholds the session's skill
-context. The `0.2` CLI and daemon cannot activate a new external user skill.
-These are rollback limits, not a migration of an ephemeral session.
+Ephemeral sessions have no row in this table: they leave no durable session
+root to migrate or roll back.
 
 Rollback therefore requires stopping owners and preserving a complete backup of
 the root. Ownership acquisition may still write fenced administration before
 replay refuses, so an older reader is not promised zero writes; readiness and
 recovered work require successful replay through the committed head. Removing
 skill files, the app server, or the daemon does not downgrade a root that holds
-their records. The pre-1.0 current-contract rule retires the old-binary accounting
-probe. A local executor ledger that a reader refuses is preserved, and the
+their records. A local executor ledger that a reader refuses is preserved, and the
 [operator recovery procedure](../operator/tools-and-policy.md#operator-tools-reach)
 still requires positive cessation of every old effect authority, or the
 prescribed host reboot, before a fresh root is used.
 
 ### What an Embedder Should Do About It
 
-- Pin an exact revision of this repository. No published version expresses a
-  loop, because no version has been published.
+- Pin an exact revision of this repository. No package version expresses a
+  compatibility range, because no package has been published.
 - Do not persist anything that depends on a durable record shape outside the
   Store, and do not read the Store's files with your own code.
 - Treat `artifact_reference.locator` as opaque. Core never parses, joins, or

@@ -113,6 +113,7 @@ flowchart TB
     DAEMON --> RUNTIME
     DAEMON --> PROTO
     COMP --> RUNTIME
+    COMP --> PROTO
     COMP --> STORE
     COMP --> LLM
     COMP --> EXEC
@@ -322,7 +323,7 @@ what happens next. Hands own workspaces and operating-system effects, and they
 sit behind the Executor port — the local executor validates bounded arguments
 against a fixed code-owned tool and holds a monitored workspace lease for the
 job's whole lifetime. It retains a receipt through the session's Store before
-replying; only the durable Store persists that receipt. Only the shell
+replying; only the durable Store persists that receipt. Only the `bash`
 tool starts an operating-system child, in its own process group and with an
 environment built from nothing; the read, write, edit, grep, find, and ls tools
 run in the local executor's VM against the leased workspace.

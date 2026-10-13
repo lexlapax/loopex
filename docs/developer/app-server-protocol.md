@@ -20,10 +20,8 @@ by two servers:
   `loopex.experimental/4`: the foreground methods plus session listing,
   daemon status, and controller leases. See [the daemon](daemon.md#concept).
 
-This pair documents the coordinated M7 implementation candidate. Accepted ADRs
-and the active plan govern its contracts; this projection does not record a
-passing qualification, milestone closure or partial-generation activation.
-The founding decision is
+This pair documents the protocol both servers speak in the current source
+(`v0.4.0`); accepted ADRs govern its contracts. The founding decision is
 accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept);
 the daemon's additions rest on
 [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) and
@@ -58,8 +56,8 @@ settings. A frame cannot replace those launch inputs or turn an identity into
 a grant. Configuration commits its effective public view, while raw instructions
 and private provider data stay outside public records.
 
-The foreground candidate has eighteen methods after initialization; the daemon
-has twenty-two. Both include configure, standalone compact and the closed
+The foreground generation has eighteen methods after initialization; the daemon
+generation has twenty-two. Both include configure, standalone compact and the closed
 choice/text/declined answer union. An `admission` reply means a command was
 accepted and journaled, never that the run has completed; completion arrives as
 committed events.
@@ -81,7 +79,7 @@ than assuming it.
 
 Public compatibility in this repository is behavioural and requires schemas,
 vectors, independent consumers, migrations, and upgrade evidence. The
-current candidate pins each complete payload manifest and its independent
+current source pins each complete payload manifest and its independent
 consumer. Before 1.0, clients and servers move together to the current contract;
 old-only and wrong-server offers refuse, with no compatibility fallback. Earlier
 generation identities remain historical evidence at their tested revisions.
@@ -172,7 +170,7 @@ Technical depth: [The transport process](app-server-protocol-technical.md#techni
 <a id="concept-protocol-daemon"></a>
 ## What the Daemon's Generation Adds
 
-The daemon candidate keeps the foreground framing, records, codes and limits,
+The daemon generation keeps the foreground framing, records, codes and limits,
 and adds
 what several clients sharing one daemon need. A client can list the sessions a
 root holds and ask for the daemon's status. Any number of connections may observe

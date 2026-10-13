@@ -137,9 +137,11 @@ records the caller in a monitored excluded-process set and adds the functions
 to a ref-counted union with no fixed ceiling; the active session clears the
 caller's flags and those match specs, and the call returns only after an OTP
 trace-delivery barrier. A session started later applies the retained set. When
-the excluded process exits, its whole contribution is removed. The ReqLLM
-credential sender is the one caller: it excludes itself before it receives any
-credential context and refuses the call if exclusion is unavailable. `Trace`
+the excluded process exits, its whole contribution is removed. Two ReqLLM
+callers use it: the durable profile's credential sender excludes itself before
+it receives any credential context, and the ephemeral profile's sensitive
+in-VM provider caller excludes itself before its provider call; each refuses
+the call if exclusion is unavailable. `Trace`
 keeps the full OTP session handle in private ETS so neither crash output nor
 status formatting carries it, and a replacement tracer recreates an active
 session from `Control`'s retained metadata.
@@ -161,9 +163,12 @@ Concept: [Redaction is a contract, not a filter](observability.md#concept-observ
 | Key in `messages canonical_request_bytes text tool_calls arguments argument result results content contents data bytes payload body chunk` | `content` placeholder |
 | Binary longer than 64 bytes | `bytes` placeholder |
 | Nesting deeper than 6 | `depth` placeholder |
+| List longer than 32 elements | the first 32 elements, then one `list` placeholder for the rest |
+| Map or tuple with more than 32 members | `map` or `tuple` placeholder |
+| Pid, port, reference or function | `opaque` placeholder |
 
-A placeholder carries the byte size and the lowercase SHA-256 digest of what it
-replaced. The rendered form is then truncated to `entry_bytes` with a `...`
+A placeholder carries the byte size and the lowercase SHA-256 digest of the
+deterministic external-term encoding of what it replaced. The rendered form is then truncated to `entry_bytes` with a `...`
 marker, so an entry is bounded however deep or wide the term was.
 
 <a id="technical-observability-evidence"></a>

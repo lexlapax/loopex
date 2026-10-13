@@ -345,8 +345,10 @@ and the current `model_attempt_settled_v3` shape in
 Public event kinds are `user.message_appended`, `run.started`,
 `assistant.message_appended`, `tool.started`, `tool.finished`, `run.finished`,
 `steer.resolved`, `follow_up.resolved`, `session.settled`,
-`interaction.requested`, `interaction.resolved`, `interaction.expired`, and
-`interaction.cancelled`. `session.settled` closes a run that promoted no queued
+`interaction.requested`, `interaction.answer_admitted`, `interaction.resolved`,
+`interaction.expired`, `interaction.cancelled`, `interaction.answered`,
+`interaction.declined`, `session.configured`, `context.compacted`,
+`context.maintenance_changed`, and `context.compaction_finished`. `session.settled` closes a run that promoted no queued
 follow-up, so a consumer can tell a session that is idle from one that moved
 straight to its next run. Each event carries an `event_id` and receives an
 `event_sequence` stamped by the Store.
@@ -490,7 +492,7 @@ Concept: [Five replaceable boundaries](architecture.md#concept-arch-ports).
 
 | Port | Callbacks |
 | --- | --- |
-| `Loopex.Store` | `transact/2`, `transaction_status/4`, `runtime_command/2`, `ownership_head/3`, `load_records/4`, `load_events/4` |
+| `Loopex.Store` | `transact/2`, `transaction_status/4`, `runtime_command/2`, `ownership_head/3`, `load_records/4`, `load_events/4`, optional `creation_provenance/3` and `creation_recovery/2` |
 | `Loopex.Model` | `complete/3`, optional `prepare_configuration/5` |
 | `Loopex.Executor` | `execute/5`, `cancel/2`, optional `retained_receipt/2` |
 | `Loopex.ArtifactStore` | `put/3`, `fetch/2`, `stat/2`, `describe/2`, optional `reserve_transfer/3`, `open_transfer/3`, `read_transfer/3`, `close_transfer/2`, optional `read_job_range/2` |
@@ -665,7 +667,7 @@ durable companion's isolation claim.
 | Context and record admission | `apps/loopex/lib/loopex/runtime/context_admission.ex` |
 | Ports | `apps/loopex/lib/loopex/{store,model,executor,artifact_store,policy}.ex` |
 | Store lane, catalogue, job shape | `apps/loopex/lib/loopex/store/`, `apps/loopex/lib/loopex/executor/job_request.ex` |
-| Effect identity and admission | `apps/loopex/lib/loopex/effect.ex` |
+| Effect job identity and grants | `apps/loopex/lib/loopex/executor.ex` |
 | Run bounds and stream identity | `apps/loopex/lib/loopex/bounds.ex`, `stream_domain.ex` |
 | Conversation projection and tools | `apps/loopex/lib/loopex/conversation.ex`, `tool_registry.ex` |
 | Project resources and session directory | `apps/loopex/lib/loopex/project_resource.ex`, `session_directory.ex` |

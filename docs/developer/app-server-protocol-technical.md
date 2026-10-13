@@ -5,9 +5,7 @@
 
 Concept: [App server protocol](app-server-protocol.md#concept).
 
-This companion projects the accepted current M7 wire contract and prepared
-implementation candidate. It names required evidence, not completed
-qualification or closure. Complete manifests supply the inventories consumed by
+This companion projects the current wire contract. Complete manifests supply the inventories consumed by
 `LoopexProtocol.Session` for foreground /3 and `LoopexProtocol.Session.V2`
 for daemon /4. Schemas and literal vectors live in `apps/loopex_protocol/priv/`;
 no partial manifest independently activates serving.
@@ -42,9 +40,9 @@ Historical generation 1 was named `loopex.session.v1-experimental` before its
 rename. That rename changed its metadata digest while the original methods,
 families, codes, limits, manifest and vectors stayed the same, as recorded by
 the public-schema conformance test at that revision. Historical /1 and /2
-identities remain evidence at their original tested revisions. The before-1.0
-candidate removes their product schemas/vectors after caller migration; it
-keeps no compatibility decoder or old-client promise.
+identities remain evidence at their original tested revisions. Before 1.0 the
+product carries no schemas or vectors for them, and keeps no compatibility
+decoder or old-client promise.
 
 Every request is one object carrying `method` and a `request_id`. The first must
 be `initialize`:
@@ -70,7 +68,7 @@ a client can verify the contract it is about to speak rather than assume it.
 
 Concept: [One contract, not a second loop](app-server-protocol.md#concept-protocol-one-contract).
 
-Besides `initialize`, the foreground candidate has eighteen methods:
+Besides `initialize`, the foreground generation has eighteen methods:
 
 | Group | Methods |
 | --- | --- |
@@ -272,8 +270,7 @@ unavailable state. The actual connection charges
 `max(1,048,576, source_read + snapshot_write_debit + metadata_read)` per opening,
 plus emitted snapshot reads once, within 1,073,741,824 bytes. Pending, live,
 retiring and unacknowledged entries retain two connection/attachment slots and
-four runtime slots; genuine job reservations share Store headroom. These are
-required invariants, not proof established by this documentation.
+four runtime slots; genuine job reservations share Store headroom.
 
 <a id="technical-protocol-wire"></a>
 ## Wire Representations
@@ -385,7 +382,7 @@ custody remains uncertainty, never success inferred from a disappeared PID.
 
 Concept: [What the daemon's generation adds](app-server-protocol.md#concept-protocol-daemon).
 
-The daemon candidate carries the foreground methods, families, codes and limits,
+The daemon generation carries the foreground methods, families, codes and limits,
 for twenty-two methods after initialization, and adds:
 
 | Addition | Members |
@@ -410,9 +407,9 @@ leases, connections, and output bounded is in
 [the daemon pair](daemon-technical.md#technical-depth).
 
 <a id="technical-protocol-evidence"></a>
-## Required evidence
+## Evidence
 
-| Claim | Where |
+| Claim | Where it is proved |
 | --- | --- |
 | Complete canonical preimages, literal digests and positive/negative vectors | `apps/loopex_protocol/test/current_contract_manifest_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `clients/node/current-contract-manifest-vectors.mjs`, `clients/node/contract-negotiation-tests.mjs` |
 | Method and record shapes against the foreground /3 schema | `apps/loopex_protocol/test/session_schema_test.exs` |
@@ -423,9 +420,6 @@ leases, connections, and output bounded is in
 | Delivery bounds and slow readers | `apps/loopex_app_server/test/delivery_bounds_test.exs` |
 | An independent client drives a whole session, and the skill, interaction, and artifact chain, over a real process | `apps/loopex_app_server/test/external_workflow_test.exs` |
 | An independent client observes and takes over a session over the daemon's socket | `apps/loopex_daemon/test/external_socket_workflow_test.exs` |
-
-These paths name required proof, not a passing run. Coordinated integration,
-both supported pairs and the independent/real-provider lanes remain necessary.
 
 The vectors are literal byte strings with literal verdicts, not values generated
 from the implementation they check. A generated vector proves only that this
