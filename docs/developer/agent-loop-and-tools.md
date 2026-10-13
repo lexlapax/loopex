@@ -909,7 +909,7 @@ entry not reported `contained`, enforces the ceilings of 64 KiB per resource and
 decision binds. Nothing is ever truncated into context.
 
 Resolution is exhaustive, and every request's receipt names exactly one
-disposition from a closed set of nine. `staged` is the admitted one; the eight
+disposition from a closed set of ten. `staged` is the admitted one; the nine
 that stage the class empty are `no_manifest`, `manifest_rejected`,
 `over_limit` with its dimension and observed size, `no_decision`,
 `binding_changed`, `staged_empty` for a matching manifest that truthfully
@@ -929,8 +929,11 @@ and limit. `manifest_rejected` reasons are themselves closed —
 revision, resolved set, or content digest produces a different manifest digest,
 so a decision bound to the old one admits nothing; there is no partial match and
 no staleness window.
-Blocks are resolved per turn from the same manifest and decision, so an edited
-resource stops being admitted at the next turn rather than at the next run.
+The host captures the manifest and its decision when it composes the session,
+and blocks are resolved per turn from those captured bytes, not reread from
+disk. Editing a file therefore changes nothing that session admits; the edit
+takes effect only when the host discovers the resource again, which produces a
+new manifest digest that the earlier decision refuses as `binding_changed`.
 
 Failing closed here withholds *content*, never the runtime: a headless run with
 no matching decision stages the class empty, journals the declined receipt, and

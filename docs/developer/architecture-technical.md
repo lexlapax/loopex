@@ -471,8 +471,9 @@ can hand the returned item straight to `transact/2` and know what it will be
 measured as.
 
 `Loopex.Runtime.ContextAdmission` evaluates a candidate in a fixed order and the
-first failure wins: the `system` provenance class against its strict 1,000-token
-ceiling, the whole provider-visible request against the run's committed
+first failure wins: the `system` provenance class against its strict ceiling,
+the session's captured `system_class_tokens` (1,000 when the host declares
+none), the whole provider-visible request against the run's committed
 `context_token_budget`, the durable record's structure, and then that record's
 exact encoded byte cost against the Store item ceiling. Structure precedes bytes
 because a structurally inadmissible record has no meaningful size, and both are

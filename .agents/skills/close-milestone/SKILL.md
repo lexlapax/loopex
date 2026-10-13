@@ -21,7 +21,8 @@ technical guidance. The process is the
    candidate.
 2. Make every current-state page correct at the candidate, changed or not:
    the root `README.md`, `DEVELOPMENT.md`, `CHANGELOG.md`, `docs/README.md`,
-   the roadmap pair and every `docs/operator/` and `docs/developer/` page. Read
+   the roadmap pair and every `docs/operator/`, `docs/developer/` and
+   `docs/process/` page. Read
    each page and confirm every command, flag, path, example, version and status
    claim against the candidate's code, or correct it; record the page inventory
    and result in the review report. Add the changelog release entry and any

@@ -16,7 +16,7 @@ imports anything outside Node's own standard library.
 | `loopex-client.mjs` | The connection, the request correlation, and the four wire representations |
 | `workflow.mjs` | The integrated workflow: negotiate, create, attach, prompt, follow events, inspect, leave |
 | `interaction-workflow.mjs` | The chain: find and select an admitted skill, submit a task, answer the host policy's question, watch the tool run, read the artifact it kept |
-| `daemon-client.mjs` | The generation-2 connection to a running daemon over its Unix-domain socket, sharing the wire helpers above |
+| `daemon-client.mjs` | The generation-4 connection to a running daemon over its Unix-domain socket, sharing the wire helpers above |
 | `daemon-takeover.mjs` | The cross-process takeover: observe a session another client controls, wait for that controller's lease to lapse, take control with a fresh epoch, abort the running work and release |
 | `maintenance-workflow.mjs` | The maintenance workflow over either server: an authored model alias resolves once, the configuration change and compaction completion are decoded independently, exact retries replay their admissions, and over the daemon a stale epoch is refused first |
 | `compaction-activity-workflow.mjs` | The activity workflow over either server: prompt real history, compact it, and observe the one closed compaction activity item naming the compact owner and the completion's episode |

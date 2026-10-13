@@ -76,7 +76,7 @@ Closure happens in this order; use the `close-milestone` skill.
    retained evidence or a demonstration. Every current-state page is correct
    at that commit, changed or not: the root README, `DEVELOPMENT.md`,
    `CHANGELOG.md`, the docs index, the roadmap pair and every
-   `docs/operator/` and `docs/developer/` page. A documentation correctness
+   `docs/operator/`, `docs/developer/` and `docs/process/` page. A documentation correctness
    review confirms each command, flag, path, example, version and status
    claim against the code or corrects it, and the commit carries the
    changelog release entry and any `VERSION` advance. The plan's
@@ -171,8 +171,10 @@ closure.** On the administrative SHA they are:
 2. **Documentation structure.** `bash scripts/check.sh --docs`, including its
    `mix loopex.status` step, because the administrative tree differs from the
    tested one only in documentation.
-3. **Documentation meaning.** The final semantic documentation gate reads the
-   relevant `docs/operator/` and `docs/developer/` pages.
+3. **Documentation meaning.** The final semantic documentation gate reads every
+   current-state page: the root README, `DEVELOPMENT.md`, `CHANGELOG.md`, the
+   docs index, the roadmap pair and every `docs/operator/`, `docs/developer/`
+   and `docs/process/` page.
 4. **Archive identity.** From M5 onward, the archive manifest is recomputed
    from a fresh `git archive` extraction staged under the
    [canonical archive-extraction rule](milestones-technical.md#technical-milestones-archive-extraction)

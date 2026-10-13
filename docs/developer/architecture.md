@@ -322,8 +322,9 @@ The runtime is the brain: it coordinates sessions, orders commits, and decides
 what happens next. Hands own workspaces and operating-system effects, and they
 sit behind the Executor port — the local executor validates bounded arguments
 against a fixed code-owned tool and holds a monitored workspace lease for the
-job's whole lifetime. It retains a receipt through the session's Store before
-replying; only the durable Store persists that receipt. Only the `bash`
+job's whole lifetime. It retains each receipt in its own filesystem ledger
+before replying; the session coordinator then journals the validated receipt
+in the session's Store, a separate record with its own owner. Only the `bash`
 tool starts an operating-system child, in its own process group and with an
 environment built from nothing; the read, write, edit, grep, find, and ls tools
 run in the local executor's VM against the leased workspace.

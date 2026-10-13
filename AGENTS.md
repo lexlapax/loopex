@@ -174,8 +174,8 @@ A milestone runs in four steps; the
 3. **Close.** Every outcome maps to tests, retained evidence, or a
    demonstration. The candidate passes a documentation correctness review of
    every current-state page, changed or not: the root README, `DEVELOPMENT.md`,
-   `CHANGELOG.md`, the docs index, the roadmap pair and every `docs/operator/`
-   and `docs/developer/` page. Each command, flag, path, example, version and
+   `CHANGELOG.md`, the docs index, the roadmap pair and every `docs/operator/`,
+   `docs/developer/` and `docs/process/` page. Each command, flag, path, example, version and
    status claim is confirmed against the candidate's code or corrected, and the
    candidate carries its changelog release entry and any `VERSION` advance. The exact candidate already carries an indexed evidence-page
    scaffold. Its `Proved` progress rows mean the implementation is complete and

@@ -35,7 +35,7 @@ The maintainer accepted M7, ADRs 0041–0049, the
 `2986150b878151524ecdd9bac5a9779e69e196b4` on 2026-09-30. The
 [acceptance disposition](../process/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds every historical pair's digests and records the integration instruction.
-The founding prerequisites are accepted and implementation may begin. The maintainer
+The founding prerequisites were accepted and M7's implementation was authorized at that revision. The maintainer
 accepted ADRs 0065, 0067 and 0068 on 2026-10-09 in the
 [disposition](../process/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09). M7 closed on
 2026-10-13 and is the source release `v0.4.0`; its
