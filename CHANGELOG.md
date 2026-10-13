@@ -5,12 +5,12 @@ All notable changes to Loopex are recorded here. The format follows
 semantic versioning under the
 [0.x compatibility policy](docs/vision.md#concept-vision-compatibility). That
 policy labels public surfaces stable, release-candidate, or experimental. The
-wire protocol and M6's new surfaces are experimental; none is labelled
+wire protocol and M6's and M7's new surfaces are experimental; none is labelled
 release-candidate or stable — see
 [compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
-No installable package is published yet. The `0.3.0` and `0.1.0` entries record
-source releases tagged `v0.3.0` and `v0.1.0`; the annotated tag `v0.0.0-m2` is defined as
+No installable package is published yet. The `0.4.0`, `0.3.0` and `0.1.0`
+entries record source releases tagged `v0.4.0`, `v0.3.0` and `v0.1.0`; the annotated tag `v0.0.0-m2` is defined as
 the exact integrated M2 source snapshot; neither is a package version, public
 API freeze, or compatibility label. Entries below the first package release record
 repository, planning, and milestone implementation work, and carry no consumer
@@ -21,6 +21,8 @@ courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
 [milestone guide](docs/developer/milestones.md#concept-milestones-close).
 
 ## [Unreleased]
+
+## [0.4.0] — 2026-10-13
 
 Add native conversational `loopex chat` with an explicit configuration file,
 retained settings on resume, settled configuration changes, context compaction
@@ -51,9 +53,16 @@ the retained single-writer attempts index, `mix loopex.m7_matrix`, and the
 `m7-provider`, `m7-rollback` and attended `m7-operator` release lanes; see the
 [M7 validation runbook](docs/operator/m7-validation.md).
 
-M7 remains in progress: its operator and real-provider closure runs remain.
-This entry records current source behavior, not a source release or milestone
-closure.
+Durable provider replies refuse the exact selected key, including a key split
+across streamed deltas; a key split across separate replies or transformed is
+outside that check. Helper children stay refused for mutation after the
+delegation registry is lost, and CLI output retires its whole process group
+when its custodian or leader dies.
+
+M7 closed on 2026-10-13 and is tagged `v0.4.0`. The source `VERSION` still
+reads `0.3.0`, because M7 did not advance it. The
+[closure evidence](docs/evidence/M7-closure-runs.md) records the matrix, its
+reuse for the reviewed candidate, and the independent reviews.
 
 ## [0.3.0] — 2026-09-29
 

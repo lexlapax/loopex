@@ -31,21 +31,21 @@ while the session lives; a session "brain" can coordinate local or remote
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-The accepted [M7 coding-agent proof](docs/plans/M7.md#concept) is in review.
-Current source includes native [chat from an explicit profile](docs/operator/coding-sessions.md#operator-sessions-chat),
+The [M7 coding-agent proof](docs/plans/M7.md#concept) closed on 2026-10-13
+and is the source release `v0.4.0`. It adds native
+[chat from an explicit profile](docs/operator/coding-sessions.md#operator-sessions-chat),
 [settled configuration and compaction](docs/operator/coding-sessions.md#operator-sessions-chat-settings),
 and [model-question responders for embedding](docs/developer/runtime-and-embedding.md#technical-embedding-question-responder).
-It also includes read-only helper roles that may run on their own provider,
+It also adds read-only helper roles that may run on their own provider,
 a separate thinking-off summarizer, and the coordinated `loopex.experimental/3`
-and `/4` wire generations. The operator and real-provider closure runs in the
-[M7 validation runbook](docs/operator/m7-validation.md) and the independent
-review of the exact candidate remain, so M7's nine outcomes are not closed. M6 is the last closed product checkpoint;
-successors remain drafts.
+and `/4` wire generations. The [closure evidence](docs/evidence/M7-closure-runs.md)
+records its runs and reviews. Successors remain drafts.
 
 ## What Loopex Provides
 
 The latest source release is
-[v0.3.0](https://github.com/lexlapax/loopex/releases/tag/v0.3.0). Loopex is a
+[v0.4.0](https://github.com/lexlapax/loopex/releases/tag/v0.4.0); its source
+`VERSION` still reads `0.3.0`, because M7 did not advance it. Loopex is a
 working single-machine coding harness and the runtime underneath it. Build it
 from the tagged source on macOS or Linux using the
 [operator getting-started guide](docs/operator/getting-started.md#operator-start-build).
@@ -222,7 +222,8 @@ without entering the kernel.
   OTP generations with tested migration and exact rollback. No extension
   manifest or lifecycle API ships in the current source.
 - **A seven-tool coding surface** (`read write edit bash grep find ls`)
-  inside a system prompt budgeted under 1,000 tokens. The coding and
+  inside a measured system-class budget: 1,000 tokens by default, 1,500 for
+  the chat coding profiles and 2,000 for a helper parent. The coding and
   read-only presets select four tools each, and the selected definitions are
   measured with the request before dispatch. Chat adds the model-question
   tool to a nonempty profile and, when helpers are enabled, the `task` tool.
@@ -242,8 +243,8 @@ What the open development does not include:
   or timeline is owed.
 - **The roadmap follows the maintainer's use,** not a backlog. Requests are
   interesting to read but create no obligations.
-- **No stability promises in 0.x.** Current surfaces are unfrozen. M6's new
-  embedding and command contracts and the wire protocol are experimental;
+- **No stability promises in 0.x.** Current surfaces are unfrozen. M6's and
+  M7's embedding and command contracts and the wire protocol are experimental;
   breaking an experimental API in a minor release carries an explicit migration
   note. No surface claims release-candidate or stable status.
 

@@ -41,7 +41,8 @@ labelling one stable would be a promise with nothing behind it.
 
 **Versions name source, not contracts.** The closed M5 source is `v0.2.0` and
 the closed M6 source is `v0.3.0`, with an ephemeral embedding profile and
-`loopex ask`; M7 has no selected version.
+`loopex ask`. The closed M7 source is `v0.4.0`, whose `VERSION` still reads
+`0.3.0` because M7 did not advance it.
 The older `v0.0.0-m2` and `v0.1.0` tags also name source snapshots. None is a
 package or a compatibility freeze. No installed binary or package is published,
 so the vision's package surface — released names, contents, and constraints —
