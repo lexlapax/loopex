@@ -591,6 +591,12 @@ independently of a blocked provider and owns the companion's process group until
 its cleanup is proved. [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept)
 fixes these boundaries.
 
+Both profiles refuse a provider reply whose text, tool calls, usage,
+continuation or streamed progress contains the exact selected key, and fail
+that call instead of publishing it. The check is exact and per reply. The
+provider already holds the key, so a key split across separate replies, or
+sent reversed, encoded or spaced, is outside this guarantee.
+
 The ephemeral `ask` and embedded profile deliberately use a different boundary:
 ReqLLM runs in the host VM. A hosted provider's selected key may be visible to
 trusted host code, host-installed handlers, crash reports, and HTTP/TLS state
