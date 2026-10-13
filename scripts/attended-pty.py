@@ -81,40 +81,42 @@ class Redactor:
         self.keys = sorted((key for key in keys if key), key=len, reverse=True)
         self.width = max((len(key) for key in self.keys), default=1)
         self.pending = b""
+        # The first `covered` pending bytes belong to a span already published
+        # as one replacement; a key continuing from them extends that span.
+        self.covered = 0
         self.replacement = replacement_for(self.keys)
 
     def feed(self, data, final=False):
         content = self.pending + data
         safe = len(content) if final else self.hold_start(content)
-        cursor = 0
+        cursor = self.span_end(content, 0, self.covered) if self.covered else 0
+        span = 0 if self.covered else None
         output = bytearray()
-        while cursor < safe:
+        while True:
             matches = [(content.find(key, cursor), key) for key in self.keys]
             matches = [(position, key) for position, key in matches if position >= 0]
-            if not matches:
-                output.extend(content[cursor:safe])
-                cursor = safe
-                break
-            position, key = min(matches, key=lambda item: (item[0], -len(item[1])))
-            if position >= safe:
-                output.extend(content[cursor:safe])
-                cursor = safe
-                break
-            end = self.span_end(content, position, position + len(key))
-            if end > safe:
-                # A key reaching the held tail may still grow; decide later.
-                output.extend(content[cursor:position])
-                cursor = position
+            position, key = min(matches, key=lambda item: (item[0], -len(item[1])), default=(None, b""))
+            if position is None or position >= safe:
+                if safe > cursor:
+                    output.extend(content[cursor:safe])
+                    cursor, span = safe, None
                 break
             output.extend(content[cursor:position])
             output.extend(self.replacement)
-            cursor = end
-        self.pending = content[cursor:]
+            span = position
+            cursor = self.span_end(content, position, position + len(key))
+        # Concept: retention stays bounded by the longest key.
+        # Technical depth: a span reaching the held tail is already published;
+        # only its last width - 1 bytes, where a longer key could still begin,
+        # are kept as covered. Unpublished bytes after it stay held as they are.
+        keep = cursor if span is None or final else min(cursor, max(span, len(content) - self.width + 1))
+        self.pending = content[keep:]
+        self.covered = cursor - keep
         return bytes(output)
 
     def span_end(self, content, start, end):
         # Overlapping keys redact as one span, so no key's suffix survives.
-        position = start + 1
+        position = start
         while position < end:
             for key in self.keys:
                 if content.startswith(key, position):

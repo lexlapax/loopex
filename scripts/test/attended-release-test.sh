@@ -647,6 +647,26 @@ elixir_redact '' abc abcdef '' \
 [ "$(cat "$work/chain-actual")" = '[REDACTED]!' ] ||
   fail 'human redactor published part of an overlapping key'
 
+# Repeated overlapping matches publish their one marker before the stream ends.
+repeat_gate="$work/redact-repeat-release"
+(
+  for _ in 1 2 3 4 5 6 7 8; do head -c 1024 /dev/zero | tr '\0' a; done
+  while [ ! -e "$repeat_gate" ]; do sleep 0.05; done
+  printf '!'
+) | elixir_redact '' aa '' '' >"$work/redact-repeat-actual" &
+repeat_pid=$!
+repeat_seen=0
+for _ in $(seq 1 200); do
+  if [ "$(cat "$work/redact-repeat-actual")" = '[REDACTED]' ]; then repeat_seen=1; break; fi
+  kill -0 "$repeat_pid" 2>/dev/null || break
+  sleep 0.05
+done
+touch "$repeat_gate"
+wait "$repeat_pid" || fail 'human redactor failed on repeated overlapping keys'
+[ "$repeat_seen" -eq 1 ] || fail 'human redactor withheld repeated overlapping keys'
+[ "$(cat "$work/redact-repeat-actual")" = '[REDACTED]!' ] ||
+  fail 'human redactor changed repeated overlapping keys'
+
 printf 'REDRED' | elixir_redact '' RED '' '' >"$work/marker-actual" ||
   fail 'human redactor refused a marker-contained key'
 [ "$(cat "$work/marker-actual")" = '!!' ] ||
@@ -723,6 +743,19 @@ for chunks in ((b"xxsk-super-secret-value!",), (b"xxsk", b"-super-secret-value!"
     redactor = Redactor([b"xxsk", b"sk-super-secret-value"])
     published = b"".join(redactor.feed(chunk) for chunk in chunks) + redactor.feed(b"", final=True)
     assert published == b"[REDACTED]!", published
+# Repeated overlapping matches publish one marker and hold no more than a key.
+redactor = Redactor([b"aa"])
+published = b"".join(redactor.feed(b"a" * 1024) for _ in range(8))
+assert published == b"[REDACTED]" and len(redactor.pending) < redactor.width
+assert redactor.feed(b"!", final=True) == b"!"
+keys = [b"xxsk", b"sk-super-secret-value", b"value-tail"]
+stream = b"pre xxsk-super-secret-value-tail post"
+for first in range(len(stream) + 1):
+    for second in range(first, len(stream) + 1):
+        redactor = Redactor(keys)
+        published = (redactor.feed(stream[:first]) + redactor.feed(stream[first:second])
+                     + redactor.feed(stream[second:], final=True))
+        assert published == b"pre [REDACTED] post", (first, second, published)
 # A prompt without a newline is published at once; only a key prefix waits.
 redactor = Redactor([b"secret-key"])
 assert redactor.feed(b"answer> ") == b"answer> "

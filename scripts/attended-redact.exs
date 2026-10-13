@@ -20,11 +20,11 @@ defmodule LoopexAttendedRedact do
             :regular ->
               {:ok, input} = :file.open(~c"/dev/fd/4", [:read, :binary, :raw])
               output = Port.open({:fd, 4, 5}, [:binary, :out])
-              stream_file(input, output, keys, width, marker, <<>>)
+              stream_file(input, output, keys, width, marker, {<<>>, 0})
 
             :other ->
               port = Port.open({:fd, 4, 5}, [:binary, :eof])
-              stream_pipe(port, keys, width, marker, <<>>)
+              stream_pipe(port, keys, width, marker, {<<>>, 0})
 
             _ ->
               fail("redaction_failed")
@@ -88,33 +88,33 @@ defmodule LoopexAttendedRedact do
   defp max_key_width([]), do: 1
   defp max_key_width(keys), do: keys |> Enum.map(&byte_size/1) |> Enum.max()
 
-  defp stream_file(input, output, keys, width, replacement, pending) do
+  defp stream_file(input, output, keys, width, replacement, {pending, covered}) do
     case :file.read(input, 65_536) do
       :eof ->
-        {redacted, <<>>} = redact(pending, keys, width, replacement, true)
+        {redacted, {<<>>, 0}} = redact(pending, covered, keys, width, replacement, true)
         publish(output, redacted)
         :ok = :file.close(input)
         Port.close(output)
 
       {:ok, data} ->
-        {redacted, remaining} = redact(pending <> data, keys, width, replacement, false)
+        {redacted, held} = redact(pending <> data, covered, keys, width, replacement, false)
         publish(output, redacted)
-        stream_file(input, output, keys, width, replacement, remaining)
+        stream_file(input, output, keys, width, replacement, held)
 
       _ ->
         fail("redaction_failed")
     end
   end
 
-  defp stream_pipe(port, keys, width, replacement, pending) do
+  defp stream_pipe(port, keys, width, replacement, {pending, covered}) do
     receive do
       {^port, {:data, data}} when is_binary(data) ->
-        {redacted, remaining} = redact(pending <> data, keys, width, replacement, false)
+        {redacted, held} = redact(pending <> data, covered, keys, width, replacement, false)
         publish(port, redacted)
-        stream_pipe(port, keys, width, replacement, remaining)
+        stream_pipe(port, keys, width, replacement, held)
 
       {^port, :eof} ->
-        {redacted, <<>>} = redact(pending, keys, width, replacement, true)
+        {redacted, {<<>>, 0}} = redact(pending, covered, keys, width, replacement, true)
         publish(port, redacted)
         Port.close(port)
 
@@ -123,7 +123,13 @@ defmodule LoopexAttendedRedact do
     end
   end
 
-  defp redact(content, keys, width, replacement, final?) do
+  # Concept: `covered` leading bytes of the held content belong to a span
+  # already published as one replacement; a key continuing from them extends
+  # that span, and retention stays bounded by the longest key.
+  # Technical depth: a span reaching the held tail is published at once; only
+  # its last width - 1 bytes, where a longer key could still begin, are kept
+  # as covered. Unpublished bytes after it stay held as they are.
+  defp redact(content, covered, keys, width, replacement, final?) do
     # Credential values exclude CR and LF, so no key can cross a completed
     # line. Release that line even when it is shorter than the longest key.
     line_end =
@@ -139,7 +145,18 @@ defmodule LoopexAttendedRedact do
         do: byte_size(content),
         else: hold_start(content, keys, max(line_end, byte_size(content) - width + 1))
 
-    scan(content, keys, safe, replacement, 0, [])
+    {cursor, span} =
+      if covered > 0, do: {span_end(content, keys, 0, covered), 0}, else: {0, nil}
+
+    {reversed, cursor, span} = scan(content, keys, safe, replacement, cursor, span, [])
+
+    keep =
+      if span == nil or final?,
+        do: cursor,
+        else: min(cursor, max(span, byte_size(content) - width + 1))
+
+    {IO.iodata_to_binary(Enum.reverse(reversed)),
+     {binary_part(content, keep, byte_size(content) - keep), cursor - keep}}
   end
 
   defp hold_start(content, keys, from) do
@@ -154,31 +171,18 @@ defmodule LoopexAttendedRedact do
     end)
   end
 
-  defp scan(content, _keys, safe, _replacement, cursor, reversed) when cursor >= safe do
-    {IO.iodata_to_binary(Enum.reverse(reversed)),
-     binary_part(content, cursor, byte_size(content) - cursor)}
-  end
-
-  defp scan(content, keys, safe, replacement, cursor, reversed) do
+  defp scan(content, keys, safe, replacement, cursor, span, reversed) do
     case earliest(content, keys, cursor) do
       {position, key} when position < safe ->
         prefix = binary_part(content, cursor, position - cursor)
+        stop = span_end(content, keys, position, position + byte_size(key))
+        scan(content, keys, safe, replacement, stop, position, [replacement, prefix | reversed])
 
-        case span_end(content, keys, position + 1, position + byte_size(key)) do
-          # A key reaching the held tail may still grow; decide later.
-          stop when stop > safe ->
-            {IO.iodata_to_binary(Enum.reverse([prefix | reversed])),
-             binary_part(content, position, byte_size(content) - position)}
-
-          stop ->
-            scan(content, keys, safe, replacement, stop, [replacement, prefix | reversed])
-        end
+      _ when safe > cursor ->
+        {[binary_part(content, cursor, safe - cursor) | reversed], safe, nil}
 
       _ ->
-        prefix = binary_part(content, cursor, safe - cursor)
-
-        {IO.iodata_to_binary(Enum.reverse([prefix | reversed])),
-         binary_part(content, safe, byte_size(content) - safe)}
+        {reversed, cursor, span}
     end
   end
 
