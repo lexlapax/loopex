@@ -79,8 +79,9 @@ They are recorded here as decided, not proposed.
 
 This record introduces no second role or provider schema and fixes no
 session's model at process launch. ADRs 0044, 0048 and 0049 govern committed
-selection, custody and explicit configuration. File, keychain and command
-credentials remain a separate future decision.
+selection, custody and explicit configuration. Provider sign-in tokens are
+decided by [ADR 0073](0073-provider-oauth-sign-in.md#concept); file, keychain
+and command sources for API keys remain a separate future decision.
 
 <a id="concept-adr-0037-consequences"></a>
 ### Observable Consequences

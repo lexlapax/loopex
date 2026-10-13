@@ -169,7 +169,7 @@ Concept: [Adopting a root the source build wrote](0072-store-readiness-marker-ba
 **Grammar.**
 
 ```text
-loopex store adopt [--state-root DIR] [--workspace DIR] [--work-ms N] [--cleanup-grace-ms N]
+loopex store adopt [--config FILE] [--state-root DIR] [--workspace DIR] [--work-ms N] [--cleanup-grace-ms N]
 ```
 
 The root and workspace are selected exactly as ADR 0037 selects them for the
@@ -258,7 +258,7 @@ Concept: [Backup](0072-store-readiness-marker-backup-and-restore.md#concept-adr-
 **Grammar.**
 
 ```text
-loopex store backup [--state-root DIR] [--workspace DIR] [--work-ms N] [--cleanup-grace-ms N] BACKUP
+loopex store backup [--config FILE] [--state-root DIR] [--workspace DIR] [--work-ms N] [--cleanup-grace-ms N] BACKUP
 ```
 
 Root, workspace and limits are selected as for adopt. `BACKUP` is required.
@@ -564,7 +564,7 @@ fields that recovery depends on:
 | --- | --- |
 | `closed` | `code`: `invalid_history`, `history_unavailable` or `session_absent`; `session_id`: the session whose scan returned it, at most 256 bytes; `recovery`: the constant `restore_from_backup` |
 | `unavailable` | `code`: `store_unavailable`, `unexpected` or `runtime_unavailable`; no `session_id` |
-| every state | `project_resources`: `admitted`, `not_admitted` or `none`; `none` when the workspace offers none, `not_admitted` when the operator declined at an explicit start or the service was started on demand, which never asks |
+| every state | `project_resources`, with ADR 0037's values: `absent` when the workspace offers none, `unadmitted` when the operator declined at an explicit start or the service was started on demand, which never asks, else `admitted` |
 
 The helper classification already stops at the first such session but keeps
 only its identifier (`Helper.classify_sessions/4` returns `[row.session_id]`,
@@ -646,7 +646,7 @@ own manifest.
 | `apps/loopex_composition/test/restore_workflow_test.exs` (extended) | A plan with the discard form and `source_status` `available` refuses `invalid_plan` before any claim; with `lost` it commits and its receipt equals a latest-form restore's apart from the plan digest |
 | `apps/loopex_cli/test/store_command_test.exs` | Grammar, defaults, exit statuses 0, 1 and 2, exact output lines including both statement forms, the printed ADR 0037 writer command parsed by ADR 0037's own parser to `/paths/state_root` = destination, the `LOOPEX_HOME` precedence note, and the configuration file byte-identical after restore |
 | `apps/loopex_composition/test/delegation_readiness_code_test.exs` | Classification keeps `%{session_id, code}` for each of the three codes and names no session for runtime-page failures |
-| `apps/loopex_daemon/test/readiness_closed_root_test.exs` | A root on which the service did further work after a backup, then had one session history made unreadable: readiness `closed` with that session and `invalid_history`; the root moved aside and the earlier backup restored with `--source lost --discard-later-work`; the service on the restored root reports `serving`; an on-demand start reports `project_resources` `not_admitted`. A second case with no activity after the backup restores without the flag |
+| `apps/loopex_daemon/test/readiness_closed_root_test.exs` | A root on which the service did further work after a backup, then had one session history made unreadable: readiness `closed` with that session and `invalid_history`; the root moved aside and the earlier backup restored with `--source lost --discard-later-work`; the service on the restored root reports `serving`; an on-demand start reports `project_resources` `unadmitted`. A second case with no activity after the backup restores without the flag |
 
 The installed lane of M8 outcomes 6 and 7 runs backup, restore and the
 refusal of an unmarked root under the installed artifact. Store conformance,

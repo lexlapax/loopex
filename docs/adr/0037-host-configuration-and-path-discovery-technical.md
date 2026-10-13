@@ -48,6 +48,7 @@ every value read from the file keeps ADR 0049's `file#pointer` origin.
 $HOME/.loopex/              0700, created by init (one mkdir, never -p)
   config.json               0600, written only by the writers below
   .config-writer/           0700, holds the writer lock
+  auth/                     0700, ADR 0073's sign-in metadata and file-fallback token store
   log/                      0700, created by the first service start
     service.log             0600, the service's stdout and stderr, appended
     service.log.1           the previous log, kept once
@@ -130,8 +131,11 @@ written: <path>` or `Configuration updated: <pointer>` and, when the selected
 service answers `daemon.readiness`, `the running service keeps its startup
 configuration; restart it to apply this change`.
 
-The lock reuses `LoopexComposition.Placement.acquire/2` on the
-`.config-writer` directory, so its record binds the owning OS process to its
+The lock uses the placement lock primitive that M8 extracts into one shared
+private module (the same primitive ADR 0073's refresh lock uses), on the
+`.config-writer` directory, never `Placement.acquire/2`, whose first step
+admits a state root under ADR 0072 and must not mark a lock directory. Its
+record binds the owning OS process to its
 observed start identity and a stale lock is reclaimed only when that
 incarnation is gone; a PID alone is never proof. A live holder refuses
 `configuration_locked`, naming its PID. The lock is released after the
@@ -157,7 +161,7 @@ All waits yield to the command's signal route exactly as `LoopexCli.Live`'s
 | --- | --- | --- |
 | `select` | `Home.select`, `ConfigFile.load`, `ConfigSelection.compose` with no overrides; derive root and socket | `probe`; a load or selection refusal ends the command with its class and pointer |
 | `probe` | `DaemonClient.connect(socket, timeout: 1_000)` | answers: `readiness`; else live `Placement.live_owner(root)`: `wait`; else `precheck` |
-| `precheck` | For each `providers.*.credential.env`, test presence and nonemptiness of the variable without retaining, printing, hashing or comparing the value | all present: `spawn`; else refuse `provider_credential_absent` naming the first absent pointer (for example `/providers/anthropic/credential/env`), with no process, lock, log or socket created |
+| `precheck` | For each `providers.*.credential.env`, test presence and nonemptiness of the variable without retaining, printing, hashing or comparing the value; for each `providers.*.credential.oauth` route, read only ADR 0073's non-secret sign-in metadata and refuse `provider_sign_in_required` naming the route when it is absent or signed out | all present: `spawn`; else refuse `provider_credential_absent` naming the first absent pointer (for example `/providers/anthropic/credential/env`), with no process, lock, log or socket created |
 | `spawn` | Rotate the log, then start the detached service as below and record `t0` | `wait` |
 | `wait` | Every 250 ms until `t0 + 75_000`: connect; else read this start's `log/start-<16 hex>.exit` | answers: `readiness`; exit status 76 (`placement_active`): stay in `wait`, another start won; any other status: refuse with its `LoopexDaemon.ExitStatus` class; deadline: refuse `service_not_ready`, naming `starting` or the live holder's PID |
 | `readiness` | `daemon.readiness` | `serving`: done; `closed`: refuse `service_closed` with the session, its code and `loopex store restore`; `classifying` or `unavailable`: poll every 1,000 ms until the same deadline, then refuse `service_not_serving` with the last answer |
@@ -209,6 +213,7 @@ attachment and no lease. Its `result` has exactly these members:
 | `covered`, `enumerated` | Canonical decimal strings when `classifying`, else `null` |
 | `session_id` | The unreadable session's identity when `closed`, else `null` |
 | `code` | `closed`: `invalid_history`, `history_unavailable` or `session_absent`; `unavailable`: `store_unavailable`, `unexpected` or `runtime_unavailable`; else `null` |
+| `recovery` | `restore_from_backup` when `closed`, else `null` (ADR 0072) |
 | `project_resources` | `absent` (no manifest), `unadmitted` (no decision) or `admitted` |
 | `workspace` | The service's absolute workspace path, at most 4,096 bytes |
 | `configuration_file` | The absolute file given to `--config`, or `null` |
