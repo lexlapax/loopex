@@ -178,10 +178,16 @@ running; the refusal tells the operator to read `loopex service status`.
   COMMAND FILE LOG EXIT [--admit-project-resources DIGEST] </dev/null >/dev/null 2>&1 &
 ```
 
-`COMMAND` is `bin/loopex` under the release root ADR 0038's launcher exports,
-or in a checkout the launcher beside the escript, `Path.join(Path.dirname(
-:escript.script_name()), "bin/loopex")`; neither being an executable regular
-file refuses `service_command_unavailable`. The service therefore starts with
+`COMMAND` is resolved from the location of the running escript, never from
+the environment, exactly as ADR 0038's `LoopexCli.ProviderLaunch.options/0`
+resolves the release root. With `script = Path.expand(:escript.script_name())`:
+when `MANIFEST` is a regular file in the release root, `script` with two
+directory levels removed (the installed `libexec/loopex`), `COMMAND` is
+`bin/loopex` under that root, the same installed-mode test ADR 0038's
+launcher applies; otherwise, in a checkout, it is the launcher beside the
+escript, `Path.join(Path.dirname(script), "bin/loopex")`. The selected path
+not being an executable regular file refuses `service_command_unavailable`;
+no fallback path is tried. The service therefore starts with
 `SIGHUP` ignored by `nohup` and `SIGINT` and `SIGQUIT` ignored as an
 asynchronous list. Because those three were ignored on entry, the launcher's
 own traps for them cannot be installed (POSIX), while its `SIGTERM` forward
@@ -327,7 +333,7 @@ Every case uses a temporary `HOME` and `LOOPEX_HOME`. Test files are in
 | `home_test.exs` | Unit | Absent, relative, non-UTF-8 and oversized `HOME` refuse; default path on each platform; `--config` wins; missing discovered file refuses naming `init`; a `config.json` in the invocation directory is ignored |
 | `config_inspection_test.exs` (extended) | Unit | Explicit and discovered selection of the same bytes give identical rows and origins; the selection line; `LOOPEX_HOME` still overrides the file's root |
 | `config_writer_test.exs` | Unit and fault | `init` refuses an existing file and each missing flag; written document validates and holds no value outside the schema; `set` and `unset` pointer rules and `/schema_version`; kill points before the temporary write, before rename and after rename leave prior bytes or the new bytes, never a partial file; a live lock refuses; a lock whose incarnation is gone, including a reused PID, is reclaimed; modes 0700 and 0600 |
-| `service_start_test.exs` | Process race | Eight concurrent starters spawn at most eight daemons and all converge on one serving socket, the others recording 76; an absent reference refuses before any process, lock, log or socket; presence check reads no value (sentinel variable never appears in any output or log); a started service's readiness says `unadmitted`; the 75,000 ms bound reports `starting` with an injected slow start; an early exit maps its status to its class |
+| `service_start_test.exs` | Process race | Eight concurrent starters spawn at most eight daemons and all converge on one serving socket, the others recording 76; an absent reference refuses before any process, lock, log or socket; presence check reads no value (sentinel variable never appears in any output or log); a started service's readiness says `unadmitted`; the 75,000 ms bound reports `starting` with an injected slow start; an early exit maps its status to its class; the spawned command is `<root>/bin/loopex` for an escript at `<root>/libexec/loopex` beside a `MANIFEST` and the launcher beside a checkout escript, unchanged with `LOOPEX_ESCRIPT` and any other variable set to a different tree; a non-executable selection refuses `service_command_unavailable` |
 | `service_command_test.exs` | Real daemon | `start`, `stop`, `status`, `paths` and `doctor` objects and exit statuses; `stop` refuses a foreground holder and never signals it; `doctor` with a service running reads readiness from it and opens no session record |
 | `service_detach_pty_test.exs` | PTY | A service started on demand from a PTY survives `SIGINT` to the foreground group and hangup of the PTY, and stops on `service stop` |
 | `live_service_test.exs` | Real daemon | `run` and `resume --service` start on demand; `attach` and `sessions --service` refuse `service_not_running`; `--daemon` never starts |

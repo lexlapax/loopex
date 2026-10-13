@@ -4,10 +4,10 @@
 Technical depth: [Attached conversation mapping, service configuration and evidence](0071-daemon-attached-conversation-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service-hosted helpers designed on 2026-10-13
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing; it applies [ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept) and [ADR 0033](0033-collaboration-controller-lease-and-takeover.md#concept) to the conversation command, extends the daemon's startup inputs with [ADR 0049](0049-explicit-host-configuration.md#concept)'s file, and narrowly amends ADR 0049's conversation status record so a service-owned value can be absent
-- **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept) and `loopex.experimental/4`, the daemon generation [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) introduced, both delivered by M7; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the home, the on-demand start and `daemon.readiness`
+- **Supersedes:** nothing; it applies [ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept) and [ADR 0033](0033-collaboration-controller-lease-and-takeover.md#concept) to the conversation command, extends the daemon's startup inputs with [ADR 0049](0049-explicit-host-configuration.md#concept)'s file, and applies [ADR 0046](0046-child-session-tool.md#concept), [ADR 0056](0056-host-helper-ledger-recipe.md#concept) and [ADR 0069](0069-helper-run-evidence-and-route-guard.md#concept) to the service. It narrowly amends ADR 0049's conversation status record so a service-owned value can be absent, ADR 0032's activation ceiling so it counts client activations and not helper children, and [ADR 0055](0055-remote-session-creation-options.md#concept)'s creation options on a helper-enabled service
+- **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept) and `loopex.experimental/4`, the daemon generation [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) introduced, both delivered by M7; ADRs 0046, 0056 and 0069 as delivered by M7; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the home, the on-demand start and `daemon.readiness`
 - **Prerequisite for:** M8 outcomes 4 and 5
 
 <a id="concept-adr-0071-decision"></a>
@@ -30,7 +30,9 @@ run, as M7's `m7.daemon-detach` case proved.
 
 The maintainer's 2026-10-13 decisions bind this record: proposals P1, P5, P7
 and P8 of the [M8 plan](../plans/M8.md#concept-plan-decisions) are accepted as
-written and recorded here as decided.
+written and recorded here as decided. The maintainer also decided that the
+service hosts helper roles in M8, so a configuration that works in the
+foreground conversation works through the service; decision 10 records it.
 
 **The decision.**
 
@@ -56,9 +58,8 @@ written and recorded here as decided.
    environment inputs are not read under a file, `LOOPEX_PROVIDER_API_KEY` is
    discarded unread exactly as the foreground conversation discards it, and
    the provider launch comes from the build. `--provider-launch` with a file,
-   a missing credential reference, an unusable file, a trace that does not
-   start and a file that enables helper delegation are refused by name, each
-   with its own exit status.
+   a missing credential reference, an unusable file and a trace that does not
+   start are refused by name, each with its own exit status.
    A session keeps its committed settings; a changed file affects new sessions
    after a restart. There is no reload.
 4. **Leaving the terminal never aborts.** Attached, quitting, end of input
@@ -83,6 +84,23 @@ written and recorded here as decided.
 9. **Compaction uses the foreground's fixed bounds.** The attached `/compact`
    sends the same four attempts, 60 seconds and 32,768 tokens the foreground
    command shows, so no protocol default is added.
+10. **The service hosts helper roles.** When the file enables delegation, the
+    service runs read-only helper children exactly as the foreground
+    conversation does under ADRs 0046, 0056 and 0069. Every session it creates
+    is a helper parent with the file's saved roles frozen at the service's
+    start. The parent's `task` tool starts one read-only child at a time
+    within a per-run allowance kept in the service's private ledger; the child
+    works in the service's workspace and cannot change it; and the result
+    reports the child's usage, the run's delegation totals and the parent's
+    own usage separately and combined. An attached conversation drives a
+    helper parent like any other session. A helper child can be watched but
+    never prompted, steered, configured, compacted, answered, aborted or
+    resumed by any client; it stops only through its parent. When the service
+    stops or fails while a helper runs, the next start recovers stop-only: the
+    child is stopped and never prompted again, and the parent's call reports
+    that it was interrupted, so the operator asks again. Until the next start
+    has classified all retained helper history the service reports
+    `classifying` and admits no session work.
 
 The alternatives considered are in the companion. The main one, a daemon that
 chat starts privately and owns, was rejected because it creates a second
@@ -111,9 +129,19 @@ committed configuration the service projects; host policy and trace state
 belong to the service and are shown as absent.
 
 The service's existing residency limits are unchanged. A daemon activates at
-most 64 sessions in its lifetime, so a service left running eventually refuses
-a new or resumed conversation until it is restarted; the refusal is shown as
-the service returns it.
+most 64 sessions for its clients in its lifetime, so a service left running
+eventually refuses a new or resumed conversation until it is restarted; the
+refusal is shown as the service returns it. Helper children do not spend those
+activations; each parent run's child count and token allowance bound them.
+
+With helpers enabled, the attached conversation shows the parent's `task`
+calls and their results as the foreground does: the role, model, child
+session, outcome, bounded text and the separate and combined usage. The child
+itself can be watched with `loopex attach --service CHILD --observe` while it
+is active in this service lifetime. A second helper in the same parent while
+one is active is refused before any work; independent parents may each run one
+helper at the same time. A conversation started while the service is
+classifying helper history is refused until the service serves.
 
 <a id="concept-adr-0071-compatibility"></a>
 ### Compatibility and Rollback
@@ -130,17 +158,41 @@ The one protocol addition M8 makes is ADR 0037's `daemon.readiness`, which
 also carries the workspace this record shows. The conversation status record
 gains nullable host-owned members, a narrow amendment of ADR 0049.
 
+Helper hosting adds no wire member, stored record or ledger format: the parent
+binding, run ledger and receipts are ADR 0056's, written by the same
+composition owner the foreground uses. A root whose helpers ran under the
+service resumes under the foreground conversation and the reverse, because
+both hosts classify and recover the same history. A service started with
+delegation disabled still classifies and guards a root's helper history, as
+M7 delivers. Core gains no command, record or public function; it gains one
+undocumented detailed form of its existing exact-genesis creation call, so the
+service accounts a helper parent's activation as it does any other session's.
+
 Removing this capability removes a client and one startup input. No durable
 session fact depends on which kind of terminal admitted a command.
 
 ## Open for the Maintainer
 
-- **Helper roles under the service.** The delivered daemon serves no helper
-  sessions. This record refuses to start a service whose file enables
-  delegation, naming the member, so a foreground-only setting is never
-  silently dropped. The alternative is to extend the daemon to create helper
-  parents in M8, which P1's "M7's conversation" could be read to require.
-  Recommendation: refuse in M8 and schedule helper serving as its own decision.
+Decided on 2026-10-13: the service hosts helper roles in M8 (decision 10),
+and the earlier refusal of a file that enables delegation is withdrawn.
+
+- **Helper children and the activation ceiling.** The helper owner activates
+  children inside the service's runtime, outside the daemon's admission relay,
+  so ADR 0032's 64-activation lifetime ceiling does not count them, and Core
+  has no deactivation. Each parent run is bounded by its `max_children` (at
+  most 128) and token allowance, but a service left running accumulates idle
+  child coordinators across many runs until it is restarted, as a long
+  foreground conversation does today. The alternative is to count each child
+  against the ceiling, which needs a permit from the daemon's registry inside
+  the helper owner and a new refusal in ADR 0046's fixed order.
+  Recommendation: do not count them in M8, state the cost in the operator
+  runbook, and leave a bounded child lifetime to the successor that adds Core
+  deactivation.
+- **Daemon exit statuses across M8 records.** This record uses 111 to 115 and
+  leaves 114 retired. ADR 0072 and ADR 0073 each also number their daemon
+  statuses from 111. One order must be fixed when the three are accepted; this
+  record proposes that ADR 0072's statuses follow 115 and ADR 0073's follow
+  those.
 
 ## Governance Record
 
