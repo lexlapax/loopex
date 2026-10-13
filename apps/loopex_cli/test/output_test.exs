@@ -312,6 +312,10 @@ defmodule LoopexCli.OutputTest do
     # Technical depth: the caller is suspended before the target acknowledges.
     # The owner answers the sys request only after its acquisition step, so its
     # successful publication is already queued; the caller resumes after the cutoff.
+    # GenServer.start's acknowledgement can still be queued under load; until
+    # the release it is the only message the caller can receive, so the caller
+    # is suspended only once it waits in open's receive with an empty mailbox.
+    await_idle(command)
     true = :erlang.suspend_process(command)
     Held.release(held, :acquired)
     _ = :sys.get_state(owner)
@@ -446,6 +450,17 @@ defmodule LoopexCli.OutputTest do
   # reach the held target first, so a fixed window would measure host load.
   # The wait ends on the first message with the tag or the caller's DOWN,
   # under the ExUnit test timeout.
+  defp await_idle(pid) do
+    case Process.info(pid, [:status, :message_queue_len]) do
+      [status: :waiting, message_queue_len: 0] ->
+        :ok
+
+      [_status, _length] ->
+        Process.sleep(1)
+        await_idle(pid)
+    end
+  end
+
   defp await_report(caller, tag) do
     monitor = Process.monitor(caller)
 
