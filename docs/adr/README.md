@@ -80,6 +80,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0070 | Pre-1.0 superseded surface retirement | Accepted | [Decision](0070-pre-1-superseded-surface-retirement.md#concept) | [Technical depth](0070-pre-1-superseded-surface-retirement-technical.md#technical-depth) |
 | 0071 | Daemon-attached conversation | Proposed | [Decision](0071-daemon-attached-conversation.md#concept) | [Technical depth](0071-daemon-attached-conversation-technical.md#technical-depth) |
 | 0072 | Store readiness: current-format marker and operator backup and restore | Proposed | [Decision](0072-store-readiness-marker-backup-and-restore.md#concept) | [Technical depth](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth) |
+| 0073 | Provider OAuth sign-in | Proposed | [Decision](0073-provider-oauth-sign-in.md#concept) | [Technical depth](0073-provider-oauth-sign-in-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
