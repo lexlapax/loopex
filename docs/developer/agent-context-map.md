@@ -7527,3 +7527,54 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   cases are measured with their appendix under `chat-coding-appendix`. The
   cold build is bounded at 300,000 ms. The fixture strips only the exact EOF
   echo.
+
+<a id="disposition-m7-closure-2026-10-13"></a>
+### M7 closure disposition, 2026-10-13
+
+- **Decision.** The maintainer approved closing M7 and merging it to `main`.
+  The tested implementation candidate is
+  `70ed6675eb9a3bc70e06d33b6e5c70ccac057c00`, the commit the independent
+  reviewer cleared; its administrative direct child fills the
+  [closure evidence page](../evidence/M7-closure-runs.md).
+- **Matrix reuse.** The closure matrix ran
+  `c602bc1d11fb7e7d89474e541f075056f69499c0`: the current-pair fast check on
+  macOS (1,668 s), the floor lane on serenity (1,855 s) and T17 attempt 10,
+  the full attended release check (2,928 s, every lane and all 27 M7 cases
+  passing). The maintainer chose to reuse that matrix for `96607f8b`, then
+  `4c1a4207`, then `cbbae79a` and its documentation child `70ed6675`, with
+  focused tests on both pairs and an independent re-review of each
+  increment, and no full suite or paid run. The later commits fix review
+  findings in the provider build fixture, the closure scaffold, durable
+  provider replies (`e171384f`), helper registry loss (`25c2fdc3`), CLI
+  output retirement (`af6f77c7`) and the documentation. These closure claims
+  have no execution evidence on the fixed bytes: the full fast suites on both
+  pairs; T17's real-provider, helper, attended, long-context, interrupt and
+  external workflows; the fresh-source build and archive; the independent
+  client, platform, isolation and long-duration lanes; and the documentation
+  examples that need a provider credential.
+- **T17 host.** On 2026-10-13 the maintainer chose the full matrix on
+  serenity, superseding the macOS-plus-cross-UID choice recorded in the
+  [review disposition](#disposition-m7-review-findings-2026-10-12), because
+  the campaign index is pinned to writer `maintainer-serenity` on host
+  `serenity`. Attempts 8 to 10 ran there.
+- **Attempts 8 to 10.** Attempt 8 (`9762b105`) failed `m7.oversized-source`
+  on an oracle that matched the model's quotation of the sentinel; the join
+  now checks the excerpt's byte range. Attempt 9 (`c602bc1d`) failed
+  `m7.ephemeral-question` on an unclassified `model_call_failed`; ten
+  diagnostic reruns did not reproduce it, and it stays `evidence_unavailable`.
+  Attempt 10 passed. Each failed attempt is archived whole under
+  `t17-release/attemptN/` and the index was recreated byte-identical, under
+  the [restart override](#disposition-m7-t17-operator-override-2026-10-11).
+- **Selected-key scope.** The maintainer accepted the selected-key guard's
+  scope: it refuses the exact key within one provider reply, including split
+  streamed deltas. A key split across separate replies, which the CLI can
+  show back to back on stderr, or a transformed key, is outside the
+  guarantee, because the provider already holds the key. The
+  [operator page](../operator/tools-and-policy.md) states this limit.
+- **Review.** Independent reviews 3 to 8 cleared the candidate: the outcome
+  map and matrix audit (review 3), the late fixture fixes (reviews 4 and 5),
+  whole-candidate security and documentation (review 6) and their fixes
+  (reviews 7 and 8). The attended block was operated by the coding agent
+  under the restart override; its records carry the label `Maintainer`,
+  which is not a claim of human attendance. This closure authorizes no tag,
+  release or publication.
