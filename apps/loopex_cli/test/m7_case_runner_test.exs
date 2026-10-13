@@ -760,6 +760,51 @@ defmodule LoopexCli.M7CaseRunnerTest do
     refute File.read!(Path.join(result.root, "records/facts.json")) =~ "SENTINEL"
   end
 
+  test "an oversized source passes when the reply quotes the omitted sentinel", f do
+    quoted = ~s(line 80 contains "M7-OVERSIZED-SENTINEL-7F3A". noted)
+
+    script = fn _call ->
+      %{
+        main: [
+          %{text: quoted, calls: []},
+          %{text: "ready", calls: []},
+          %{text: "again", calls: []}
+        ],
+        maintenance: List.duplicate(@oversized_summary, 4)
+      }
+    end
+
+    passed!(scenario!(f, "m7.oversized-source", script))
+  end
+
+  test "the sentinel join refuses a fragment over the prompt's sentinel" do
+    alias Mix.Tasks.Loopex.M7Evidence.Scenarios
+
+    serialized = ~s([{"content":) <> JSON.encode!(Scenarios.oversized_prompt())
+    {at, _} = :binary.match(serialized, "M7-OVERSIZED-SENTINEL-7F3A")
+
+    row = fn fragments ->
+      source = %{"messages" => %{"kind" => "serialized_excerpt", "fragments" => fragments}}
+
+      messages = [
+        {:loopex_map, [{"role", "system"}, {"content", "summarize"}]},
+        {:loopex_map, [{"role", "user"}, {"content", JSON.encode!(source)}]}
+      ]
+
+      bytes = :erlang.term_to_binary(messages: messages)
+      %{payload: %{"request" => %{"canonical_request_bytes" => bytes}}}
+    end
+
+    fragment = &%{"offset" => &1, "text" => binary_part(serialized, &1, &2)}
+    tail = byte_size(serialized) - at - 100
+
+    assert Scenarios.sentinel_omitted?(row.([fragment.(0, 400), fragment.(at + 100, tail)]))
+    refute Scenarios.sentinel_omitted?(row.([fragment.(0, at + 5)]))
+    refute Scenarios.sentinel_omitted?(row.([fragment.(0, 400), fragment.(at - 10, 40)]))
+    refute Scenarios.sentinel_omitted?(row.([fragment.(10, 400)]))
+    refute Scenarios.sentinel_omitted?(row.([%{"offset" => 0, "text" => "[{\"role\":"}]))
+  end
+
   test "baseline durable pins the dated default model and one committed tool round", f do
     result =
       passed!(

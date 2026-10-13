@@ -440,11 +440,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
           excerpted == [] ->
             {:missing, :excerpted_source}
 
-          Enum.any?(
-            excerpted,
-            &(:binary.match(&1.payload["request"]["canonical_request_bytes"], @oversized_sentinel) !=
-                  :nomatch)
-          ) ->
+          not sentinel_omitted?(hd(excerpted)) ->
             {:failed, :sentinel_inside_excerpt}
 
           not Enum.all?(checkpoints, &get_in(&1.payload, ["summary", "source_excerpted"])) ->
@@ -871,6 +867,37 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
         Enum.all?(
           entries,
           &(Map.get(replies, &1["source"]["operation_id"]) == &1["capsule"]["content"])
+        )
+    else
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  # Concept: the first excerpted summary source omits the ledger's middle,
+  # while a reply that quotes the sentinel stays ordinary retained history.
+  # Technical depth: that source is the canonical messages JSON opening with
+  # the pinned prompt, so the sentinel holds a fixed byte range in it. The
+  # first fragment must be a prefix of that encoding and no fragment may
+  # overlap the range.
+  @doc false
+  def sentinel_omitted?(row) do
+    head = ~s([{"content":)
+    serialized = head <> JSON.encode!(oversized_prompt())
+    {at, size} = :binary.match(serialized, @oversized_sentinel)
+
+    with bytes when is_binary(bytes) <-
+           get_in(row.payload, ["request", "canonical_request_bytes"]),
+         request when is_list(request) <- :erlang.binary_to_term(bytes, [:safe]),
+         [_system, %{"content" => content}] <- plain(Keyword.get(request, :messages)),
+         {:ok, %{"messages" => %{"kind" => "serialized_excerpt", "fragments" => fragments}}} <-
+           JSON.decode(content),
+         [%{"offset" => 0, "text" => first} | _] <- fragments do
+      String.starts_with?(serialized, first) and
+        Enum.all?(
+          fragments,
+          &(&1["offset"] + byte_size(&1["text"]) <= at or &1["offset"] >= at + size)
         )
     else
       _ -> false
