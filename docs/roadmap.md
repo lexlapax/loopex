@@ -143,9 +143,11 @@ were accepted at `2986150b878151524ecdd9bac5a9779e69e196b4`; the
 binds those bytes. M7 owns continuity, instructions, compaction, model control,
 questions, conversational chat, bounded helpers and operator validation;
 later accepted ADRs through 0070 settle its implementation boundaries.
-The installed durable operator, store engine and governed extension runtime
-[drafts](drafts/README.md) for M8–M10 follow it and remain unaccepted; this
-roadmap grants no release version or publication authority.
+The [M8 installed durable operator plan](plans/M8.md#concept) is Open for
+planning: installation, home configuration, service lifecycle, an attached
+conversation, and backup and restore. The store engine and governed extension
+runtime [drafts](drafts/README.md) for M9 and M10 follow. All three remain
+unaccepted; this roadmap grants no release version or publication authority.
 
 Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technical-roadmap-minimal-runnable)
 

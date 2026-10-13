@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M8` is open; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M7` — 2026-10-13 |
-| Blockers | None; `M7` is closed and its governance row is recorded |
-| Authorized work | Explicitly authorized planning, ADR, and review work only; no product implementation until the next milestone is accepted |
-| Next maintainer decision | Open the next milestone, or defer it |
-| Next transition | Write the next milestone's plan pair and move it to Open |
+| Blockers | `M8` is open and not accepted; the maintainer must accept its plan pair; `M8` waits on ADR 0037, ADR 0038, ADR 0071, and ADR 0072 before the outcomes that depend on them |
+| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
+| Next maintainer decision | Accept or reject the `M8` plan pair; disposition [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept), [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept), [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept), and [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) |
+| Next transition | Record the acceptance governance row and move `M8` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -41,6 +41,13 @@ accepted ADRs 0065, 0067 and 0068 on 2026-10-09 in the
 2026-10-13 and is the source release `v0.4.0`; its
 [closure runs](../evidence/M7-closure-runs.md) record the matrix and the
 independent reviews.
+
+The maintainer opened `M8` for planning on 2026-09-30 on branch `m8`; the
+[opening record](../process/agent-context-map.md#disposition-m8-opening-2026-09-30)
+holds the instruction. On 2026-10-13 the branch was rebased onto the closed M7
+baseline and `M8` became the Open milestone; the
+[rebase record](../process/agent-context-map.md#disposition-m8-rebase-2026-10-13)
+lists what changed. Open `M8` carries no implementation authority.
 No partially accepted subset authorizes dependent implementation.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the
@@ -154,6 +161,7 @@ representable.
 | `M5` | Closed | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 | `M6` | Closed | [concept](M6.md) | [technical depth](M6-technical.md) | — |
 | `M7` | Closed | [concept](M7.md) | [technical depth](M7-technical.md) | — |
+| `M8` | Open | [concept](M8.md) | [technical depth](M8-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact

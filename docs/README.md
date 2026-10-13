@@ -22,7 +22,7 @@ is the index of what exists.
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
 | [evidence/](evidence/README.md) | Retained check-run and demonstration evidence, named by the revision it was taken at. |
-| [drafts/](drafts/README.md) | Draft milestone plan pairs (M8, M9, M10) not yet in the register; a draft moves into `plans/` only when the maintainer opens it. |
+| [drafts/](drafts/README.md) | Draft milestone plan pairs (M9, M10) not yet in the register; a draft moves into `plans/` only when the maintainer opens it. |
 | [archive/](archive/README.md) | Non-normative historical inputs, retained for provenance. |
 
 Every directory under `docs/` carries a `README.md` describing its contents and
@@ -122,6 +122,8 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0068 — CLI-owned output | [Decision](adr/0068-cli-owned-output.md#concept) | [Technical depth](adr/0068-cli-owned-output-technical.md#technical-depth) |
 | 0069 — Helper run evidence and route guard | [Decision](adr/0069-helper-run-evidence-and-route-guard.md#concept) | [Technical depth](adr/0069-helper-run-evidence-and-route-guard-technical.md#technical-depth) |
 | 0070 — Pre-1.0 superseded surface retirement | [Decision](adr/0070-pre-1-superseded-surface-retirement.md#concept) | [Technical depth](adr/0070-pre-1-superseded-surface-retirement-technical.md#technical-depth) |
+| 0071 — daemon-attached conversation | [Decision](adr/0071-daemon-attached-conversation.md#concept) | [Technical depth](adr/0071-daemon-attached-conversation-technical.md#technical-depth) |
+| 0072 — store readiness: marker, reader boundary, backup and restore | [Decision](adr/0072-store-readiness-marker-backup-and-restore.md#concept) | [Technical depth](adr/0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
@@ -136,7 +138,7 @@ whose path or explicit fragment does not resolve.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, the floor refresh, observability, and the experimental session protocol driven by an independent Node consumer in plain JavaScript; Closed, with its runs in [M4 closure runs](evidence/M4-closure-runs.md).
 - [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4; Closed, with its runs in [M5 closure runs](evidence/M5-closure-runs.md).
 - [M6 minimal runnable Loopex](plans/M6.md#concept) and [technical plan](plans/M6-technical.md#technical-depth) — the embedded ephemeral API, the in-process model adapter and memory store, the standalone command for shells and agents, full Loopex unchanged, and closure tooling in the repository. The [plans register](plans/README.md) carries its current state.
-- M7 is closed: [M7 coding-agent proof](plans/M7.md#concept) ([technical](plans/M7-technical.md#technical-depth)), placed first on 2026-09-29; then the unregistered successor drafts: [M8 installed durable operator](drafts/m8-installed-durable-operator.md#concept) ([technical](drafts/m8-installed-durable-operator-technical.md#technical-depth)), [M9 store engine successor](drafts/m9-store-engine-successor.md#concept) ([technical](drafts/m9-store-engine-successor-technical.md#technical-depth)) and [M10 governed extension runtime](drafts/m10-governed-extension-runtime.md#concept) ([technical](drafts/m10-governed-extension-runtime-technical.md#technical-depth)).
+- M7 is closed: [M7 coding-agent proof](plans/M7.md#concept) ([technical](plans/M7-technical.md#technical-depth)), placed first on 2026-09-29. [M8 installed durable operator](plans/M8.md#concept) ([technical](plans/M8-technical.md#technical-depth)) is Open for planning; then the unregistered successor drafts: [M9 store engine successor](drafts/m9-store-engine-successor.md#concept) ([technical](drafts/m9-store-engine-successor-technical.md#technical-depth)) and [M10 governed extension runtime](drafts/m10-governed-extension-runtime.md#concept) ([technical](drafts/m10-governed-extension-runtime-technical.md#technical-depth)).
 
 - [M7 closure runs](evidence/M7-closure-runs.md) — the closure matrix, its reuse for the reviewed candidate, earlier attempts and the independent reviews.
 - [M7 contract inventory](evidence/M7-contract-inventory.md) — every record, API, tool generation, adapter and protocol M7 changes, with its pinned digests and proving tests.

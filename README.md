@@ -26,7 +26,7 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M8` is open; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
@@ -39,7 +39,9 @@ and [model-question responders for embedding](docs/developer/runtime-and-embeddi
 It also adds read-only helper roles that may run on their own provider,
 a separate thinking-off summarizer, and the coordinated `loopex.experimental/3`
 and `/4` wire generations. The [closure evidence](docs/evidence/M7-closure-runs.md)
-records its runs and reviews. Successors remain drafts.
+records its runs and reviews. The
+[M8 installed durable operator plan](docs/plans/M8.md#concept) is Open for
+planning; later successors remain drafts.
 
 ## What Loopex Provides
 
