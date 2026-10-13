@@ -303,12 +303,16 @@ defmodule Loopex.LLM.ReqLLM do
       when is_binary(credential) and is_function(progress, 1) and is_function(started, 0) do
     case worker_preflight(request, credential) do
       {:ok, context, identity, options} ->
+        withheld = :ets.new(__MODULE__, [:set, :public])
+        :ets.insert(withheld, {:forwarded, 0})
+        guarded = &withhold_echo(withheld, credential, progress, &1)
+
         try do
           started.()
 
-          case handoff(request, context, identity, options, credential, progress) do
+          case handoff(request, context, identity, options, credential, guarded) do
             {:ok, reply} ->
-              {:ok, reply}
+              release_echo_free(withheld, credential, progress, reply)
 
             {:error, _sanitized, failure} ->
               {:error, {:dispatched_or_unknown, @call_failed}, failure}
@@ -320,12 +324,138 @@ defmodule Loopex.LLM.ReqLLM do
           _error -> worker_unknown()
         catch
           _class, _reason -> worker_unknown()
+        after
+          :ets.delete(withheld)
         end
 
       _refused ->
         {:error, {:not_dispatched, @call_failed}}
     end
   end
+
+  # Concept: a provider that echoes the selected credential publishes nothing of
+  # the echo. The exact value is refused from provider-controlled progress and
+  # reply data before either leaves the worker that holds it; the host bridge
+  # never holds the value and cannot scan for it.
+  #
+  # Technical depth: each delta stream -- text and reasoning by content index,
+  # tool arguments by call index -- forwards only bytes that cannot begin the
+  # value, withholding at most the value's length minus one trailing bytes until
+  # the next delta of that stream or the terminal decision. So no forwarded run
+  # of one stream contains or completes the value. Whole call identifiers and
+  # names are scanned as they arrive. Native progress runs in the transport's
+  # drain process, joined before `handoff/6` returns; the public table is this
+  # invocation's only shared state. The first echo forwards nothing further and
+  # ends in the fixed unknown, whatever the reply. A released reply counts the
+  # deltas actually forwarded, so its text still replays byte for byte.
+  defp withhold_echo(withheld, credential, progress, %{kind: kind} = delta) do
+    {stream, field} =
+      if kind == :tool_call_delta,
+        do: {{kind, delta.call_index}, :arguments_fragment},
+        else: {{kind, delta.content_index}, :text}
+
+    pending = :ets.lookup_element(withheld, stream, 2, "")
+    text = pending <> (Map.fetch!(delta, field) || "")
+
+    cond do
+      :ets.member(withheld, :echo) ->
+        :ok
+
+      echoes?([text | Map.values(delta)], credential) ->
+        :ets.insert(withheld, {:echo})
+
+      true ->
+        split = withhold_point(text, credential)
+        :ets.insert(withheld, {stream, binary_part(text, split, byte_size(text) - split)})
+
+        cond do
+          split > 0 ->
+            text
+            |> binary_part(0, split)
+            |> split_progress_fragment()
+            |> Enum.each(&forward(withheld, progress, %{delta | field => &1}))
+
+          # An opening call delta names its call and carries no fragment.
+          is_nil(Map.fetch!(delta, field)) ->
+            forward(withheld, progress, delta)
+
+          true ->
+            :ok
+        end
+    end
+
+    :ok
+  end
+
+  defp forward(withheld, progress, delta) do
+    :ets.update_counter(withheld, :forwarded, 1)
+    progress.(delta)
+  end
+
+  # Concept: the earliest offset from which the rest could still begin the value.
+  # Technical depth: only offsets within the value's length minus one of the end
+  # that hold the value's first byte are candidates, so the scan stays bounded.
+  defp withhold_point(text, credential) do
+    size = byte_size(text)
+    scope = min(size, byte_size(credential) - 1)
+
+    text
+    |> :binary.matches(binary_part(credential, 0, 1), scope: {size - scope, scope})
+    |> Enum.find_value(size, fn {at, _} ->
+      if binary_part(credential, 0, size - at) == binary_part(text, at, size - at), do: at
+    end)
+  end
+
+  # Concept: the terminal decision releases withheld progress only with a reply
+  # whose provider-controlled fields never contain the value. Host-supplied
+  # request identity and canonical bytes are not a provider echo.
+  defp release_echo_free(withheld, credential, progress, reply) do
+    provider_fields =
+      Map.take(reply, [
+        :text,
+        :tool_calls,
+        :provider_response_id,
+        :usage,
+        :completion,
+        :continuation
+      ])
+
+    if :ets.member(withheld, :echo) or echoes?(provider_fields, credential) do
+      worker_unknown()
+    else
+      for {{kind, index}, tail} <- Enum.sort(:ets.tab2list(withheld)), tail != "" do
+        delta =
+          if kind == :tool_call_delta,
+            do: %{
+              kind: kind,
+              call_index: index,
+              tool_call_id: nil,
+              name: nil,
+              arguments_fragment: tail
+            },
+            else: %{kind: kind, content_index: index, text: tail}
+
+        forward(withheld, progress, delta)
+      end
+
+      forwarded = :ets.lookup_element(withheld, :forwarded, 2)
+      {:ok, %{reply | delta_count: forwarded, streamed: forwarded > 0}}
+    end
+  end
+
+  defp echoes?(value, credential) when is_binary(value),
+    do: :binary.match(value, credential) != :nomatch
+
+  defp echoes?(value, credential) when is_map(value),
+    do: Enum.any?(value, fn {key, member} -> echoes?([key, member], credential) end)
+
+  defp echoes?(value, credential) when is_list(value),
+    do: Enum.any?(value, &echoes?(&1, credential))
+
+  defp echoes?(value, credential) when is_tuple(value),
+    do: echoes?(Tuple.to_list(value), credential)
+
+  defp echoes?(_value, _credential), do: false
 
   defp worker_preflight(request, credential) do
     with true <- byte_size(credential) in 1..65_536,

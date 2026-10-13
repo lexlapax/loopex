@@ -320,6 +320,73 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
     assert reply.staged_request_digest == request.staged_request_digest
   end
 
+  test "the worker refuses a provider text echo of the selected credential" do
+    {result, deltas} = worker_result(text_events(["echo " <> @key <> " done"]))
+
+    assert result == {:error, {:dispatched_or_unknown, "model_call_failed"}, unavailable()}
+    assert deltas == []
+  end
+
+  test "the worker forwards no delta run that would reassemble the selected credential" do
+    {result, deltas} =
+      worker_result(text_events(["echo synthetic-", "native-trans", "port-key!"]))
+
+    assert result == {:error, {:dispatched_or_unknown, "model_call_failed"}, unavailable()}
+    assert Enum.map(deltas, & &1.text) == ["echo "]
+  end
+
+  test "the worker refuses the selected credential in tool arguments and continuation" do
+    tool = LoopexProtocol.ToolDefinition.question_definition()
+
+    tool_events =
+      text_events(["hello"])
+      |> List.insert_at(-3, %{
+        "type" => "content_block_start",
+        "index" => 2,
+        "content_block" => %{
+          "type" => "tool_use",
+          "id" => "call",
+          "name" => "ask",
+          "input" => %{}
+        }
+      })
+      |> List.insert_at(-3, %{
+        "type" => "content_block_delta",
+        "index" => 2,
+        "delta" => %{"type" => "input_json_delta", "partial_json" => ~s({"question":"synthetic-)}
+      })
+      |> List.insert_at(-3, %{
+        "type" => "content_block_delta",
+        "index" => 2,
+        "delta" => %{"type" => "input_json_delta", "partial_json" => ~s(native-transport-key"})}
+      })
+      |> List.insert_at(-3, %{"type" => "content_block_stop", "index" => 2})
+      |> List.update_at(-2, &put_in(&1, ["delta", "stop_reason"], "tool_use"))
+
+    {result, deltas} = worker_result(tool_events, [tool])
+    assert result == {:error, {:dispatched_or_unknown, "model_call_failed"}, unavailable()}
+
+    assert Enum.map(deltas, &Map.get(&1, :arguments_fragment)) == [nil, nil, ~s({"question":")]
+
+    signed =
+      text_events(["hello"])
+      |> List.update_at(3, &put_in(&1, ["delta", "signature"], @key))
+
+    {result, deltas} = worker_result(signed)
+    assert result == {:error, {:dispatched_or_unknown, "model_call_failed"}, unavailable()}
+    assert Enum.map(deltas, & &1.text) == ["hello"]
+  end
+
+  test "the worker releases a withheld credential prefix with an ordinary reply" do
+    {result, deltas} = worker_result(text_events(["hello synth", "etic-native"]))
+
+    assert {:ok, reply} = result
+    assert Enum.map(deltas, & &1.text) == ["hello ", "synthetic-native"]
+    assert reply.text == "hello synthetic-native"
+    assert reply.delta_count == 2 and reply.streamed
+    assert reply.continuation["status"] == "closed"
+  end
+
   test "malformed input cancels and joins a drain blocked inside progress" do
     prefix = events() |> Enum.drop(-3) |> encode()
     bad = "event: content_block_delta\ndata: {malformed-private-sentinel\n\n"
@@ -577,6 +644,65 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
 
   def telemetry_event(event, _measurements, metadata, recipient),
     do: send(recipient, {:sdk_telemetry, event, metadata})
+
+  defp worker_result(events, tools \\ []) do
+    {server, base} = server([encode(events)])
+    original = prepared(base, "default", tools).request
+
+    {:ok, request} =
+      Model.request(original.model, original.messages,
+        tools: tools,
+        sampling: original.sampling,
+        deadline: System.system_time(:millisecond) + 10_000
+      )
+
+    prior = Application.fetch_env(:req_llm, :anthropic)
+    Application.put_env(:req_llm, :anthropic, base_url: base)
+    parent = self()
+
+    result =
+      try do
+        Loopex.LLM.ReqLLM.worker_invoke(
+          request,
+          @key,
+          &send(parent, {:worker_delta, &1}),
+          fn -> :ok end
+        )
+      after
+        case prior do
+          {:ok, value} -> Application.put_env(:req_llm, :anthropic, value)
+          :error -> Application.delete_env(:req_llm, :anthropic)
+        end
+      end
+
+    assert_receive {:request, ^server, _, _}
+    {result, worker_deltas([])}
+  end
+
+  defp worker_deltas(deltas) do
+    receive do
+      {:worker_delta, delta} ->
+        refute inspect(delta) =~ @key
+        worker_deltas([delta | deltas])
+    after
+      0 -> Enum.reverse(deltas)
+    end
+  end
+
+  defp text_events(pieces) do
+    {head, [_hello | tail]} = Enum.split(events(), 7)
+
+    head ++
+      Enum.map(pieces, fn text ->
+        %{
+          "type" => "content_block_delta",
+          "index" => 1,
+          "delta" => %{"type" => "text_delta", "text" => text}
+        }
+      end) ++ tail
+  end
+
+  defp unavailable, do: Mapping.failure_pair("unavailable", "unclassified")
 
   defp prepared(base, level \\ "default", tools \\ []) do
     mapping = %{
