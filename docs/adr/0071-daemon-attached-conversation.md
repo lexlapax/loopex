@@ -193,11 +193,9 @@ and the earlier refusal of a file that enables delegation is withdrawn. Also
 decided on 2026-10-13: helper children count toward the daemon's
 64-activation limit, refused as `helper_activation_limit` when it is reached.
 
-- **Daemon exit statuses across M8 records.** This record uses 111 to 115 and
-  leaves 114 retired. ADR 0072 and ADR 0073 each also number their daemon
-  statuses from 111. One order must be fixed when the three are accepted; this
-  record proposes that ADR 0072's statuses follow 115 and ADR 0073's follow
-  those.
+Also decided on 2026-10-13: the M8 records number their daemon exit statuses
+in one sequence. This record uses 111 to 115 with 114 retired, ADR 0072 uses
+116 to 119, and ADR 0073 uses 120 to 123. Nothing in this record remains open.
 
 ## Governance Record
 
