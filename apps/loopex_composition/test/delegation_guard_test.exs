@@ -122,18 +122,27 @@ defmodule LoopexComposition.DelegationGuardTest do
     Process.flag(:trap_exit, true)
 
     on_exit(fn ->
-      Supervisor.start_child(
-        LoopexComposition.Supervisor,
-        Supervisor.child_spec(
-          {Registry, keys: :unique, name: LoopexComposition.Delegation.Registry},
-          restart: :temporary
-        )
-      )
+      assert {:ok, _} =
+               Supervisor.start_child(
+                 LoopexComposition.Supervisor,
+                 Supervisor.child_spec(
+                   {Registry, keys: :unique, name: LoopexComposition.Delegation.Registry},
+                   restart: :temporary
+                 )
+               )
     end)
+
+    # The partitions die after their killed supervisor; later tests restart
+    # the Registry only once its partition names are free again.
+    members =
+      for {_id, pid, _type, _modules} <- Supervisor.which_children(registry),
+          is_pid(pid),
+          do: Process.monitor(pid)
 
     monitor = Process.monitor(registry)
     Process.exit(registry, :kill)
     assert_receive {:DOWN, ^monitor, :process, _, :killed}, 5_000
+    for member <- members, do: assert_receive({:DOWN, ^member, :process, _, _}, 5_000)
 
     # The application supervisor has handled the exit once it answers.
     assert is_list(Supervisor.which_children(LoopexComposition.Supervisor))
