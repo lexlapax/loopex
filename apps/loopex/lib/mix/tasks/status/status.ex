@@ -103,6 +103,7 @@ defmodule Loopex.Checks.Status do
     )
 
     require_register_matches_plans!(rows, plan_names)
+    require_closed_prose!(documents, rows)
 
     verify_rejoin_barrier!(documents)
     []
@@ -216,6 +217,31 @@ defmodule Loopex.Checks.Status do
     if Map.drop(values, @derived_fields) != expected do
       raise Invalid, "#{@index}: the register state requires its exact derived status capsule"
     end
+  end
+
+  # Concept: once the register closes a milestone, no current-state page may
+  # still describe it as unfinished; the marked blocks are checked above, and
+  # this covers the prose around them that closure and release leave behind.
+  # Technical depth: current-state pages are the root README, the docs index,
+  # the roadmap pair and the operator and developer pages; plans, evidence,
+  # ADRs, drafts, the changelog and the context map record history. Link
+  # targets are dropped first so a sentence is read as its visible text.
+  @current_prose ~r{\A(README\.md|docs/README\.md|docs/roadmap(-technical)?\.md|docs/(operator|developer)/.+\.md)\z}
+  @unfinished ~S"(?:is|remains|stays)(?: still)? (?:in review|in progress|open|not closed)"
+
+  defp require_closed_prose!(documents, rows) do
+    closed = for {name, "Closed"} <- rows, do: name
+
+    for {path, text} <- documents,
+        Regex.match?(@current_prose, path),
+        path != "docs/developer/agent-context-map.md",
+        visible = Regex.replace(~r/\]\([^)]*\)/, text, "]"),
+        name <- closed,
+        Regex.match?(~r/\b#{name}\b[^.|\n]{0,100}\b#{@unfinished}\b/, visible) do
+      raise Invalid, "#{path}: describes closed milestone #{name} as unfinished"
+    end
+
+    :ok
   end
 
   defp require_register_matches_plans!(rows, plan_names) do

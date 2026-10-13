@@ -981,6 +981,24 @@ defmodule Loopex.StatusCheckTest do
           closed = Map.update!(documents, "docs/plans/README.md", &Fixture.closed_capsule/1)
           assert [] == Fixture.checked(closed)
 
+          # Prose around the marked blocks must follow the register too: a
+          # current-state page may not still call a closed milestone unfinished,
+          # even through a link, while history pages keep what was true then.
+          append = fn docs, path, line ->
+            Map.update(docs, path, line, &(&1 <> "\n" <> line <> "\n"))
+          end
+
+          closed
+          |> append.("README.md", "M0 is in review.")
+          |> assert_invalid("README.md: describes closed milestone M0 as unfinished")
+
+          closed
+          |> append.("docs/roadmap.md", "The [M0 plan](plans/M0.md#concept) remains in progress.")
+          |> assert_invalid("docs/roadmap.md: describes closed milestone M0 as unfinished")
+
+          assert [] == Fixture.checked(append.(closed, "CHANGELOG.md", "M0 remains in progress."))
+          assert [] == Fixture.checked(append.(closed, "README.md", "M0 closed on 2026-08-15."))
+
           closed
           |> replace(
             "docs/plans/README.md",
