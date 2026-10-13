@@ -117,9 +117,14 @@ defmodule LoopexComposition.DelegationDemonstrationTest do
     on_exit(fn ->
       if Loopex.Runtime.alive?(runtime), do: Loopex.stop(runtime)
 
-      for pid <- [handle.helper, handle.objects],
-          Process.alive?(pid),
-          do: GenServer.stop(pid, :normal, 5_000)
+      for pid <- [handle.helper, handle.objects], Process.alive?(pid) do
+        try do
+          GenServer.stop(pid, :normal, 5_000)
+        catch
+          # It can end normally on its own while the stop is in `:sys.terminate`.
+          :exit, {{:normal, {:sys, :terminate, _}}, {GenServer, :stop, _}} -> :ok
+        end
+      end
     end)
 
     assert Helper.status(handle.helper).classified == :complete
