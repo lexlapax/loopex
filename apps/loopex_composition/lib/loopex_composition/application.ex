@@ -8,8 +8,11 @@ defmodule LoopexComposition.Application do
   ## Technical depth
 
   The named one-for-one supervisor never automatically shuts down. ReqLLMStarter
-  is temporary and nonsignificant. The owner DynamicSupervisor accepts each
-  session's temporary child specification. This callback starts no provider
+  is temporary and nonsignificant. The helper-classification Registry is
+  temporary too: its meta rows record which runtimes were bound, so a lost
+  Registry stays lost and ADR 0069's guard refuses rather than reading a fresh
+  one as never bound. The owner DynamicSupervisor accepts each session's
+  temporary child specification. This callback starts no provider
   dependency and creates no session or runtime.
   """
 
@@ -20,7 +23,10 @@ defmodule LoopexComposition.Application do
   def start(_type, _args) do
     children = [
       {LoopexComposition.ReqLLMStarter, []},
-      {Registry, keys: :unique, name: LoopexComposition.Delegation.Registry},
+      Supervisor.child_spec(
+        {Registry, keys: :unique, name: LoopexComposition.Delegation.Registry},
+        restart: :temporary
+      ),
       {DynamicSupervisor,
        strategy: :one_for_one, name: LoopexComposition.Ephemeral.OwnerSupervisor}
     ]

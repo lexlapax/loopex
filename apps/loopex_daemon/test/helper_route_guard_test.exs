@@ -88,4 +88,56 @@ defmodule LoopexDaemon.HelperRouteGuardTest do
 
     assert {:ok, ^before} = Loopex.Store.load_records(fixture.store, parent, 0, 1_000)
   end
+
+  # Concept: losing the classification Registry's partition keeps a helper
+  # child's daemon routes closed.
+  # Technical depth: the partition restarts empty while runtime and helper stay
+  # alive and this trapping host ignores the exit; the child prompt still
+  # refuses before admission and records nothing.
+  test "a lost registry partition keeps the helper child's daemon routes refused" do
+    fixture =
+      Fixture.start([
+        %{text: "go", calls: [Fixture.task_call("call-task")]},
+        %{text: "Finding.", calls: []},
+        %{text: "done", calls: []}
+      ])
+
+    parent = Fixture.parent(fixture, "parent-create")
+    {_attachment, run} = Fixture.prompt(fixture, parent, "prompt", "investigate")
+    assert Fixture.await_terminal(fixture, parent, run).terminal.state == "completed"
+    [{child, _}] = Map.to_list(Helper.status(fixture.helper).children)
+    {:ok, attachment} = Loopex.attach(fixture.runtime, child, after_event_sequence: 0)
+    {:ok, before} = Loopex.Store.load_records(fixture.store, child, 0, 1_000)
+    command = %{type: :prompt, command_id: "after-loss", content: "x"}
+
+    assert SocketConnection.route_guard(fixture.runtime, child, :prompt) ==
+             {:refused, "helper_session_owned"}
+
+    registry = LoopexComposition.Delegation.Registry
+    Process.flag(:trap_exit, true)
+    {:ok, owner} = Registry.register(registry, {:probe, make_ref()}, nil)
+    Process.exit(owner, :kill)
+    assert_receive {:EXIT, ^owner, :killed}, 5_000
+    await_partition(registry, owner)
+    assert Registry.lookup(registry, fixture.runtime.supervisor) == []
+    assert Process.alive?(fixture.helper) and Loopex.Runtime.alive?(fixture.runtime)
+
+    assert {:refused, record} =
+             SocketConnection.run_mutation(attachment, command, "request", "session.prompt", nil)
+
+    assert inspect(record) =~ "helper_owner_unavailable"
+    assert {:ok, ^before} = Loopex.Store.load_records(fixture.store, child, 0, 1_000)
+  end
+
+  defp await_partition(registry, old) do
+    restarted =
+      Enum.all?(Supervisor.which_children(registry), fn {_id, pid, _, _} ->
+        is_pid(pid) and pid != old
+      end)
+
+    unless restarted do
+      Process.sleep(10)
+      await_partition(registry, old)
+    end
+  end
 end

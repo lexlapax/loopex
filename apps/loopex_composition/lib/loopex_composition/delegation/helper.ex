@@ -66,10 +66,15 @@ defmodule LoopexComposition.Delegation.Helper do
   `LoopexComposition.Delegation.Registry`, so the entry lives as long as the
   host rather than the owner: a route that finds the entry but no live owner
   refuses instead of treating the runtime as helper-free (ADR 0069 fails
-  closed).
+  closed). Before registering it leaves a `{:bound, supervisor}` meta row,
+  which outlives a restart of the Registry's partition, so a route that later
+  finds the entry gone refuses instead of reading the runtime as never bound.
   """
   def bind(helper, runtime, store \\ nil) do
-    case Registry.register(LoopexComposition.Delegation.Registry, runtime.supervisor, helper) do
+    registry = LoopexComposition.Delegation.Registry
+    :ok = Registry.put_meta(registry, {:bound, runtime.supervisor}, true)
+
+    case Registry.register(registry, runtime.supervisor, helper) do
       {:ok, _owner} -> GenServer.call(helper, {:bind, runtime, store}, :infinity)
       {:error, {:already_registered, _host}} -> rebind(helper, runtime, store)
     end

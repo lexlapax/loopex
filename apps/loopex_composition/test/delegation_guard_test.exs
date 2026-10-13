@@ -75,6 +75,76 @@ defmodule LoopexComposition.DelegationGuardTest do
     assert {:ok, ^before} = Loopex.Store.load_records(fixture.store, child, 0, 1_000)
   end
 
+  # Concept: losing the classification Registry never reopens a helper child.
+  # Technical depth: a restart of the Registry's partition empties the entry
+  # while runtime and helper stay alive; the bound runtime keeps refusing every
+  # mutating route, and a runtime no helper was ever bound to still admits.
+  test "a lost registry partition keeps a bound runtime's routes refused" do
+    fixture =
+      Fixture.start([
+        %{text: "go", calls: [Fixture.task_call("call-task")]},
+        %{text: "Finding.", calls: []},
+        %{text: "done", calls: []}
+      ])
+
+    parent = Fixture.parent(fixture, "parent-create")
+    {_attachment, run} = Fixture.prompt(fixture, parent, "prompt", "investigate")
+    assert Fixture.await_terminal(fixture, parent, run).terminal.state == "completed"
+    [{child, _}] = Map.to_list(Helper.status(fixture.helper).children)
+    plain = plain_runtime(fixture.root)
+    assert Delegation.guard(fixture.runtime, child, :prompt) == {:error, :helper_session_owned}
+    assert Delegation.guard(plain, "ordinary", :prompt) == :ok
+
+    kill_registry_partition()
+
+    assert Registry.lookup(LoopexComposition.Delegation.Registry, fixture.runtime.supervisor) ==
+             []
+
+    assert Process.alive?(fixture.helper) and Loopex.Runtime.alive?(fixture.runtime)
+
+    for command <- Delegation.mutating_commands(), session <- [child, parent, "ordinary"] do
+      assert Delegation.guard(fixture.runtime, session, command) ==
+               {:error, :helper_owner_unavailable}
+    end
+
+    for read_only <- [:attach, :snapshot, :history, :artifact],
+        do: assert(Delegation.guard(fixture.runtime, child, read_only) == :ok)
+
+    assert Delegation.guard(plain, "ordinary", :prompt) == :ok
+  end
+
+  # Concept: a lost Registry is not replaced by an empty one.
+  # Technical depth: the application does not restart it, so every mutating
+  # route refuses while read-only routes stay open; the test restores it.
+  test "a lost registry stays lost and refuses every mutating route" do
+    fixture = Fixture.start([%{text: "done", calls: []}])
+    registry = Process.whereis(LoopexComposition.Delegation.Registry)
+    Process.flag(:trap_exit, true)
+
+    on_exit(fn ->
+      Supervisor.start_child(
+        LoopexComposition.Supervisor,
+        Supervisor.child_spec(
+          {Registry, keys: :unique, name: LoopexComposition.Delegation.Registry},
+          restart: :temporary
+        )
+      )
+    end)
+
+    monitor = Process.monitor(registry)
+    Process.exit(registry, :kill)
+    assert_receive {:DOWN, ^monitor, :process, _, :killed}, 5_000
+
+    # The application supervisor has handled the exit once it answers.
+    assert is_list(Supervisor.which_children(LoopexComposition.Supervisor))
+    assert Process.whereis(LoopexComposition.Delegation.Registry) == nil
+
+    assert Delegation.guard(fixture.runtime, "ordinary", :prompt) ==
+             {:error, :helper_owner_unavailable}
+
+    assert Delegation.guard(fixture.runtime, "ordinary", :snapshot) == :ok
+  end
+
   test "an exhausted classification bound closes helper and mutating admission with counts" do
     fixture =
       Fixture.start([
@@ -201,5 +271,41 @@ defmodule LoopexComposition.DelegationGuardTest do
 
     refute Enum.any?(rows, &(&1.payload.kind == "effect_intent_committed_v2"))
     assert map_size(Helper.status(fixture.helper).children) == 1
+  end
+
+  # A durable runtime no helper owner is bound to, over its own Local Store.
+  defp plain_runtime(root) do
+    {:ok, store_pid} = Loopex.Store.Local.start_link(path: Path.join(root, "plain.log"))
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, store_pid)
+
+    {:ok, runtime} =
+      Loopex.start_link(runtime_id: "plain-runtime", context_token_budget: 8_192, store: store)
+
+    on_exit(fn -> if Loopex.Runtime.alive?(runtime), do: Loopex.stop(runtime) end)
+    runtime
+  end
+
+  # Kills the partition that owns this process's registrations (Registry's
+  # documented `register/3` owner) the way a host that traps exits sees it, and
+  # waits for the Registry to restart it empty.
+  defp kill_registry_partition do
+    registry = LoopexComposition.Delegation.Registry
+    Process.flag(:trap_exit, true)
+    {:ok, owner} = Registry.register(registry, {:probe, make_ref()}, nil)
+    Process.exit(owner, :kill)
+    assert_receive {:EXIT, ^owner, :killed}, 5_000
+    await_partition(registry, owner)
+  end
+
+  defp await_partition(registry, old) do
+    restarted =
+      Enum.all?(Supervisor.which_children(registry), fn {_id, pid, _, _} ->
+        is_pid(pid) and pid != old
+      end)
+
+    unless restarted do
+      Process.sleep(10)
+      await_partition(registry, old)
+    end
   end
 end

@@ -217,37 +217,44 @@ defmodule LoopexComposition.Delegation do
   is decided before admission, so it writes no record and starts no work.
 
   The guard fails closed: once a helper owner has been bound to the runtime,
-  an owner that has exited refuses every mutating route
-  with `helper_owner_unavailable`, because its children can no longer be
+  an owner that has exited, or a lost binding entry, refuses every mutating
+  route with `helper_owner_unavailable`, because its children can no longer be
   told apart from ordinary sessions.
   """
   @spec guard(map() | nil, binary(), atom()) :: :ok | {:error, term()}
-  def guard(nil, _session, _command), do: :ok
+  def guard(handle, _session, command) when handle == nil or command in @read_only, do: :ok
 
   # Concept: only a runtime no helper owner was ever bound to is unguarded.
   # Technical depth: `Helper.bind/3` registers from the host process, so the
-  # entry survives the owner's exit. A host that never started this application
-  # has no registry and therefore cannot have bound an owner.
+  # entry survives the owner's exit, and first writes a `{:bound, supervisor}`
+  # meta row that the Registry's own supervisor keeps across a partition
+  # restart. An entry missing beside that row was lost, not never made. A
+  # missing or restarting Registry raises; the application never restarts a
+  # lost Registry, so its meta rows cannot silently vanish.
   def guard(%Loopex.Runtime{supervisor: supervisor}, session, command) do
-    with registry when is_pid(registry) <- Process.whereis(LoopexComposition.Delegation.Registry),
-         [{_host, helper}] <- Registry.lookup(LoopexComposition.Delegation.Registry, supervisor) do
-      guard(%{helper: helper}, session, command)
-    else
-      _never_bound -> :ok
+    registry = LoopexComposition.Delegation.Registry
+
+    case Registry.lookup(registry, supervisor) do
+      [{_host, helper}] -> guard(%{helper: helper}, session, command)
+      [] -> if Registry.meta(registry, {:bound, supervisor}) == :error, do: :ok, else: lost()
     end
+  rescue
+    ArgumentError -> lost()
   end
 
-  def guard(%{helper: helper}, session, command) when command not in @read_only do
+  def guard(%{helper: helper}, session, _command) do
     case Helper.classify_session(helper, session) do
       {:ok, :helper_child} -> {:error, :helper_session_owned}
       {:ok, _ordinary_or_parent} -> :ok
       {:error, :helper_classification_incomplete} -> incomplete(helper)
     end
   catch
-    :exit, _owner_gone -> {:error, :helper_owner_unavailable}
+    :exit, _owner_gone -> lost()
   end
 
   def guard(_handle, _session, _command), do: :ok
+
+  defp lost, do: {:error, :helper_owner_unavailable}
 
   defp incomplete(helper) do
     case Helper.status(helper).classified do
