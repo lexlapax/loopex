@@ -25,7 +25,7 @@ Constraints to know before you start:
   `ollama:llama3.2`. Run Ollama and make that model available before the
   one-shot example. `--model` also selects a supported hosted model. OpenAI
   needs `OPENAI_API_KEY`, Anthropic needs
-  `ANTHROPIC_API_KEY`, and OpenRouter needs `OPENROUTER_API_KEY`. The older
+  `ANTHROPIC_API_KEY`, and OpenRouter needs `OPENROUTER_API_KEY`. The
   durable `loopex run` path and `ask --state-root` default to
   `anthropic:claude-haiku-4-5` when no model is selected, and need
   `LOOPEX_PROVIDER_API_KEY`.
@@ -138,7 +138,7 @@ loopex -p "summarise this repository" --policy shell-allowlist \
 ```
 
 The built command selects byte encoding before the VM reads standard input,
-including on OTP 27. Legacy commands retain Unicode output; answer their
+including on OTP 27. The other commands use Unicode output; answer their
 confirmation prompts with plain ASCII `y` or `yes`. Piped confirmations padded
 with Unicode whitespace may be rejected.
 

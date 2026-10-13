@@ -140,7 +140,7 @@ provider-visible context one request may admit, and how long stopping may take:
 | --- | --- | --- |
 | `--state-root` | Where durable session records and artifacts are kept | `LOOPEX_HOME`; refused as `:loopex_home_required` when neither is given |
 | `--workspace` | The directory the tools act on | the current directory |
-| `--context-token-budget` | Maximum estimated tokens in one exact provider-visible request | 8192 |
+| `--context-token-budget` | Maximum estimated tokens in one exact provider-visible request | the model's context window minus the 4,096-token reply reserve, or 8192 when the window is unknown |
 | `--cleanup-grace-ms` | How long stopping a running tool may take, in milliseconds | 5000 |
 
 The context value is admission policy, not the model's published capacity and
@@ -674,8 +674,8 @@ ended any other way still exits `0`. Scripts must read the run's ending line on
 standard error rather than the exit status to learn the outcome: `loopex: done`
 is the only successful ending. The others are `loopex: failed …`,
 `loopex: stopped at the … bound …`,
-`loopex: stopped, but the effect's outcome is unknown`, and `loopex: <outcome>`
-for any other ending, such as `loopex: cancelled` or `loopex: denied`. If no
+`loopex: stopped, but the effect's outcome is unknown`, and
+`loopex: cancelled`. If no
 ending arrives within the command's follow window, it prints
 `loopex: stopped following this run; it may still be running`, still exits
 `0`, and `loopex resume` continues reading from the durable record. An unrecognised subcommand, or no

@@ -277,7 +277,7 @@ the interaction exists only in memory and the host uses `answer/3`. The policy
 is asked again after the answer, which is an input to that decision, never the
 decision itself. The app server's `ask` stance uses the durable path; see
 [app server operations](app-server.md#operator-app-server-launching). The
-`loopex` command and the daemon ship no stance that defers. The one-shot
+`loopex` command and the daemon ship no stance that defers. The
 `loopex run` command cannot answer a question; `loopex chat` answers the open
 one with `/answer` or `/decline`, as
 [chat input](coding-sessions.md#operator-sessions-chat-input) describes.
