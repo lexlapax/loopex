@@ -1368,6 +1368,95 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert facts(result)["join"] =~ "native_thinking"
   end
 
+  # Per the 2026-10-12 thinking-oracle override: adaptive and omitted cells
+  # need a native continuation on the further prompt, manual cells a thinking
+  # literal, and cells without continuation none.
+  test "the thinking-bound join requires each cell's continuation and manual thinking" do
+    alias Mix.Tasks.Loopex.M7Evidence.Scenarios
+    cells = Scenarios.bound_cells()
+    join = Scenarios.get("m7.thinking-bound").joins
+    thinking = %{"content" => [%{"kind" => "literal", "value" => %{"type" => "thinking"}}]}
+    text = %{"content" => [%{"kind" => "literal", "value" => %{"type" => "text"}}]}
+
+    mode = fn {model, reasoning} ->
+      case LoopexComposition.ProviderBindings.mapping(model, reasoning, 8_192) do
+        {:ok, %{"continuation_required" => true, "thinking" => %{"mode" => mode}}} -> mode
+        {:ok, %{"continuation_required" => true}} -> "required"
+        _ -> nil
+      end
+    end
+
+    rows = fn continuation_for ->
+      Enum.flat_map(Enum.with_index(cells), fn {cell, i} ->
+        [r1, r2, r3] = Enum.map(1..3, &"run-#{i}-#{&1}")
+
+        terminal =
+          &%{payload: %{:kind => "run_terminal_committed", "run_id" => &1, "outcome" => &2}}
+
+        [
+          %{
+            payload: %{
+              :kind => "executor_receipt_committed_v2",
+              "run_id" => r1,
+              "receipt" => %{"outcome" => "completed"}
+            }
+          },
+          terminal.(r1, "bound_reached"),
+          terminal.(r2, "completed"),
+          terminal.(r3, "completed"),
+          %{
+            payload: %{
+              :kind => "model_attempt_settled_v3",
+              "run_id" => r3,
+              "result" => %{"reply" => %{"continuation" => continuation_for.(mode.(cell))}}
+            }
+          }
+        ]
+      end)
+    end
+
+    assert Enum.any?(cells, &(mode.(&1) == "manual"))
+    assert Enum.any?(cells, &(mode.(&1) not in [nil, "manual"]))
+
+    with_thinking = fn
+      nil -> nil
+      _ -> thinking
+    end
+
+    assert join.(rows.(with_thinking), nil, nil) == {:ok, nil}
+
+    # Adaptive and omitted cells may answer the further prompt without thinking.
+    adaptive_text = fn
+      nil -> nil
+      "manual" -> thinking
+      _ -> text
+    end
+
+    assert join.(rows.(adaptive_text), nil, nil) == {:ok, nil}
+
+    manual_text = fn
+      nil -> nil
+      _ -> text
+    end
+
+    assert join.(rows.(manual_text), nil, nil) == {:missing, :native_thinking}
+
+    lost = fn
+      nil -> nil
+      "manual" -> thinking
+      _ -> nil
+    end
+
+    assert join.(rows.(lost), nil, nil) == {:missing, :native_continuation}
+
+    unexpected = fn
+      nil -> text
+      _ -> thinking
+    end
+
+    assert join.(rows.(unexpected), nil, nil) == {:failed, :unexpected_continuation}
+  end
+
   # The held second request never reaches the fixture: the abort cancels it
   # before transport, so only the tool reply and the two later replies exist.
   @tag timeout: 120_000
