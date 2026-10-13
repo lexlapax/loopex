@@ -140,25 +140,31 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   # Technical depth: the shell names the group before waiting on it; stdin is
   # closed before the command can read anything.
   def run_bounded([command | arguments], cd, environment, deadline) do
-    port =
-      Port.open({:spawn_executable, "/bin/sh"}, [
-        :binary,
-        :exit_status,
-        :stderr_to_stdout,
-        args: [
-          "-c",
-          "set -m; \"$@\" </dev/null & printf '#{@group_tag}%s\\n' \"$!\"; wait \"$!\"",
-          "provider-build",
-          command | arguments
-        ],
-        cd: cd,
-        env:
-          Enum.map(environment, fn {name, value} ->
-            {~c"#{name}", if(value, do: ~c"#{value}", else: false)}
-          end)
-      ])
+    # An expired deadline starts nothing, so nothing can outlive the failure.
+    if System.monotonic_time(:millisecond) >= deadline,
+      do: raise("provider cold build exceeded #{@build_ms} ms before it started")
 
-    collect(port, deadline, [])
+    [command | arguments] |> open_group(cd, environment) |> collect(deadline, [])
+  end
+
+  @doc false
+  def open_group([command | arguments], cd, environment) do
+    Port.open({:spawn_executable, "/bin/sh"}, [
+      :binary,
+      :exit_status,
+      :stderr_to_stdout,
+      args: [
+        "-c",
+        "set -m; \"$@\" </dev/null & printf '#{@group_tag}%s\\n' \"$!\"; wait \"$!\"",
+        "provider-build",
+        command | arguments
+      ],
+      cd: cd,
+      env:
+        Enum.map(environment, fn {name, value} ->
+          {~c"#{name}", if(value, do: ~c"#{value}", else: false)}
+        end)
+    ])
   end
 
   # Concept: the build has its own deadline, since setup_all has none.
@@ -167,7 +173,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   # group is killed and joined, so no descendant outlives the failure; the
   # build fails as unavailable evidence. A fresh extraction's build takes
   # about a minute.
-  defp collect(port, deadline, output) do
+  @doc false
+  def collect(port, deadline, output) do
     receive do
       {^port, {:data, data}} ->
         collect(port, deadline, [output | data])
@@ -182,22 +189,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   end
 
   defp expire(port, output) do
-    output = IO.iodata_to_binary(drain(port, output))
+    # Concept: the group is named by the shell itself, never guessed.
+    # Technical depth: the shell prints the group's line right after forking
+    # the command, so expiry waits for that line, bounded like the group's
+    # join. A shell that exits unnamed forked nothing; one that stays unnamed
+    # past the bound fails without claiming cleanup.
+    {group, output} = await_group(port, output, System.monotonic_time(:millisecond) + 5_000)
 
-    # The group is named by the shell's line, or, before that line is read,
-    # by the shell's one child; the shell exits by itself once it is gone.
-    group =
-      case Regex.run(~r/^#{@group_tag}([0-9]+)$/m, output) do
-        [_line, group] -> group
-        nil -> shell_child(port)
-      end
-
-    if group do
-      System.cmd("/bin/kill", ["-KILL", "--", "-" <> group], stderr_to_stdout: true)
-
-      unless await_group_gone(group, System.monotonic_time(:millisecond) + 5_000),
-        do: raise("provider cold build group #{group} survived its kill")
-    end
+    if is_binary(group) and
+         not kill_group(group, System.monotonic_time(:millisecond) + 5_000, nil),
+       do: raise("provider cold build group #{group} survived its kill")
 
     with {:os_pid, shell} <- Port.info(port, :os_pid),
          do: System.cmd("/bin/kill", ["-KILL", Integer.to_string(shell)])
@@ -208,35 +209,37 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
       ArgumentError -> :ok
     end
 
+    if group == :unnamed,
+      do: raise("provider cold build group was not named within 5000 ms:\n#{output}")
+
     raise "provider cold build exceeded #{@build_ms} ms:\n#{output}"
   end
 
-  defp drain(port, output) do
-    receive do
-      {^port, {:data, data}} -> drain(port, [output | data])
-    after
-      0 -> output
-    end
-  end
+  defp await_group(port, output, deadline) do
+    output = IO.iodata_to_binary(output)
 
-  defp shell_child(port) do
-    with {:os_pid, shell} <- Port.info(port, :os_pid),
-         {table, 0} <- System.cmd("/bin/ps", ["-axo", "pid=,ppid="]) do
-      table
-      |> String.split("\n", trim: true)
-      |> Enum.find_value(fn row ->
-        case String.split(row) do
-          [pid, parent] -> if parent == Integer.to_string(shell), do: pid
-          _other -> nil
+    case Regex.run(~r/^#{@group_tag}([0-9]+)$/m, output) do
+      [_line, group] ->
+        {group, output}
+
+      nil ->
+        receive do
+          {^port, {:data, data}} -> await_group(port, [output | data], deadline)
+          {^port, {:exit_status, _status}} -> {nil, output}
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) -> {:unnamed, output}
         end
-      end)
-    else
-      _gone -> nil
     end
   end
 
-  defp await_group_gone(group, deadline) do
+  # Concept: a group is gone only once it stays empty.
+  # Technical depth: a member forking while the group is killed can leave a
+  # child the kill missed, which a later scan shows. The kill repeats until
+  # scans for 100 ms find no live member, within the join bound.
+  defp kill_group(group, deadline, quiet_since) do
+    System.cmd("/bin/kill", ["-KILL", "--", "-" <> group], stderr_to_stdout: true)
     {table, 0} = System.cmd("/bin/ps", ["-axo", "pgid=,stat="])
+    now = System.monotonic_time(:millisecond)
 
     alive? =
       table
@@ -246,15 +249,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
       end)
 
     cond do
-      not alive? ->
+      not alive? and quiet_since != nil and now - quiet_since >= 100 ->
         true
 
-      System.monotonic_time(:millisecond) >= deadline ->
-        false
+      now >= deadline ->
+        not alive?
 
       true ->
         Process.sleep(10)
-        await_group_gone(group, deadline)
+        kill_group(group, deadline, if(alive?, do: nil, else: quiet_since || now))
     end
   end
 
