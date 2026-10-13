@@ -172,7 +172,12 @@ A milestone runs in four steps; the
    the first integrated workflow early, then add boundary and failure cases as
    implementation reaches them.
 3. **Close.** Every outcome maps to tests, retained evidence, or a
-   demonstration. The exact candidate already carries an indexed evidence-page
+   demonstration. The candidate passes a documentation correctness review of
+   every current-state page, changed or not: the root README, `DEVELOPMENT.md`,
+   `CHANGELOG.md`, the docs index, the roadmap pair and every `docs/operator/`
+   and `docs/developer/` page. Each command, flag, path, example, version and
+   status claim is confirmed against the candidate's code or corrected, and the
+   candidate carries its changelog release entry and any `VERSION` advance. The exact candidate already carries an indexed evidence-page
    scaffold. Its `Proved` progress rows mean the implementation is complete and
    name the proof obligation; scaffold fields marked `Pending` hold results or
    identities produced later by runs and review of that exact commit. The
@@ -214,8 +219,8 @@ A milestone runs in four steps; the
    their recorded procedures. Before creating a new tag, verify that
    the diff from the tested SHA is confined to those five paths and allowed
    regions by retaining and reviewing its complete patch. Then run
-   `bash scripts/check.sh --docs`, the final semantic review of the relevant
-   `docs/operator/` and `docs/developer/` pages, and the archive comparison on
+   `bash scripts/check.sh --docs`, the final semantic review of every
+   current-state page named in step 3, and the archive comparison on
    the administrative SHA. Stage that SHA into a fresh `git archive`
    extraction under the milestone guide's scoped-umask
    [archive-extraction rule](docs/developer/milestones-technical.md#technical-milestones-archive-extraction)
@@ -235,7 +240,11 @@ A milestone runs in four steps; the
    the repository and put their results, retained-output references and
    SHA-256 digests in the immutable annotated tag when it is created. Do not
    amend the evidence page or create a third commit. No suite or release check
-   runs again.
+   runs again. After the tag, re-read every current-state page for status and
+   release statements the closure or tag made untrue, and correct them in a
+   separate commit on `main` outside the closure packet; `mix loopex.status`
+   refuses a current-state page that still calls a closed milestone
+   unfinished.
 
 Historical milestones keep their plans, evidence logs, and dispositions as
 records of what was proved at the revisions they name. Current tests belong to

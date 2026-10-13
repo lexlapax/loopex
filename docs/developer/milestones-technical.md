@@ -316,7 +316,7 @@ creating the tag:
 | --- | --- | --- |
 | Confine the administrative commit | Require `git rev-list --parents -n 1 <administrative>` to return exactly `<administrative> <tested>`; compare `git diff --name-only <tested>..<administrative>` with [the five paths](#technical-milestones-confinement); compare their `git ls-tree` entries and inspect `git diff --raw --no-renames` to require ordinary blobs with unchanged modes; inspect and retain the complete zero-context patch; map every changed byte to its one allowed region; reconstruct `docs/plans/README.md` from its tested bytes plus the administrative register row and marked Current Status block; and reconstruct the root `README.md` from its tested bytes plus the administrative marked status block, requiring byte equality for both files | An extra parent, intermediate commit, missing or extra path, changed object type or mode, hunk outside a named region, changed pre-existing context-map byte, changed scaffold structure, or changed byte outside any permitted region means the tag would publish a tree outside the two-commit closure contract. `mix loopex.status` proving the values does not prove this metadata and byte confinement. The release stops and the packet is reassembled |
 | Re-prove the documentation structure | `bash scripts/check.sh --docs` on `COMMIT` | The administrative commit's own documentation changes are not green; fix the candidate and assemble a replacement administrative commit |
-| Re-prove documentation meaning | Run the milestone's final semantic documentation gate on the relevant `docs/operator/` and `docs/developer/` pages at `COMMIT` | The operator and developer accounts disagree with each other, the plan, the accepted ADRs, or the implemented behavior; fix the candidate and assemble a replacement administrative commit |
+| Re-prove documentation meaning | Run the milestone's final semantic documentation gate on every current-state page at `COMMIT`: the root README, `DEVELOPMENT.md`, `CHANGELOG.md`, the docs index, the roadmap pair and every `docs/operator/` and `docs/developer/` page | The operator and developer accounts disagree with each other, the plan, the accepted ADRs, or the implemented behavior; fix the candidate and assemble a replacement administrative commit |
 | Re-prove the archive identity | For M5 and later, stage `COMMIT` with `git archive` into a fresh empty extraction under the [canonical archive-extraction rule](#technical-milestones-archive-extraction), then run the M5-delivered producer as `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"` with `retained_manifest` outside `tree`. Retain those exact bytes. For each archive, first require its complete unexcluded `(kind, mode, path)` projection to match the independent Git-tree source projection. Then require the tested and administrative manifests to have identical ordered projections before exclusions. A NUL-aware parser rejects malformed or duplicate records, removes `docs` and its descendants plus exact root `README.md` and the M5-delivered `SOURCE_IDENTITY`, and compares every remaining complete tuple with the manifest bytes retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The command or source identity is absent, fails validation, emits a malformed or duplicate record stream, depends on the ambient umask, differs from its commit's source modes, changes a canonical mode, or the published bytes are not the closed bytes outside the confined regions. Entries under `docs/`, the supplied root README and the two `SOURCE_IDENTITY` payloads are expected to differ. The preceding content-confinement proof covers every permitted documentation hunk and the README's exact marked-block replacement. This comparison catches archive inclusion or exclusion changes that `.gitattributes` can cause without a path appearing in `git diff` |
 
 For M6, use the [accepted closure tooling](../plans/M6-technical.md#technical-plan-closure-tooling)
@@ -330,13 +330,14 @@ not extra runs of the suite or release check.
 Nothing else is re-run. There is no second suite, no second release check and
 no second provider credential: the tested tree and the administrative tree
 differ only in documentation, which is exactly the property the first step
-establishes. The semantic gate reads `docs/operator` and `docs/developer`; the
+establishes. The semantic gate reads every current-state page; the
 structural check still covers the documentation paths that `check.sh --docs`
 selects.
 
-The semantic gate starts with a complete file inventory of `docs/operator/`
-and `docs/developer/`. It identifies every page affected by the milestone and
-accounts for new, renamed and removed pages. For each relevant page, it checks
+The semantic gate starts with a complete inventory of the current-state pages:
+the root README, `DEVELOPMENT.md`, `CHANGELOG.md`, the docs index, the roadmap
+pair, `docs/operator/` and `docs/developer/`. It accounts for new, renamed and
+removed pages and reads every page, changed or not. For each page, it checks
 the administrative SHA against the implemented behavior, the plan, accepted
 ADRs and the other relevant pages. The retained checklist names every file and
 records either the comparison result or why the file is not relevant.

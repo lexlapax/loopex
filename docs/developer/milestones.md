@@ -73,8 +73,13 @@ Closure happens in this order; use the `close-milestone` skill.
 
 1. **Assemble the candidate.** A closure candidate is one commit on `main` or
    the plan-designated milestone branch at which every outcome maps to tests,
-   retained evidence or a demonstration. The documentation the milestone
-   changed is updated, and the plan's
+   retained evidence or a demonstration. Every current-state page is correct
+   at that commit, changed or not: the root README, `DEVELOPMENT.md`,
+   `CHANGELOG.md`, the docs index, the roadmap pair and every
+   `docs/operator/` and `docs/developer/` page. A documentation correctness
+   review confirms each command, flag, path, example, version and status
+   claim against the code or corrects it, and the commit carries the
+   changelog release entry and any `VERSION` advance. The plan's
    progress table says `Proved` for each outcome. The same commit moves the
    register and its two marked status blocks from `In progress` to
    `In review`, and carries the indexed evidence-page scaffold that closure
@@ -95,6 +100,13 @@ Closure happens in this order; use the `close-milestone` skill.
    placeholder the tested scaffold predeclared. If the plan designated a
    milestone branch, fast-forward `main` to that administrative SHA. If the
    fast-forward fails, do not treat closure as integrated or release from it.
+5. **Correct what closure made untrue.** After closure, and again after any
+   tag, re-read every current-state page for status and release statements
+   that the transition made false, such as a milestone still described as in
+   review or an old release named as the latest, and correct them in a
+   separate commit on `main`. `mix loopex.status` refuses a current-state page
+   that still calls a closed milestone unfinished; it catches only that
+   wording, so the reading is still required.
 
 `Proved` maps completed implementation to a named proof obligation; it does
 not claim that a closure run or review performed after the commit already has

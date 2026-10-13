@@ -19,8 +19,13 @@ technical guidance. The process is the
    the candidate exists remains `Pending` in a predeclared scaffold field until
    the administrative commit records the result of running it against that
    candidate.
-2. Update the documentation the milestone changed: `CHANGELOG.md`, `README.md`,
-   the affected `docs/` pages and indexes. Create
+2. Make every current-state page correct at the candidate, changed or not:
+   the root `README.md`, `DEVELOPMENT.md`, `CHANGELOG.md`, `docs/README.md`,
+   the roadmap pair and every `docs/operator/` and `docs/developer/` page. Read
+   each page and confirm every command, flag, path, example, version and status
+   claim against the candidate's code, or correct it; record the page inventory
+   and result in the review report. Add the changelog release entry and any
+   `VERSION` advance the planned release needs. Create
    `docs/evidence/<NAME>-closure-runs.md` as an unfilled scaffold with its final
    headings and fields, mark its results pending, and index it in
    `docs/evidence/README.md`. Both files belong to the tested candidate.
@@ -48,7 +53,8 @@ technical guidance. The process is the
    runs are of the candidate, and the candidate cannot carry its own later
    results.
 4. Ask an independent reviewer to read the candidate for outcome compliance,
-   correctness, test honesty, public impact, security, and rollback. Retain the
+   correctness, test honesty, public impact, security, rollback, and the
+   correctness of every current-state page from step 2. Retain the
    complete review report outside the repository under a retained-output
    reference with its SHA-256 digest.
 5. Present the packet to the maintainer: outcomes and their proof, check
@@ -77,8 +83,8 @@ two-commit closure and tag procedure applies from M5 onward; historical
 closures and tags keep their recorded procedure. If the maintainer later
 authorizes a tag, follow the milestone guide's release sequence. Re-prove the
 five-path and allowed-region confinement, then run
-the documentation check, the final semantic operator/developer
-documentation gate, and the archive comparison on the administrative SHA.
+the documentation check, the final semantic documentation gate over every
+current-state page, and the archive comparison on the administrative SHA.
 For that comparison, stage a fresh `git archive` extraction under the same
 [canonical archive-extraction rule](../../../docs/developer/milestones-technical.md#technical-milestones-archive-extraction),
 including the hostile caller-umask proof, then run the
@@ -95,3 +101,10 @@ before creating the tag. Retain those outputs outside the repository and put
 their results, retained-output references, and SHA-256 digests in the
 annotation at creation. Do not amend the evidence page or create a third
 commit.
+
+After closure, and again after any tag, re-read every current-state page for
+status and release statements the transition made untrue, such as a milestone
+still called in review or an old release named as the latest, and correct
+them in a separate commit on `main`. `mix loopex.status` refuses a
+current-state page that still calls a closed milestone unfinished; it catches
+only that wording, so the reading is still required.
