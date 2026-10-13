@@ -91,8 +91,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
       # Technical depth: the result reaches Core only after the guard proves
       # the group gone. ERTS's default TERM handler runs a graceful init:stop,
       # measured at up to 1.4 s, inside every call; this one-use worker has
-      # nothing to drain, so TERM keeps the kernel's default disposition.
-      :ok = :os.set_signal(:sigterm, :default)
+      # nothing to drain, so a handler ahead of it halts the VM. The signal
+      # stays handled in the VM rather than reset to the kernel default: XNU
+      # ends a stopped process on a default TERM while Linux holds it pending,
+      # and a VM-handled TERM waits for a stopped worker to continue on both.
+      :ok = :gen_event.add_handler(:erl_signal_server, __MODULE__.TermHalt, [])
       sink = spawn_link(fn -> io_sink() end)
       true = Process.group_leader(self(), sink)
       :ok = :logger.set_primary_config(:level, :none)
@@ -327,4 +330,22 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
         io_sink()
     end
   end
+end
+
+defmodule Loopex.LLM.ReqLLM.ProviderWorker.TermHalt do
+  @moduledoc false
+  # Concept: a provider worker's TERM halts its VM without a graceful stop.
+  # Technical depth: added ahead of ERTS's own signal handler, which keeps
+  # every other signal's default handling.
+  @behaviour :gen_event
+
+  @impl true
+  def init([]), do: {:ok, nil}
+
+  @impl true
+  def handle_event(:sigterm, _state), do: :erlang.halt(143, flush: false)
+  def handle_event(_signal, state), do: {:ok, state}
+
+  @impl true
+  def handle_call(_request, state), do: {:ok, :ok, state}
 end
