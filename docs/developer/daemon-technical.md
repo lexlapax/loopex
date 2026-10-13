@@ -6,7 +6,7 @@
 Concept: [The daemon](daemon.md#concept).
 
 This companion names the processes, the orders they follow, the fixed clocks,
-where each bound lives and which tests hold each claim. The operator-facing
+and where each bound lives. The operator-facing
 grammar, limits table, stop-bound formula and exit statuses are stated once in
 the [operator page](../operator/daemon.md#technical-depth) and are not repeated
 here.
@@ -199,31 +199,8 @@ directory is refused as `session_catalog_retired`, never imported. A row that
 cannot be written leaves the session as it is and sends `daemon.notice` with
 `index_write_failed` to the client that caused it.
 
-<a id="technical-daemon-evidence"></a>
-## Evidence
-
-| Claim | Tests |
-| --- | --- |
-| Startup order, checkpoints, reverse cleanup | `service_lifecycle_test.exs`, `startup_arbiter_test.exs`, `readiness_test.exs` |
-| Relay tickets, barriers, retirement | `admission_relay_test.exs`, `owner_test.exs`, `collaboration_test.exs` |
-| Slots, retirement barrier, eviction, reclamation, succession | `connection_registry_test.exs`, `succession_capacity_test.exs`, `wire_records_test.exs`, `output_buffer_test.exs` |
-| Leases and takeover | `lease_owner_test.exs`, `lease_lifecycle_test.exs` |
-| Non-blocking components: per-step clocks, lease-owner replacement, the monitored holder close, held requests, the stop rule | `owner_test.exs`, `lease_owner_test.exs`, `socket_transport_test.exs` |
-| No blocking call between components through `:gen.call/4` while serving or stopping (T14); an orderly stop exits 0 with a lease owner's relay request unanswered past a step between the cut and the freeze (T21's owner and Service halves) | `service_lifecycle_test.exs` |
-| Socket, peer credential, framing and methods | `listener_test.exs`, `listener_socket_test.exs`, `peer_credential_test.exs`, `connection_protocol_test.exs`, `request_test.exs`, `request_ledger_test.exs`, `socket_transport_test.exs` |
-| Index, offline writers and retired-catalog refusal | `session_index*_test.exs`; `apps/loopex_cli/test/cli_test.exs` |
-| Credential custody | `credential_custody_test.exs` here and in the app server and CLI |
-| Progress and workflow | `external_socket_workflow_test.exs` |
-| Cross-process CLI workflow | `apps/loopex_cli/test/multi_client_workflow_test.exs` |
-
-Release-only lanes, excluded by the daemon's `test_helper.exs`:
-
-| Tag | Case | Run by |
-| --- | --- | --- |
-| `real_provider` | `external_socket_workflow_real_test.exs` | the release manifest, its own process |
-| `node_client` | `external_socket_workflow_test.exs` Node cases | `--only node_client` |
-| `long_bound` | `maximum_population_test.exs` | `--only long_bound` |
-| `cross_uid` | `cross_uid_test.exs`, two cases | Linux only, exactly two executed |
+The tests and release lanes that prove each claim on this page are listed in the
+[verification guide](../process/verification-technical.md#technical-verification-evidence-daemon).
 
 ## Related
 

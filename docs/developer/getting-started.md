@@ -3,22 +3,21 @@
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Commands and code for both tracks](getting-started-technical.md#technical-depth).
+Technical depth: [Commands and code for building on Loopex](getting-started-technical.md#technical-depth).
 
-This guide is the first stop for a developer. It has two tracks:
+This guide is the first stop for a developer building on Loopex: running it
+inside your own Elixir application, driving its sessions from a program in any
+language over the session protocol, or replacing one of its boundaries.
 
-- **Building on Loopex** — running Loopex inside your own Elixir application, or
-  driving its sessions from a program in any language over the session protocol.
-- **Contributing to Loopex** — changing this repository: its toolchain, its
-  checks, where each application lives, and how work is planned and closed.
-
-Both tracks start from a source checkout, such as the `v0.4.0` source release.
+Everything starts from a source checkout, such as the `v0.4.0` source release.
 Nothing is published as a binary or package, and no surface is stable yet:
 every API, option, record, and wire shape named here may change between
 revisions, so pin an exact revision and read
 [Compatibility surfaces](compatibility-surfaces.md#concept) before depending on
 one. The guide routes to the pages that own each topic rather than repeating
-them.
+them. Changing Loopex itself — its toolchain, checks, milestones and commits —
+is covered by [DEVELOPMENT.md](../../DEVELOPMENT.md) and the
+[development process](../process/README.md).
 
 <a id="concept-getting-started-model"></a>
 ## What You Are Working With
@@ -146,61 +145,16 @@ name. The ports, their callbacks, and the suites are in
 
 Technical depth: [Adding an adapter](getting-started-technical.md#technical-getting-started-adapter).
 
-<a id="concept-getting-started-contributing"></a>
-## Contributing: Toolchain and Checks
-
-Development needs Git, Bash, ordinary POSIX tools, Python 3, and the accepted
-Elixir and Erlang/OTP toolchain. Python runs a demonstration fixture test in
-the fast check and the attended release runner. Two supported toolchain pairs
-are pinned, and the older one is the floor. While editing, run the focused tests for what
-you touched. Before a change is integrated, the fast check runs once: formatting,
-warning-free compilation, dependency direction, documentation structure, and the
-credential-free test suite. A prose-only change has a documentation mode. The
-full release check needs a real provider credential and runs once before a
-milestone closes. Selected unattended release lanes also run before merges
-that change provider or credential handling, wire protocol, or daemon behavior.
-
-Checks are honest by rule: a required check is never skipped, filtered, softened,
-or retried into passing, and a failure that disappears on retry is a flake to
-fix. [DEVELOPMENT.md](../../DEVELOPMENT.md) owns the commands and prerequisites,
-and the [verification guide](../process/verification.md#concept) owns which checks a
-change selects and why.
-
-Technical depth: [Everyday commands](getting-started-technical.md#technical-getting-started-checks).
-
 <a id="concept-getting-started-layout"></a>
-## Contributing: Where Things Live
+## Where Things Live
 
-The repository is one Elixir umbrella of eleven applications under `apps/`, an
-independent client under `clients/`, repository scripts under `scripts/`, and
-documentation under `docs/`. Dependencies point inward to the kernel,
-`apps/loopex`, and a check refuses any that do not. Tests live beside each
-application, and a boundary's shared conformance suite is reused rather than
-copied. Public modules and functions document a `Concept` section before a
-`Technical depth` section, and project documents come in the same two depths,
-as the [development charter](../process/development-charter.md#concept) explains.
+The repository is one Elixir umbrella of eleven applications under `apps/` and
+an independent client under `clients/`. Dependencies point inward to the
+kernel, `apps/loopex`; an edge or host you add depends on it the same way.
+Public modules and functions document a `Concept` section before a
+`Technical depth` section, so the generated documentation reads purpose first.
 
 Technical depth: [The repository map](getting-started-technical.md#technical-getting-started-layout).
-
-<a id="concept-getting-started-milestones"></a>
-## Contributing: How Work Is Planned
-
-Work is maintainer-directed. Bounded work is a milestone: a pair of plan
-documents naming its purpose, outcomes, and how each outcome will be proved,
-accepted by the maintainer before implementation. Work normally lands on
-`main` in small reviewed changes. A plan-designated milestone branch may carry
-the tested candidate through closure, then rejoins `main` without changing
-that candidate's source. A milestone closes only after every outcome maps to
-tests, retained evidence, or a demonstration. An independent reviewer reads
-the exact candidate.
-Decisions about ownership, trust, public contracts, persistent formats,
-dependencies, or migration are architecture decisions, proposed and accepted
-before the work that depends on them. [AGENTS.md](../../AGENTS.md) is the
-canonical development contract, [the plans register](../plans/README.md) says
-what is authorized now, and the [milestone guide](../process/milestones.md#concept) has the
-procedure.
-
-Technical depth: [Plans, decisions, and commits](getting-started-technical.md#technical-getting-started-milestones).
 
 <a id="concept-getting-started-diagnosing"></a>
 ## Diagnosing a Running Runtime

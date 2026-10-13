@@ -7,7 +7,7 @@ Concept: [Observability](observability.md#concept).
 
 This companion carries the exact emission inventory, the trace session's
 configuration domain and ceilings, the redaction rules by name, the module that
-enforces each, and the tests that hold them.
+enforces each.
 
 <a id="technical-observability-inventory"></a>
 ## The Emission Inventory
@@ -126,9 +126,8 @@ and OTP installs them only for loaded modules, so the session first calls
 included. That loads installed code from the code path, as the Store and
 executor boundaries already do when they probe an adapter; it never creates a
 code generation, which stays the VM generation manager's alone. A name that no
-installed module answers to traces nothing.
-`apps/loopex/test/trace_session_test.exs` compiles a module to a code-path
-directory without loading it and proves a session naming it traces its calls.
+installed module answers to traces nothing. A module installed on the code
+path but not yet loaded is therefore traced once a session names it.
 
 **Exclusion.** `Loopex.Trace.exclude_self/2` takes a host-bound capability
 (`Loopex.Trace.Capability.Handle`, bound once per runtime) and the exact
@@ -171,18 +170,8 @@ A placeholder carries the byte size and the lowercase SHA-256 digest of the
 deterministic external-term encoding of what it replaced. The rendered form is then truncated to `entry_bytes` with a `...`
 marker, so an entry is bounded however deep or wide the term was.
 
-<a id="technical-observability-evidence"></a>
-## Evidence
-
-| Claim | Where it is proved |
-| --- | --- |
-| Five locked trace-session witnesses, redaction and limit negatives | `apps/loopex/test/trace_session_test.exs` |
-| Exclusion: 65 functions for one sender enter and leave both `Control` sets; the private session handle never reaches crash output | `apps/loopex/test/trace_session_test.exs` |
-| A session driven over the daemon socket emits the embedded caller's span names and metadata key sets, and neither the daemon nor the CLI emits telemetry | `apps/loopex_daemon/test/telemetry_parity_test.exs` |
-| The credential sender is excluded before credential context, and a refused exclusion refuses the call | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` |
-| Port and cut emissions, and the absence of content | `apps/loopex/test/telemetry_boundary_test.exs` |
-| The edge handler carries spans into the diagnostics plane and refuses anything richer | `apps/loopex_telemetry/test/telemetry_handler_test.exs` |
-| A stalled sink neither blocks an emitting boundary nor exceeds the ceiling; ten thousand spans with no handler stay inside a bounded cost | `apps/loopex/test/telemetry_boundary_test.exs` |
+The tests that prove each claim on this page are listed in the
+[verification guide](../process/verification-technical.md#technical-verification-evidence-observability).
 
 <a id="technical-observability-adding"></a>
 ## Changing the Inventory

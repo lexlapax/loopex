@@ -17,7 +17,7 @@ to use the command, start with [getting started](getting-started.md) instead.
 
 What you can do here:
 
-- run the complete loop from the source tree, with or without a real provider;
+- run the complete loop through the `loopex` command or your own host;
 - start, stop and resume a runtime and its sessions in a fixed order;
 - recover after a process or machine crash and reconcile an in-flight effect
   from the executor's receipt ledger;
@@ -96,33 +96,16 @@ and an answer grants no tool authority.
 <a id="operator-runtime-first-run"></a>
 ## Run the Working Loop
 
-From the repository root, the credential-free demonstration is:
+The quickest way to exercise the runtime is the `loopex` command, a host over
+the same kernel. From a built checkout,
+[ask once without a state root](getting-started.md#operator-start-ask) runs the
+ephemeral profile against a local model, and
+[run a first durable session](getting-started.md#operator-start-first-run)
+drives the durable profile from a prompt to the end of its run, with host
+policy deciding each tool call. Stopping, resuming and recovering that
+session are described below.
 
-```bash
-MIX_ENV=test mix test apps/loopex_reference_client/test/reference_client_test.exs --seed 0 --trace
-```
-
-It starts an isolated runtime and durable local Store in temporary directories,
-submits a prompt through the reference client, receives a deterministic model
-tool call, runs the controlled `write` tool beneath its workspace lease, consumes
-the durable event sequence through `run.finished`, checks the resulting file,
-and removes its temporary state. Success is every case in the file passing with
-none excluded.
-
-To run the same path through the real ReqLLM adapter, export the provider key
-as `LOOPEX_PROVIDER_API_KEY` from your secret store, then:
-
-```bash
-MIX_ENV=test mix test apps/loopex_reference_client/test/real_model_session_test.exs --only real_provider --seed 0 --trace
-```
-
-It makes two real model calls around one controlled tool effect and checks that
-both calls send the canonical request bytes the session already committed. Keep
-the credential out of the command line, the repository, the state root, logs and
-fixtures, and unset it afterwards if nothing else manages its lifetime.
-
-These are source-tree demonstrations, not a command contract. To embed Loopex in
-your own host, follow the
+To run the loop inside your own host instead, follow the
 [developer runtime and embedding guide](../developer/runtime-and-embedding.md#concept).
 
 <a id="operator-runtime-prerequisites"></a>

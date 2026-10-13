@@ -7,7 +7,8 @@ Concept: [Loopex architecture](architecture.md#concept).
 
 This companion carries the invariants a change must not break, the module that
 enforces each, the record shapes by name, where each concern lives, how a new
-adapter joins a port, and the repository commands that hold the shape.
+adapter joins a port. The repository commands that hold the shape are listed
+in the [verification guide](../process/verification-technical.md#technical-verification-entrypoints).
 
 <a id="technical-arch-applications"></a>
 ## Exact Inventory and the Checks That Hold It
@@ -678,31 +679,3 @@ durable companion's isolation claim.
 | Edge implementations | `apps/loopex_store_local/lib/`, `apps/loopex_llm_reqllm/lib/`, `apps/loopex_executor_local/lib/`, `apps/loopex_telemetry/lib/` |
 | Reference stack and surfaces | `apps/loopex_composition/lib/`, `apps/loopex_cli/lib/`, `apps/loopex_reference_client/lib/`, `apps/loopex_app_server/lib/`, `apps/loopex_daemon/lib/` |
 | Independent wire consumer | `clients/node/` |
-| Repository checks | `apps/loopex/lib/mix/tasks/`, `scripts/` |
-
-<a id="technical-arch-checks"></a>
-## Repository Checks
-
-Every check runs locally from a clean checkout with the toolchain in
-[DEVELOPMENT.md](../../DEVELOPMENT.md); hosted continuous integration calls the
-same commands and never redefines or waives one.
-
-| Command | What it holds |
-| --- | --- |
-| `mix test` in one application | That application's credential-free suite; the test helpers exclude `real_provider`, `long_bound`, and the other release-only tags. |
-| `mix loopex.deps_budget` | The eleven-application inventory, roles, the admitted external dependencies, and inward direction. |
-| `mix loopex.core_only` | Core in a separate virtual machine, no adapter resolvable, no per-runtime state in application environment. |
-| `mix loopex.docs_check` | Compiled documentation read through `Code.fetch_docs/1` orders the depth sections on covered public code. |
-| `mix loopex.status` | Governance rows, index chains, link grammar, paired documents, and bound artifacts at every reachable revision. |
-| `mix loopex.format_scope` | The effective formatter configuration actually reaches application sources. |
-| `mix loopex.matrix` | The running toolchain is one of the two validated `(Elixir, OTP)` pairs in `.tool-versions`. |
-| `mix loopex.version_train` | One version across the umbrella. |
-| `mix loopex.hook_registration` | Each named client hook is registered under the event and matcher that makes it run. |
-| `mix loopex.agent_bootstrap` | Development-client adapter structure routes to the canonical contract and skills. |
-
-`mix loopex.docs_check` proves ordering and presence only; whether a section
-explains anything stays a review obligation.
-
-`scripts/check.sh` and `scripts/check-release.sh` compose these entrypoints into
-the two checks the repository runs; [DEVELOPMENT.md](../../DEVELOPMENT.md)
-describes what each one covers.

@@ -81,8 +81,7 @@ Public compatibility in this repository is behavioural and requires schemas,
 vectors, independent consumers, migrations, and upgrade evidence. The
 current source pins each complete payload manifest and its independent
 consumer. Before 1.0, clients and servers move together to the current contract;
-old-only and wrong-server offers refuse, with no compatibility fallback. Earlier
-generation identities remain historical evidence at their tested revisions.
+old-only and wrong-server offers refuse, with no compatibility fallback.
 Serving changes only with the complete coordinated generation. See
 [Compatibility surfaces](compatibility-surfaces.md#concept).
 

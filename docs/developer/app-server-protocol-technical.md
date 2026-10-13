@@ -36,13 +36,9 @@ refuse. JSON file serialization is not the digest recipe.
 `current-contract-manifests.v1.json` pins both complete canonical preimages and
 literal digests for the independent Node consumer.
 
-Historical generation 1 was named `loopex.session.v1-experimental` before its
-rename. That rename changed its metadata digest while the original methods,
-families, codes, limits, manifest and vectors stayed the same, as recorded by
-the public-schema conformance test at that revision. Historical /1 and /2
-identities remain evidence at their original tested revisions. Before 1.0 the
-product carries no schemas or vectors for them, and keeps no compatibility
-decoder or old-client promise.
+Only these two generations are served. The product carries no schema or
+vectors for any other generation literal, keeps no compatibility decoder, and
+makes no old-client promise; any other offer is refused as above.
 
 Every request is one object carrying `method` and a `request_id`. The first must
 be `initialize`:
@@ -406,24 +402,8 @@ over a live holder. `daemon.stopping` names `operator_stop`, `store_lost`,
 leases, connections, and output bounded is in
 [the daemon pair](daemon-technical.md#technical-depth).
 
-<a id="technical-protocol-evidence"></a>
-## Evidence
-
-| Claim | Where it is proved |
-| --- | --- |
-| Complete canonical preimages, literal digests and positive/negative vectors | `apps/loopex_protocol/test/current_contract_manifest_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `clients/node/current-contract-manifest-vectors.mjs`, `clients/node/contract-negotiation-tests.mjs` |
-| Method and record shapes against the foreground /3 schema | `apps/loopex_protocol/test/session_schema_test.exs` |
-| Method and record shapes against the daemon /4 schema | `apps/loopex_protocol/test/session_v2_schema_test.exs` |
-| Framing and decoding refusals | `apps/loopex_protocol/test/frame_test.exs`, `apps/loopex_protocol/test/wire_test.exs` |
-| Facade and wire agree on identities and meaning | `apps/loopex_app_server/test/session_mapping_test.exs` |
-| Mapping negatives and real effects | `apps/loopex_app_server/test/foundation_mapping_test.exs` |
-| Delivery bounds and slow readers | `apps/loopex_app_server/test/delivery_bounds_test.exs` |
-| An independent client drives a whole session, and the skill, interaction, and artifact chain, over a real process | `apps/loopex_app_server/test/external_workflow_test.exs` |
-| An independent client observes and takes over a session over the daemon's socket | `apps/loopex_daemon/test/external_socket_workflow_test.exs` |
-
-The vectors are literal byte strings with literal verdicts, not values generated
-from the implementation they check. A generated vector proves only that this
-encoder and this decoder agree with each other.
+The tests that prove each claim on this page are listed in the
+[verification guide](../process/verification-technical.md#technical-verification-evidence-protocol).
 
 ## Related
 

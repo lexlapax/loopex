@@ -3,12 +3,12 @@
 <a id="concept"></a>
 ## Concept
 
-The [pre-1.0 maintainer override](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
-supersedes this inventory's older-reader, backward-read, migration and
-cross-version rollback promises. Current boundaries retain only their current
-contracts. Historical statements below describe their named revisions;
-current-format restart/replay, authority, uncertainty and backup/restore remain
-required.
+Before 1.0, each boundary keeps only its current contract, under the
+[pre-1.0 current-contract decision](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+A current reader restarts and replays current-format data; there is no
+older-reader support, in-place migration, or cross-version rollback. Authority,
+effect uncertainty and offline backup and restore of a current-format root
+remain guaranteed.
 
 Every surface Loopex exposes is unfrozen. The ephemeral embedding and `ask`
 command contracts and the exact wire-protocol generations are experimental; the
@@ -57,13 +57,15 @@ partial match, no nearest neighbour, and no version comparison that could round
 the word `experimental` up to a released contract. A generation has schemas,
 vectors, and an independent consumer; it has no migration path and no freeze.
 
-**Durable data grows by new record kinds, and older readers refuse.** The
-ephemeral profile writes no durable session data. A reader replays the current
-record formats, and a session that contains a record kind an older reader does not know is refused by that reader
-at load, before any model or executor work. There is no in-place migration and
-none is owed. Rollback means returning to a retained old binary with a complete
-backup of the state root it wrote; removing a feature's files or its server
-never downgrades a root that already holds its records.
+**Durable data is read in its current format only.** The ephemeral profile
+writes no durable session data. A durable reader replays the current record
+formats, and a session that contains a record kind or shape outside them is
+refused at load, before any model or executor work. There is no in-place
+migration and no cross-version rollback. The recovery boundary is a complete,
+idle, current-format backup restored offline into a fresh root, as
+[runtime operations](../operator/runtime.md#operator-runtime-backup-restore)
+describes. Removing a feature's files or its server never downgrades a root
+that already holds its records.
 
 For an embedder this means: pin an exact revision, expect any surface below to
 change without notice, and read the changelog for the revision you move to
@@ -106,7 +108,7 @@ surface it belongs to under
 | Artifact transfer capability | the optional transfer callbacks and the facade transfer family | 6 and 5 | Experimental |
 | Tool definition contract | `LoopexProtocol.ToolDefinition`, `LoopexProtocol.Canonical` | 2 and 3 | Unstable |
 | Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable |
-| Durable interaction records | `interaction_requested_v1`, `policy_interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental; refused by older readers |
+| Durable interaction records | `interaction_requested_v1`, `policy_interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental |
 | Public event shapes | `Loopex.attach/3`, `Loopex.next_event/1` | 2, public protocol | Unstable |
 | App-server wire protocol | generation `loopex.experimental/3`: methods, records, error codes, identities, limits | 2, public protocol semantics | Experimental; exact generation agreement only |
 | Daemon wire protocol | generation `loopex.experimental/4` over the daemon's Unix-domain socket | 2, public protocol semantics | Experimental; exact generation agreement only |
@@ -345,17 +347,16 @@ described in
 **App-server and daemon wire protocols.** The foreground serves only
 `loopex.experimental/3` and the daemon only `loopex.experimental/4`; the daemon
 generation adds session listing, daemon status, the controller lease and a
-`writer_epoch` on every mutation of an existing session. Earlier generations
-are no longer served. The exact contract is
+`writer_epoch` on every mutation of an existing session. No other generation
+is served. The exact contract is
 [the protocol technical reference](app-server-protocol-technical.md#technical-depth).
 Initialization reports the selected generation, the exact schema digest, the
 methods, and the limits, and because the digest covers the whole schema, any
 change to a method, record, or limit changes what a client sees at
 initialization. There is no partial compatibility within a generation and no
-promise across generations. Generation 1 was once named
-`loopex.session.v1-experimental`; that name is no longer served, and a client
-offering it is refused with `unsupported_generation`. Strictness is part of the
-surface: a lenient client that relied on repair was never conformant.
+promise across generations: a client offering only other generation literals
+is refused with `unsupported_generation`. Strictness is part of the surface: a
+lenient client that relies on repair is not conformant.
 
 **Durable interactions.** The three record kinds, the `interaction_answer`
 command, and the `interaction.requested`, `interaction.resolved`,
@@ -390,28 +391,30 @@ neither plane is durable truth or authority, and no session command, wire
 request, model output, or project resource can start, change, or stop either.
 Neither changes a durable format, and removing either needs no migration.
 
-### Reader Boundaries and Rollback
+### Reader Boundaries and Recovery
 
-| Data in a state root | Current reader | Older reader |
-| --- | --- | --- |
-| A root written before conversation, tool-generation, steer, follow-up, and cancellation records existed (the M1 era) | Not readable; start on a fresh state root | — |
-| `model_attempt_settled_v1` and `model_attempt_settled_v2` settlements | Refused before activation; only `model_attempt_settled_v3` is read, so start on a fresh state root | — |
-| `resource_command_v1`, `model_request_committed_resources_v2` | Replayed; even a refused resource command creates this boundary | A reader without resource records refuses the session at load |
-| `interaction_requested_v1`, `policy_interaction_answer_admitted_v1`, `interaction_resolved_v1` | Replayed | A reader without interaction records refuses the session before any effect |
-| A root whose sessions exist only in the retired offline `sessions/` directory | Refused as `session_catalog_retired` by the daemon and by offline listing, recording and resume (ADR 0070); start on a fresh state root | — |
+| Data in a state root | Current reader |
+| --- | --- |
+| A root written before conversation, tool-generation, steer, follow-up, and cancellation records existed | Not readable; start on a fresh state root |
+| `model_attempt_settled_v1` and `model_attempt_settled_v2` settlements | Refused before activation; only `model_attempt_settled_v3` is read, so start on a fresh state root |
+| `resource_command_v1`, `model_request_committed_resources_v2` | Replayed; even a refused resource command creates this boundary |
+| `interaction_requested_v1`, `policy_interaction_answer_admitted_v1`, `interaction_resolved_v1` | Replayed |
+| A root whose sessions exist only in the retired offline `sessions/` directory | Refused as `session_catalog_retired` by the daemon and by offline listing, recording and resume (ADR 0070); start on a fresh state root |
 
 Ephemeral sessions have no row in this table: they leave no durable session
-root to migrate or roll back.
+root to recover.
 
-Rollback therefore requires stopping owners and preserving a complete backup of
-the root. Ownership acquisition may still write fenced administration before
-replay refuses, so an older reader is not promised zero writes; readiness and
-recovered work require successful replay through the committed head. Removing
-skill files, the app server, or the daemon does not downgrade a root that holds
-their records. A local executor ledger that a reader refuses is preserved, and the
+A reader that refuses a root may still have written fenced administration
+during ownership acquisition before replay refused, so a refusal is not a
+promise of zero writes; readiness and recovered work require successful replay
+through the committed head. Removing skill files, the app server, or the
+daemon does not downgrade a root that holds their records. A local executor
+ledger that a reader refuses is preserved, and the
 [operator recovery procedure](../operator/tools-and-policy.md#operator-tools-reach)
 still requires positive cessation of every old effect authority, or the
-prescribed host reboot, before a fresh root is used.
+prescribed host reboot, before a fresh root is used. Recovering a current-format
+root from loss is the offline
+[backup and restore procedure](../operator/runtime.md#operator-runtime-backup-restore).
 
 ### What an Embedder Should Do About It
 

@@ -264,9 +264,7 @@ only an absent process makes it reclaimable. The refusals and their text are in
 
 Before 1.0, Loopex maintains only the current contract. Older-root migration,
 older-reader compatibility and cross-version rollback are not supported recovery
-procedures. Historical guarantees remain recorded in the
-[milestone records](../plans/README.md); they do not authorize an older binary
-to open current state.
+procedures, and an older build is not a way to open current state.
 
 A complete latest idle backup may enter a fresh root only through the
 [offline physical restore procedure](runtime.md#operator-runtime-backup-restore).

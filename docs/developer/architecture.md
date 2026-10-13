@@ -356,8 +356,8 @@ Technical depth: [The policy, grant, and lease path](architecture-technical.md#t
 
 ## Where to Read Next
 
-- [Getting started](getting-started.md#concept) — building on Loopex and
-  contributing to it, with the commands to run first.
+- [Getting started](getting-started.md#concept) — building on Loopex, with
+  the commands and code to run first.
 - [Runtime and embedding](runtime-and-embedding.md#concept) — composing a
   runtime, the embedded API, interactions, transfers, and recovery.
 - [Agent loop and tools](agent-loop-and-tools.md#concept) — the turn machine,

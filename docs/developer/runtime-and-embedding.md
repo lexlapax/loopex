@@ -917,7 +917,6 @@ question. The contract is
 [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept),
 and its native public correlation amendment is
 [ADR 0052](../adr/0052-policy-interaction-public-events-technical.md#technical-depth).
-The witnesses are in `apps/loopex/test/interaction_lifecycle_test.exs`.
 
 Model questions have producer `model_tool` and a separate lifecycle. Enabling
 `loopex.ask` lets the model offer a bounded text or choice question only after
@@ -1028,9 +1027,6 @@ with an adapter that lacks any of the four callbacks `reserve_transfer/3`,
 opening of [ADR 0066](../adr/0066-owned-artifact-transfer-opening.md#concept);
 the wire projection is in
 [the protocol reference](app-server-protocol-technical.md#technical-protocol-artifacts).
-The witnesses are in `apps/loopex/test/artifact_transfer_contract_test.exs`,
-`apps/loopex/test/artifact_transfer_custody_test.exs` and the
-`artifact_*transfer*_test.exs` files in `apps/loopex_store_local/test/`.
 
 <a id="technical-embedding-recovery"></a>
 ### Recovery

@@ -50,6 +50,20 @@ The checkout must preserve the tracked relative `.claude/skills` symlink. On
 Windows, WSL is the straightforward path; Git Bash also requires Windows
 Developer Mode or equivalent symlink permission and Git symlink support.
 
+## While Editing
+
+Run the focused tests for what you touched, from the repository root:
+
+```bash
+(cd apps/loopex && mix test test/bounds_test.exs)   # one test file
+(cd apps/loopex_daemon && mix test)                 # one application's suite
+mix format
+```
+
+Each application's test helper excludes the release-only tags —
+`real_provider`, `long_bound`, `node_client`, and `cross_uid` where they occur —
+so `mix test` needs no credential. The release check runs those cases.
+
 ## The Two Checks
 
 Once per integration candidate, from the repository root (hosted CI runs the
@@ -118,7 +132,10 @@ bash scripts/attended-release.sh --output LOG \
 ```
 
 Run each once for the tested SHA. `DIR` and `LOG` are new retained-output paths
-outside the repository; `floor-lane.sh` needs `origin/main` fetched. The
+outside the repository; `floor-lane.sh` needs `origin/main` fetched into the
+source checkout. The runner pins that remote-tracking ref and carries it into
+its disposable clone, so the commit-message check uses the same review base
+even when the source checkout has no local `main` branch. The
 attended runner forwards the M7 matrix options unchanged to the release check
 and redacts both providers' values from its transcript.
 

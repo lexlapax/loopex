@@ -5,7 +5,7 @@
 
 Concept: [Getting started](getting-started.md#concept).
 
-This companion carries the commands and code for both tracks. Every command runs
+This companion carries the commands and code for building on Loopex. Every command runs
 from the repository root unless it says otherwise. Durable examples use a
 temporary state root; the ephemeral example uses none. Never point development
 or test commands at a real `~/.loopex`.
@@ -505,62 +505,15 @@ The callbacks, the conformance suite for each port, and the dependency rules
 per role are in
 [the architecture technical depth](architecture-technical.md#technical-arch-ports).
 
-<a id="technical-getting-started-checks"></a>
-## Everyday Commands
-
-Concept: [Contributing: toolchain and checks](getting-started.md#concept-getting-started-contributing).
-
-| Purpose | Command |
-| --- | --- |
-| One test file while editing | `(cd apps/loopex && mix test test/bounds_test.exs)` |
-| One application's credential-free suite | `(cd apps/loopex_daemon && mix test)` |
-| Formatting | `mix format` |
-| Paired documents, indexes, links, and the status register | `mix loopex.status` |
-| Concept-before-Technical-depth in compiled documentation | `mix loopex.docs_check` |
-| Dependency direction and budget | `mix loopex.deps_budget` |
-| The fast check, once per integration candidate | `bash scripts/check.sh` |
-| The fast check for a prose-only change | `bash scripts/check.sh --docs` |
-| The mode CI picks from the diff | `bash scripts/check.sh --select` |
-| The floor-pair lane for the exact committed closure candidate | `bash scripts/floor-lane.sh SHA --output-dir DIR --long-bound` |
-| The attended release check for the exact committed closure candidate | `bash scripts/attended-release.sh --output LOG --attempts-index FILE --writer ID --host ID --markers DIR --m7-config FILE --operator NAME`, with the history-safe provider credentials, pinned Node, running Ollama and `LOOPEX_RELEASE_OLLAMA_MODEL` described in [DEVELOPMENT.md](../../DEVELOPMENT.md) and the [validation runbook](../evidence/M7-validation-runbook.md) |
-
-A local pre-merge fast check counts only from a clean candidate. Retain its
-complete output and exact HEAD SHA outside the repository; otherwise use the
-hosted CI result for that candidate. The [milestone guide](../process/milestones.md#concept-milestones-close)
-owns branch-candidate rejoin and the separate closure matrix.
-
-Before `floor-lane.sh`, fetch `origin/main` into the source checkout if it is
-absent. The runner pins that remote-tracking ref and carries it into its
-disposable clone so the commit-message check uses the same review base even
-when the source checkout has no local `main` branch.
-
-For the attended runner, load `LOOPEX_PROVIDER_API_KEY` using the
-[history-safe input pattern](../../DEVELOPMENT.md) before running it;
-do not put its value in a shell command line. The direct
-`bash scripts/check-release.sh` remains the underlying release check for
-other workflows; closure does not run it again. The attended runner forwards
-the matrix options to it.
-
-Each application's test helper excludes the release-only tags —
-`real_provider`, `long_bound`, `node_client`, and `cross_uid` where they occur —
-so `mix test` needs no credential. The fast check runs every application's suite
-in its own VM and prints a line every thirty seconds; it ends with
-`check: PASS` or names what failed. What each check runs, and what the slow
-check additionally needs, is in [DEVELOPMENT.md](../../DEVELOPMENT.md); every
-repository check and what it holds is listed in
-[the architecture technical depth](architecture-technical.md#technical-arch-checks),
-and which checks a change selects is in the
-[verification guide](../process/verification.md#concept-verification-selection).
-
 <a id="technical-getting-started-layout"></a>
 ## The Repository Map
 
-Concept: [Contributing: where things live](getting-started.md#concept-getting-started-layout).
+Concept: [Where things live](getting-started.md#concept-getting-started-layout).
 
 | Path | What is there |
 | --- | --- |
 | `apps/loopex_protocol/` | Canonical encoding, tool definitions, the session protocol modules, and `priv/` schemas and vectors |
-| `apps/loopex/` | The kernel: `lib/loopex.ex` (the facade), `lib/loopex/runtime/` (Control, coordinator, reducer, dispatcher), the ports, and `lib/mix/tasks/` (the repository checks) |
+| `apps/loopex/` | The kernel: `lib/loopex.ex` (the facade), `lib/loopex/runtime/` (Control, coordinator, reducer, dispatcher), and the ports |
 | `apps/loopex_store_local/` | The local Store and artifact store |
 | `apps/loopex_llm_reqllm/` | The ReqLLM model adapter and its provider companion build |
 | `apps/loopex_executor_local/` | The local executor, workspace lease, and coding tools |
@@ -571,39 +524,10 @@ Concept: [Contributing: where things live](getting-started.md#concept-getting-st
 | `apps/loopex_app_server/` | The standard-input/output server and its shipped host |
 | `apps/loopex_daemon/` | The daemon |
 | `clients/node/` | The independent JavaScript consumer |
-| `scripts/` | `check.sh`, `check-release.sh`, and their helpers |
 | `docs/` | Documentation; start at [docs/README.md](../README.md) |
-| `.agents/skills/` | Portable procedures: `open-milestone`, `close-milestone`, `adr`, `mutant-hunt` |
 
-Each application's tests are under its own `test/`, with shared helpers in
-`test/support/`. Tests use a temporary `LOOPEX_HOME` and temporary workspaces,
-and their helpers fail before touching real user state. The map from each
-concern to its module is in
+The map from each concern to its module is in
 [the architecture technical depth](architecture-technical.md#technical-arch-concerns).
-
-<a id="technical-getting-started-milestones"></a>
-## Plans, Decisions, and Commits
-
-Concept: [Contributing: how work is planned](getting-started.md#concept-getting-started-milestones).
-
-- **What is authorized now:** the Current Status block of
-  [docs/plans/README.md](../plans/README.md).
-- **A milestone:** `docs/plans/NAME.md` and `docs/plans/NAME-technical.md`,
-  written with the `open-milestone` skill and closed with `close-milestone`;
-  the steps are in the [milestone guide](../process/milestones.md#concept) and
-  [its mechanics](../process/milestones-technical.md#technical-depth).
-- **An architecture decision:** a numbered pair under `docs/adr/`, prepared with
-  the `adr` skill and accepted by the maintainer before dependent work.
-- **A document:** a new substantive Concept document under `docs/` has a
-  Technical depth companion. Runbooks, indexes, evidence and the other forms
-  named by the charter are exceptions. Index new documents in their directory's
-  `README.md` and in [docs/README.md](../README.md) in the same change,
-  following the
-  [charter's link and anchor rules](../process/development-charter-technical.md#technical-traceable-depth).
-- **A commit:** a short imperative title `area(marker): summary`, where the
-  marker is the milestone the work belongs to, such as `docs(M5): …`, with no
-  content-origin attribution; `scripts/check-commit-messages.sh` enforces the
-  latter as part of the fast check.
 
 <a id="technical-getting-started-diagnosing"></a>
 ## A First Trace Session

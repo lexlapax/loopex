@@ -3,7 +3,7 @@
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Processes, orders, bounds and evidence](daemon-technical.md#technical-depth).
+Technical depth: [Processes, orders and bounds](daemon-technical.md#technical-depth).
 
 `loopex_daemon` is the host application that keeps one state root's sessions
 alive between separate operating-system processes. It composes the reference

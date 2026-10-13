@@ -111,7 +111,8 @@ arrived.
 **Where to start:** the [operator getting-started guide](docs/operator/getting-started.md)
 takes you from a checkout to a first session. The
 [developer getting-started guide](docs/developer/getting-started.md#concept)
-covers building on Loopex and contributing to it.
+covers building on Loopex, and the
+[development process](docs/process/README.md) covers contributing to it.
 
 After [building from source](docs/operator/getting-started.md#operator-start-build),
 you can use the same loop three ways. For an embedded local call, save this as
@@ -305,7 +306,7 @@ The roadmap is guidance. The commitment is an accepted plan.
 - [Operator getting started](docs/operator/getting-started.md) — from a
   source checkout to a first coding session, a daemon and a clean stop.
 - [Developer getting started](docs/developer/getting-started.md#concept) — building on
-  Loopex (embedding, the session protocol) and contributing to it.
+  Loopex (embedding, the session protocol, replacing a port).
 - [DEVELOPMENT.md](DEVELOPMENT.md) — current bootstrap prerequisites and the
   two check commands.
 - [docs/process/verification.md](docs/process/verification.md#concept) and

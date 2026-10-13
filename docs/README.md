@@ -7,8 +7,9 @@ work at hand.
 
 New here? Running Loopex starts at the
 [operator getting-started guide](operator/getting-started.md). Building on Loopex
-or contributing to it starts at the
-[developer getting-started guide](developer/getting-started.md#concept). This file
+starts at the
+[developer getting-started guide](developer/getting-started.md#concept), and
+contributing to it at the [development process](process/README.md). This file
 is the index of what exists.
 
 ## Directories
@@ -40,7 +41,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | --- | --- | --- | --- |
 | Product vision | [Vision](vision.md#concept) | [Vision technical depth](vision-technical.md#technical-depth) | Founding authority; the pair is one source. |
 | Capability guidance | [Roadmap](roadmap.md#concept) | [Roadmap technical depth](roadmap-technical.md#technical-depth) | Non-normative projection; accepted plans authorize work. |
-| Developer getting started | [Getting started](developer/getting-started.md#concept) | [Getting started technical depth](developer/getting-started-technical.md#technical-depth) | Two tracks: building on Loopex (embedding a runtime, driving the session protocol) and contributing (toolchain, checks, milestones). |
+| Developer getting started | [Getting started](developer/getting-started.md#concept) | [Getting started technical depth](developer/getting-started-technical.md#technical-depth) | Building on Loopex: embedding a runtime, the host policy, driving the session protocol, and replacing a port. |
 | System architecture | [Architecture](developer/architecture.md#concept) | [Architecture technical depth](developer/architecture-technical.md#technical-depth) | Descriptive: applications, ports, truth planes, and invariants as implemented; accepted ADRs remain the deciding authority. |
 | Development method | [Development charter](process/development-charter.md#concept) | [Charter technical depth](process/development-charter-technical.md#technical-depth) | Shared development form and review expectations. |
 | Public session protocol | [App server protocol](developer/app-server-protocol.md#concept) | [Protocol technical depth](developer/app-server-protocol-technical.md#technical-depth) | The experimental wire generation; accepted ADR 0023 remains the deciding authority. |

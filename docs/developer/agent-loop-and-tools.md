@@ -824,14 +824,10 @@ default.
 `loopex.context_bytes.v2` measures the exact final provider-visible messages and
 active model-facing tool projections. Store separately normalizes and measures
 each private record and unstamped public-event payload against its exact 65,536-
-byte item ceiling before that value can commit or authorize later work. An
-earlier reference fixture with longer tool descriptions makes the distinction
-concrete: system plus four projected
-tools is 2,393 canonical bytes and 799 estimated tokens; the system message
-plus the four full canonical definitions occupy 4,382 component bytes and
-measure 1,462 estimator tokens when each component is measured separately;
-a 65,536-byte project file wraps to a 65,653-byte provider message and 21,885
-estimated tokens. None of those estimates claims provider capacity, billing, or
+byte item ceiling before that value can commit or authorize later work. A
+project file at the full 65,536-byte item ceiling, for example, still grows
+when it is wrapped into a provider message, and the context measurement charges
+the wrapped message. Neither measurement claims provider capacity, billing, or
 tokenizer equality.
 
 Admission is checked in a fixed order and the first failure decides:
@@ -861,10 +857,7 @@ decided on and built from the required-only candidate: the compact record's four
 counts — system, session, steer, tool — partition the exact descriptor sequence
 behind `ordered_descriptor_digest`, and a dimension no withholding could cure
 (the strict system-class ceiling, record depth, record cardinality) is decided
-over the required-only set before anything is retained. Receipts written under
-the earlier ordering, which resolved optional content before a required-only
-fallback, remain valid for replay; that ordering is recorded in
-[M2 recorded limitations](../evidence/M2-recorded-limitations.md#adr-0017-step-five).
+over the required-only set before anything is retained.
 
 The candidate record's own byte cost is a fixed point, and one that does not
 converge is Store-unavailable rather than a measurement. Continuing without it
@@ -1052,12 +1045,5 @@ durable truth.
 
 ### Verification
 
-The loop's guarantees are held by the `apps/loopex/test/` suites named for them
-— `agent_loop_test.exs`, `bounds_test.exs`, `conversation_test.exs`,
-`tool_registry_test.exs`, `context_admission_test.exs`, `skill_context_test.exs`,
-`provider_attempt_protocol_test.exs`, and `cancellation_test.exs` among them —
-and by the executor's own suites under `apps/loopex_executor_local/test/`. The
-commands that run them are in
-[the contributing track](getting-started-technical.md#technical-getting-started-checks);
-retained evidence from the milestones that proved these guarantees is indexed in
-[docs/evidence](../evidence/README.md).
+The tests that hold the loop's guarantees are listed in the
+[verification guide](../process/verification-technical.md#technical-verification-evidence-loop).

@@ -85,6 +85,31 @@ administrative SHA. Their complete outputs stay outside the repository, and
 the annotated tag records their results, retained-output references, and
 SHA-256 digests when the tag is created. Neither lane needs a third commit.
 
+<a id="technical-verification-entrypoints"></a>
+#### Repository check entrypoints
+
+Every check runs locally from a clean checkout with the toolchain in
+[DEVELOPMENT.md](../../DEVELOPMENT.md); hosted continuous integration calls the
+same commands and never redefines or waives one.
+
+| Command | What it holds |
+| --- | --- |
+| `mix test` in one application | That application's credential-free suite; the test helpers exclude `real_provider`, `long_bound`, and the other release-only tags. |
+| `mix loopex.deps_budget` | The eleven-application inventory, roles, the admitted external dependencies, and inward direction. |
+| `mix loopex.core_only` | Core in a separate virtual machine, no adapter resolvable, no per-runtime state in application environment. |
+| `mix loopex.docs_check` | Compiled documentation read through `Code.fetch_docs/1` orders the depth sections on covered public code. |
+| `mix loopex.status` | Governance rows, index chains, link grammar, paired documents, and bound artifacts over the current tree. |
+| `mix loopex.format_scope` | The effective formatter configuration actually reaches application sources. |
+| `mix loopex.matrix` | The running toolchain is one of the two validated `(Elixir, OTP)` pairs in `.tool-versions`. |
+| `mix loopex.version_train` | One version across the umbrella. |
+| `mix loopex.hook_registration` | Each named client hook is registered under the event and matcher that makes it run. |
+| `mix loopex.agent_bootstrap` | Development-client adapter structure routes to the canonical contract and skills. |
+
+`mix loopex.docs_check` proves ordering and presence only; whether a section
+explains anything stays a review obligation. `scripts/check.sh` and
+`scripts/check-release.sh` compose these entrypoints into the two checks the
+repository runs.
+
 <a id="technical-verification-selection"></a>
 ### The selection table, mechanically
 
@@ -95,13 +120,129 @@ Concept: [Selection](verification.md#concept-verification-selection).
 | Store port | `apps/loopex_store_local/test/` conformance and fault-injection cases, `apps/loopex/test/` current-format restart/replay and `commit_unknown` cases |
 | Model port | `apps/loopex_llm_reqllm/test/` adapter, streaming conformance, credential plane; the `real_provider` cases |
 | Executor port | `apps/loopex_executor_local/test/` authority, receipts, cancellation, coding tools; `apps/loopex/test/cancellation*_test.exs` |
-| Wire protocol | `apps/loopex_protocol/test/` vectors and negotiation, `apps/loopex_app_server/test/`, `clients/node/vectors.mjs`; `docs/developer/compatibility-surfaces.md` |
+| Wire protocol | `apps/loopex_protocol/test/` vectors and negotiation, `apps/loopex_app_server/test/`, `clients/node/vectors.mjs` (see [the protocol's evidence](#technical-verification-evidence-protocol)); `docs/developer/compatibility-surfaces.md` |
 | Skills and project resources | `apps/loopex_composition/test/`, `apps/loopex/test/skill_context_test.exs`, `context_admission_test.exs` |
-| Observability | `apps/loopex/test/trace_session_test.exs`, `telemetry_boundary_test.exs`, `apps/loopex_telemetry/test/` |
+| Agent loop, interactions and transfers | See [the loop's evidence](#technical-verification-evidence-loop) |
+| Observability | `apps/loopex/test/trace_session_test.exs`, `telemetry_boundary_test.exs`, `apps/loopex_telemetry/test/` (see [observability's evidence](#technical-verification-evidence-observability)) |
 | Dependency direction | `mix loopex.deps_budget` and `apps/loopex/test/deps_budget_test.exs` |
 | Documentation chain | `mix loopex.status`, `mix loopex.docs_check` |
 | Operating-system process boundaries | The executor: `apps/loopex_executor_local/test/coding_tools_test.exs` launch-guard, cleanup and frame cases. The provider child: `apps/loopex_llm_reqllm/test/provider_startup_boundaries_test.exs`, `provider_retainer_boundaries_test.exs`, `provider_bridge_test.exs`, `credential_plane_test.exs` and `provider_companion_entry_test.exs`. Both reproduced under contention by the procedure below |
-| The daemon | `apps/loopex_daemon/test/` (see the [daemon technical page](../developer/daemon-technical.md#technical-daemon-evidence)); `apps/loopex_cli/test/multi_client_workflow_test.exs`, `live_daemon_test.exs`; the release lanes `node_client`, `long_bound`, `real_provider` and, on Linux, `cross_uid` |
+| The daemon | `apps/loopex_daemon/test/` (see [the daemon's evidence](#technical-verification-evidence-daemon)); `apps/loopex_cli/test/multi_client_workflow_test.exs`, `live_daemon_test.exs`; the release lanes `node_client`, `long_bound`, `real_provider` and, on Linux, `cross_uid` |
+
+<a id="technical-verification-boundary-evidence"></a>
+#### Where each boundary's claims are proved
+
+The product pages state each guarantee; these tables name the tests that hold
+it. Retained milestone runs are indexed in [docs/evidence](../evidence/README.md).
+
+<a id="technical-verification-evidence-protocol"></a>
+**Session protocol.** For the foreground `loopex.experimental/3` and daemon
+`loopex.experimental/4` generations in the
+[protocol reference](../developer/app-server-protocol-technical.md#technical-depth):
+
+| Claim | Where it is proved |
+| --- | --- |
+| Complete canonical preimages, literal digests and positive/negative vectors | `apps/loopex_protocol/test/current_contract_manifest_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `clients/node/current-contract-manifest-vectors.mjs`, `clients/node/contract-negotiation-tests.mjs` |
+| Method and record shapes against the foreground /3 schema | `apps/loopex_protocol/test/session_schema_test.exs` |
+| Method and record shapes against the daemon /4 schema | `apps/loopex_protocol/test/session_v2_schema_test.exs` |
+| Framing and decoding refusals | `apps/loopex_protocol/test/frame_test.exs`, `apps/loopex_protocol/test/wire_test.exs` |
+| Facade and wire agree on identities and meaning | `apps/loopex_app_server/test/session_mapping_test.exs` |
+| Mapping negatives and real effects | `apps/loopex_app_server/test/foundation_mapping_test.exs` |
+| Delivery bounds and slow readers | `apps/loopex_app_server/test/delivery_bounds_test.exs` |
+| An independent client drives a whole session, and the skill, interaction, and artifact chain, over a real process | `apps/loopex_app_server/test/external_workflow_test.exs` |
+| An independent client observes and takes over a session over the daemon's socket | `apps/loopex_daemon/test/external_socket_workflow_test.exs` |
+
+The vectors are literal byte strings with literal verdicts, not values generated
+from the implementation they check. A generated vector proves only that this
+encoder and this decoder agree with each other.
+
+<a id="technical-verification-evidence-daemon"></a>
+**The daemon.** For the processes, orders and bounds in
+[the daemon technical depth](../developer/daemon-technical.md#technical-depth);
+files are under `apps/loopex_daemon/test/` unless another application is named:
+
+| Claim | Tests |
+| --- | --- |
+| Startup order, checkpoints, reverse cleanup | `service_lifecycle_test.exs`, `startup_arbiter_test.exs`, `readiness_test.exs` |
+| Relay tickets, barriers, retirement | `admission_relay_test.exs`, `owner_test.exs`, `collaboration_test.exs` |
+| Slots, retirement barrier, eviction, reclamation, succession | `connection_registry_test.exs`, `succession_capacity_test.exs`, `wire_records_test.exs`, `output_buffer_test.exs` |
+| Leases and takeover | `lease_owner_test.exs`, `lease_lifecycle_test.exs` |
+| Non-blocking components: per-step clocks, lease-owner replacement, the monitored holder close, held requests, the stop rule | `owner_test.exs`, `lease_owner_test.exs`, `socket_transport_test.exs` |
+| No blocking call between components through `:gen.call/4` while serving or stopping (T14); an orderly stop exits 0 with a lease owner's relay request unanswered past a step between the cut and the freeze (T21's owner and Service halves) | `service_lifecycle_test.exs` |
+| Socket, peer credential, framing and methods | `listener_test.exs`, `listener_socket_test.exs`, `peer_credential_test.exs`, `connection_protocol_test.exs`, `request_test.exs`, `request_ledger_test.exs`, `socket_transport_test.exs` |
+| Index, offline writers and retired-catalog refusal | `session_index*_test.exs`; `apps/loopex_cli/test/cli_test.exs` |
+| Credential custody | `credential_custody_test.exs` here and in the app server and CLI |
+| Progress and workflow | `external_socket_workflow_test.exs` |
+| Cross-process CLI workflow | `apps/loopex_cli/test/multi_client_workflow_test.exs` |
+
+Release-only lanes, excluded by the daemon's `test_helper.exs`:
+
+| Tag | Case | Run by |
+| --- | --- | --- |
+| `real_provider` | `external_socket_workflow_real_test.exs` | the release manifest, its own process |
+| `node_client` | `external_socket_workflow_test.exs` Node cases | `--only node_client` |
+| `long_bound` | `maximum_population_test.exs` | `--only long_bound` |
+| `cross_uid` | `cross_uid_test.exs`, two cases | Linux only, exactly two executed |
+
+<a id="technical-verification-evidence-observability"></a>
+**Observability.** For the inventory, trace-session domain and redaction rules
+in [the observability technical depth](../developer/observability-technical.md#technical-depth):
+
+| Claim | Where it is proved |
+| --- | --- |
+| Five locked trace-session witnesses, redaction and limit negatives | `apps/loopex/test/trace_session_test.exs` |
+| Exclusion: 65 functions for one sender enter and leave both `Control` sets; the private session handle never reaches crash output | `apps/loopex/test/trace_session_test.exs` |
+| A session driven over the daemon socket emits the embedded caller's span names and metadata key sets, and neither the daemon nor the CLI emits telemetry | `apps/loopex_daemon/test/telemetry_parity_test.exs` |
+| The credential sender is excluded before credential context, and a refused exclusion refuses the call | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` |
+| Port and cut emissions, and the absence of content | `apps/loopex/test/telemetry_boundary_test.exs` |
+| The edge handler carries spans into the diagnostics plane and refuses anything richer | `apps/loopex_telemetry/test/telemetry_handler_test.exs` |
+| A stalled sink neither blocks an emitting boundary nor exceeds the ceiling; ten thousand spans with no handler stay inside a bounded cost | `apps/loopex/test/telemetry_boundary_test.exs` |
+
+`apps/loopex/test/trace_session_test.exs` also compiles a module to a code-path
+directory without loading it and proves a session naming it traces its calls.
+
+<a id="technical-verification-evidence-loop"></a>
+**The agent loop, interactions and transfers.** The guarantees in
+[Agent loop and tools](../developer/agent-loop-and-tools.md#technical-depth)
+are held by the `apps/loopex/test/` suites named for them —
+`agent_loop_test.exs`, `bounds_test.exs`, `conversation_test.exs`,
+`tool_registry_test.exs`, `context_admission_test.exs`, `skill_context_test.exs`,
+`provider_attempt_protocol_test.exs`, and `cancellation_test.exs` among them —
+and by the executor's own suites under `apps/loopex_executor_local/test/`.
+[Durable interactions](../developer/runtime-and-embedding.md#technical-embedding-interactions)
+are witnessed by `apps/loopex/test/interaction_lifecycle_test.exs`, and
+[artifact transfers](../developer/runtime-and-embedding.md#technical-embedding-transfers)
+by `apps/loopex/test/artifact_transfer_contract_test.exs`,
+`apps/loopex/test/artifact_transfer_custody_test.exs` and the
+`artifact_*transfer*_test.exs` files in `apps/loopex_store_local/test/`.
+
+<a id="technical-verification-evidence-reference-client"></a>
+**The embedded working loop, as a test.** From the repository root, the
+credential-free demonstration of one embedded durable turn is:
+
+```bash
+MIX_ENV=test mix test apps/loopex_reference_client/test/reference_client_test.exs --seed 0 --trace
+```
+
+It starts an isolated runtime and durable local Store in temporary directories,
+submits a prompt through the reference client, receives a deterministic model
+tool call, runs the controlled `write` tool beneath its workspace lease, consumes
+the durable event sequence through `run.finished`, checks the resulting file,
+and removes its temporary state. Success is every case in the file passing with
+none excluded.
+
+To run the same path through the real ReqLLM adapter, export the provider key
+as `LOOPEX_PROVIDER_API_KEY` from your secret store, then:
+
+```bash
+MIX_ENV=test mix test apps/loopex_reference_client/test/real_model_session_test.exs --only real_provider --seed 0 --trace
+```
+
+It makes two real model calls around one controlled tool effect and checks that
+both calls send the canonical request bytes the session already committed. Keep
+the credential out of the command line, the repository, the state root, logs and
+fixtures, and unset it afterwards if nothing else manages its lifetime. These
+are source-tree demonstrations, not a command contract.
 
 Before merging provider or credential, wire-protocol, or daemon changes, run
 the union of their applicable unattended release lanes with
