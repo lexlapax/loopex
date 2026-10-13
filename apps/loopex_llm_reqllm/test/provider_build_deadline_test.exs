@@ -71,6 +71,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildDeadlineTest do
     assert_raise RuntimeError, ~r/exceeded/, fn -> Fixture.collect(port, deadline, []) end
   end
 
+  test "a group join succeeds only after its complete empty window" do
+    # The group is already empty: a spent bound still fails the join, while
+    # a live bound proves the 100 ms empty window first.
+    {pid, 0} = System.cmd("/bin/sh", ["-c", "echo $$"])
+    group = String.trim(pid)
+
+    refute Fixture.kill_group(group, System.monotonic_time(:millisecond), nil)
+
+    started = System.monotonic_time(:millisecond)
+    assert Fixture.kill_group(group, started + 5_000, nil)
+    assert System.monotonic_time(:millisecond) - started >= 100
+  end
+
   test "expiry at any point after spawning leaves no owned process alive" do
     # Deadlines a few milliseconds ahead expire while the shell is starting,
     # forking or waiting. Each owned process records its own pid, and none of

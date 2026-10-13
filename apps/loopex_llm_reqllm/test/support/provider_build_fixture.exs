@@ -235,8 +235,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   # Concept: a group is gone only once it stays empty.
   # Technical depth: a member forking while the group is killed can leave a
   # child the kill missed, which a later scan shows. The kill repeats until
-  # scans for 100 ms find no live member, within the join bound.
-  defp kill_group(group, deadline, quiet_since) do
+  # scans for 100 ms find no live member, within the join bound; a bound that
+  # ends before that window is complete fails the join.
+  @doc false
+  def kill_group(group, deadline, quiet_since) do
     System.cmd("/bin/kill", ["-KILL", "--", "-" <> group], stderr_to_stdout: true)
     {table, 0} = System.cmd("/bin/ps", ["-axo", "pgid=,stat="])
     now = System.monotonic_time(:millisecond)
@@ -253,7 +255,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
         true
 
       now >= deadline ->
-        not alive?
+        false
 
       true ->
         Process.sleep(10)
