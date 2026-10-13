@@ -639,6 +639,14 @@ elixir_redact '' abc abcdef '' \
 [ "$(cat "$work/overlap-actual")" = '[REDACTED]' ] ||
   fail 'human redactor did not choose the longest key at one position'
 
+# A key starting inside another key and running past it joins one span, also
+# when the two keys arrive in separate reads.
+(printf 'xxsk'; sleep 0.3; printf -- '-super-secret-value!') |
+  elixir_redact '' xxsk sk-super-secret-value '' >"$work/chain-actual" ||
+  fail 'human redactor refused chained overlapping keys'
+[ "$(cat "$work/chain-actual")" = '[REDACTED]!' ] ||
+  fail 'human redactor published part of an overlapping key'
+
 printf 'REDRED' | elixir_redact '' RED '' '' >"$work/marker-actual" ||
   fail 'human redactor refused a marker-contained key'
 [ "$(cat "$work/marker-actual")" = '!!' ] ||
@@ -709,6 +717,12 @@ for key, input_bytes in ((b"RED", b"REDRED"), (b"a[R", b"aa[R")):
         assert published == b"!!"
     else:
         assert published == b"a<REDACTED>"
+# A key starting inside another key and running past it joins one span.
+for chunks in ((b"xxsk-super-secret-value!",), (b"xxsk", b"-super-secret-value!"),
+               (b"xx", b"sk-sup", b"er-secret-value!")):
+    redactor = Redactor([b"xxsk", b"sk-super-secret-value"])
+    published = b"".join(redactor.feed(chunk) for chunk in chunks) + redactor.feed(b"", final=True)
+    assert published == b"[REDACTED]!", published
 # A prompt without a newline is published at once; only a key prefix waits.
 redactor = Redactor([b"secret-key"])
 assert redactor.feed(b"answer> ") == b"answer> "

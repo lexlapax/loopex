@@ -100,11 +100,27 @@ class Redactor:
                 output.extend(content[cursor:safe])
                 cursor = safe
                 break
+            end = self.span_end(content, position, position + len(key))
+            if end > safe:
+                # A key reaching the held tail may still grow; decide later.
+                output.extend(content[cursor:position])
+                cursor = position
+                break
             output.extend(content[cursor:position])
             output.extend(self.replacement)
-            cursor = position + len(key)
+            cursor = end
         self.pending = content[cursor:]
         return bytes(output)
+
+    def span_end(self, content, start, end):
+        # Overlapping keys redact as one span, so no key's suffix survives.
+        position = start + 1
+        while position < end:
+            for key in self.keys:
+                if content.startswith(key, position):
+                    end = max(end, position + len(key))
+            position += 1
+        return end
 
     def hold_start(self, content):
         # Hold only a tail that can still begin a key, so a prompt without a

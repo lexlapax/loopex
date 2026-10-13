@@ -164,10 +164,15 @@ defmodule LoopexAttendedRedact do
       {position, key} when position < safe ->
         prefix = binary_part(content, cursor, position - cursor)
 
-        scan(content, keys, safe, replacement, position + byte_size(key), [
-          replacement,
-          prefix | reversed
-        ])
+        case span_end(content, keys, position + 1, position + byte_size(key)) do
+          # A key reaching the held tail may still grow; decide later.
+          stop when stop > safe ->
+            {IO.iodata_to_binary(Enum.reverse([prefix | reversed])),
+             binary_part(content, position, byte_size(content) - position)}
+
+          stop ->
+            scan(content, keys, safe, replacement, stop, [replacement, prefix | reversed])
+        end
 
       _ ->
         prefix = binary_part(content, cursor, safe - cursor)
@@ -175,6 +180,22 @@ defmodule LoopexAttendedRedact do
         {IO.iodata_to_binary(Enum.reverse([prefix | reversed])),
          binary_part(content, safe, byte_size(content) - safe)}
     end
+  end
+
+  # Overlapping keys redact as one span, so no key's suffix survives.
+  defp span_end(_content, _keys, position, stop) when position >= stop, do: stop
+
+  defp span_end(content, keys, position, stop) do
+    stop =
+      Enum.reduce(keys, stop, fn key, stop ->
+        size = byte_size(key)
+
+        if position + size <= byte_size(content) and binary_part(content, position, size) == key,
+          do: max(stop, position + size),
+          else: stop
+      end)
+
+    span_end(content, keys, position + 1, stop)
   end
 
   defp earliest(content, keys, cursor) do
