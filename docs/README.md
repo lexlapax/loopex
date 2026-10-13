@@ -20,7 +20,7 @@ is the index of what exists.
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
 | [evidence/](evidence/README.md) | Retained check-run and demonstration evidence, named by the revision it was taken at. |
-| [drafts/](drafts/README.md) | Draft milestone plan pairs (M8, M9, M10) not yet in the register; each moves into `plans/` when the milestone before it closes. |
+| [drafts/](drafts/README.md) | Draft milestone plan pairs (M8, M9, M10) not yet in the register; a draft moves into `plans/` only when the maintainer opens it. |
 | [archive/](archive/README.md) | Non-normative historical inputs, retained for provenance. |
 
 Every directory under `docs/` carries a `README.md` describing its contents and
@@ -132,7 +132,7 @@ whose path or explicit fragment does not resolve.
 
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, the floor refresh, observability, and the experimental session protocol driven by an independent Node consumer in plain JavaScript; Closed, with its runs in [M4 closure runs](evidence/M4-closure-runs.md).
-- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4.; Closed, with its runs in [M5 closure runs](evidence/M5-closure-runs.md).
+- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4; Closed, with its runs in [M5 closure runs](evidence/M5-closure-runs.md).
 - [M6 minimal runnable Loopex](plans/M6.md#concept) and [technical plan](plans/M6-technical.md#technical-depth) — the embedded ephemeral API, the in-process model adapter and memory store, the standalone command for shells and agents, full Loopex unchanged, and closure tooling in the repository. The [plans register](plans/README.md) carries its current state.
 - M7 is closed: [M7 coding-agent proof](plans/M7.md#concept) ([technical](plans/M7-technical.md#technical-depth)), placed first on 2026-09-29; then the unregistered successor drafts: [M8 installed durable operator](drafts/m8-installed-durable-operator.md#concept) ([technical](drafts/m8-installed-durable-operator-technical.md#technical-depth)), [M9 store engine successor](drafts/m9-store-engine-successor.md#concept) ([technical](drafts/m9-store-engine-successor-technical.md#technical-depth)) and [M10 governed extension runtime](drafts/m10-governed-extension-runtime.md#concept) ([technical](drafts/m10-governed-extension-runtime-technical.md#technical-depth)).
 

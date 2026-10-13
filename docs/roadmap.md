@@ -108,7 +108,8 @@ Technical depth: [External-consumer candidate proof](roadmap-technical.md#techni
 #### Durable service — v0.2 candidate
 
 Can independent clients attach, recover, and agree on one protocol candidate
-without owning session lifetime? M5 carries this rung: daemon-owned session
+without owning session lifetime? The Closed [M5 plan](plans/M5.md#concept),
+source release `v0.2.0`, carries this rung: daemon-owned session
 lifetime, a local socket transport, concurrent independent clients,
 collaboration with crash takeover, snapshot and cursor replay, residency
 limits, and cancellation that crosses processes, all on an ADR-selected store.
@@ -131,7 +132,7 @@ ephemeral embedding, the standalone `loopex ask` command, and the full durable
 profile. It adds three read-only tools and named skill directories, while
 leaving core's runtime library unchanged. [ADR 0039](adr/0039-ephemeral-embedded-profile.md#concept)
 governs the ephemeral profile's host-VM credential scope and cleanup limits.
-Acceptance authorizes implementation, not a release or a public-surface freeze.
+M6 closed as the source release `v0.3.0`, which freezes no public surface.
 
 The [M7 coding-agent proof](plans/M7.md#concept) closed on 2026-10-13 and is
 the source release `v0.4.0`; its
@@ -141,7 +142,7 @@ were accepted at `2986150b878151524ecdd9bac5a9779e69e196b4`; the
 [disposition](developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds those bytes. M7 owns continuity, instructions, compaction, model control,
 questions, conversational chat, bounded helpers and operator validation;
-later accepted ADRs through 0069 settle its implementation boundaries.
+later accepted ADRs through 0070 settle its implementation boundaries.
 The installed durable operator, store engine and governed extension runtime
 [drafts](drafts/README.md) for M8–M10 follow it and remain unaccepted; this
 roadmap grants no release version or publication authority.
@@ -151,9 +152,9 @@ Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technic
 <a id="concept-roadmap-governed-extension-runtime"></a>
 #### Governed extension runtime — version unselected
 
-M7 coding-agent proof, M8 installed operation and M9 store migration precede
-this M10 draft. Their acceptance and eventual release versions remain separate
-decisions; the later numeric candidates are illustrative capability labels and
+The closed M7 coding-agent proof and the M8 installed operation and M9 store
+migration drafts precede this M10 draft. M8's and M9's acceptance and eventual
+release versions remain separate decisions; the later numeric candidates are illustrative capability labels and
 do not reserve the next source version.
 
 Can reviewed and promoted trusted behavior evolve without changing session

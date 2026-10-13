@@ -20,7 +20,7 @@ imports anything outside Node's own standard library.
 | `daemon-takeover.mjs` | The cross-process takeover: observe a session another client controls, wait for that controller's lease to lapse, take control with a fresh epoch, abort the running work and release |
 | `maintenance-workflow.mjs` | The maintenance workflow over either server: an authored model alias resolves once, the configuration change and compaction completion are decoded independently, exact retries replay their admissions, and over the daemon a stale epoch is refused first |
 | `compaction-activity-workflow.mjs` | The activity workflow over either server: prompt real history, compact it, and observe the one closed compaction activity item naming the compact owner and the completion's episode |
-| `question-answer.mjs` | Decode the closed M7 choice/text/decline answer payload; preparation for the coordinated generation-3/4 switch |
+| `question-answer.mjs` | Decode the closed M7 choice/text/decline answer payload; the inspection and event decoders share it |
 | `question-answer-vectors.mjs` | Independently check literal answer vectors and UTF-8/identity byte boundaries |
 | `terminal-outcome.mjs` | Decode chat's closed terminal run objects with exact BigInt counts and opaque references |
 | `terminal-outcome-vectors.mjs` | Independently check terminal outcome vectors and reference boundaries |
@@ -44,6 +44,29 @@ imports anything outside Node's own standard library.
 | `inspection-vectors.mjs` | Independently check open-question, answer-admission and inspection literals and strict object boundaries |
 | `snapshot.mjs` | Decode the complete revision-3 snapshot with shared closed views and cursor/owner/configuration consistency checks |
 | `snapshot-vectors.mjs` | Independently check open-question and complete snapshot literals, privacy refusals and full identity/UTF-8 byte boundaries |
+| `vectors.mjs` | Execute the conformance vectors the Elixir suite reads, decoding each case's exact wire bytes with this client's own framing rules |
+| `contract-manifest.mjs` | Reproduce the canonical schema bytes and pin the current foreground and daemon contract identities |
+| `contract-manifest-vectors.mjs` | Independently prove canonical schema bytes against literal golden values |
+| `current-contract-manifest-vectors.mjs` | Bind both current complete contracts and run the approved payload vectors through the independent decoders |
+| `contract-negotiation-tests.mjs` | Check that both connections send no session request until their exact contract is verified, against controlled peers |
+| `interaction-event.mjs` | Select the model-question or policy payload decoder by producer and event kind |
+| `interaction-event-vectors.mjs` | Independently check that selection against retained literals |
+| `model-question-event.mjs` | Decode requested and terminal model-question payloads |
+| `model-question-event-vectors.mjs` | Independently check requested and terminal model-question vectors and captures |
+| `policy-interaction-event.mjs` | Decode policy question request and terminal payloads without authority |
+| `policy-interaction-event-vectors.mjs` | Independently check policy request and terminal literals |
+| `compaction-progress.mjs` | Decode one compaction attempt's activity payload without inferring its outcome |
+| `compaction-progress-vectors.mjs` | Independently check compaction activity literals and identity boundaries |
+| `context-failure.mjs` | Decode the context failure shared by compact and terminal outcomes |
+| `configure-request.mjs` | Decode the authored configure request without defaults |
+| `configure-request-vectors.mjs` | Independently check configure request vectors |
+| `command-bounds.mjs` | Encode and decode authored command bounds |
+| `command-bounds-vectors.mjs` | Independently check command-bounds vectors in both directions |
+| `active-bounds.mjs` | Encode and decode committed active bounds |
+| `active-bounds-vectors.mjs` | Independently check active-bounds vectors in both directions |
+| `creation-cancellation.mjs` | Decode the cancelled-creation record's exact request and command identities |
+| `creation-cancellation-vectors.mjs` | Independently check cancelled-creation vectors and byte boundaries |
+| `creation-options-vectors.mjs` | Independently check authored creation-option literals and byte boundaries |
 
 Run the M7 answer payload checks with the pinned Node interpreter:
 
@@ -58,9 +81,9 @@ node clients/node/inspection-vectors.mjs apps/loopex_protocol/priv/vectors/open-
 node clients/node/snapshot-vectors.mjs apps/loopex_protocol/priv/vectors/open-interaction.v1.json apps/loopex_protocol/priv/vectors/session-snapshot.v3.json
 ```
 
-This checks payloads only. The foreground and daemon clients still require
-their coordinated M7 initialization, complete schema-digest pins and live
-workflow updates before sending the new branches.
+This checks payloads only. Both connections negotiate the current generations
+against the pinned contract identities in `contract-manifest.mjs`; no live
+workflow here sends a model-question answer.
 
 ## Running it
 
@@ -143,7 +166,7 @@ Back to [clients](../README.md).
 starting a server of its own:
 
 ```bash
-node clients/node/daemon-takeover.mjs "$LOOPEX_HOME/daemon/d.sock" <session-id>
+node clients/node/daemon-takeover.mjs "$LOOPEX_HOME/daemon/daemon.sock" <session-id>
 ```
 
 It prints `{"attached":true}` once it observes the session, then one summary

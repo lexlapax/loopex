@@ -222,8 +222,9 @@ without entering the kernel.
   OTP generations with tested migration and exact rollback. No extension
   manifest or lifecycle API ships in the current source.
 - **A seven-tool coding surface** (`read write edit bash grep find ls`)
-  inside a measured system-class budget: 1,000 tokens by default, 1,500 for
-  the chat coding profiles and 2,000 for a helper parent. The coding and
+  inside a measured system-class budget: 1,000 tokens by default and
+  configurable per profile (the M7 validation profiles use 1,500 for chat
+  coding and 2,000 for a helper parent). The coding and
   read-only presets select four tools each, and the selected definitions are
   measured with the request before dispatch. Chat adds the model-question
   tool to a nonempty profile and, when helpers are enabled, the `task` tool.
@@ -263,9 +264,9 @@ bash scripts/check-release.sh --attempts-index FILE ...   # see DEVELOPMENT.md
 ```
 
 `scripts/check.sh` runs warning-free compilation, formatting, the repository
-structure checks, documentation ordering, the dependency budget, one version
-across the applications, and the credential-free suite with one application per
-VM. It runs once per integration candidate. `scripts/check-release.sh` is the
+structure checks, documentation ordering, the M7 evidence validator, the
+release-tooling fixtures, the dependency budget, one version across the
+applications, and the credential-free suite with one application per VM. It runs once per integration candidate. `scripts/check-release.sh` is the
 slow one: the real-provider workflows, the independent Node client, the
 fresh-source archive build, the long-duration bound proofs and the M7 lanes
 recorded in a retained attempts index; it needs provider credentials and the

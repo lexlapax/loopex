@@ -71,7 +71,8 @@ plan, the intact pinned coding-fixture catalog, external task and execution
 manifest, the legacy and M7 release case families, and the
 [M7 validation runbook](docs/operator/m7-validation.md)'s matching step
 ownership), the release-runner, escript-inventory,
-archive-manifest, attended-release, floor-lane, and M6 demonstration fixtures,
+archive-manifest, archive source-binding, attended-release, floor-lane, and M6
+demonstration fixtures,
 `mix loopex.deps_budget`,
 `mix loopex.version_train`, the test build, and the credential-free suite, one
 application per VM with several at once (`LOOPEX_CHECK_JOBS` bounds how many;
@@ -85,7 +86,7 @@ fails; a line every thirty seconds names what is still running, and an
 interruption kills the whole process tree. An application whose suite executed
 no test is red, not green: `scripts/suite-summary.sh` judges the result line.
 
-`bash scripts/check.sh --docs` stops after the documentation step, for a change
+`bash scripts/check.sh --docs` stops after the M7 evidence step, for a change
 that touches only prose, and `bash scripts/check.sh --select` picks between the
 two from the diff against `merge-base(origin/main, HEAD)` — documentation mode
 when every changed path is Markdown outside `apps/`, the full check otherwise
@@ -99,28 +100,27 @@ machine with the pinned Node, a provider credential, and a running local
 Ollama server at `127.0.0.1:11434`, make the selected local model available
 there and export `LOOPEX_RELEASE_OLLAMA_MODEL=ollama:<installed-model>`. The
 real local-command case checks that model through Ollama's `/api/show` before
-it runs. For M6 closure, use the retained
-[floor and attended runners](docs/plans/M6-technical.md#technical-plan-closure-tooling):
+it runs. For closure, use the
+[floor and attended runners](docs/plans/M6-technical.md#technical-plan-closure-tooling)
+M6 introduced, loading provider A's `LOOPEX_PROVIDER_API_KEY` and provider B's
+`OPENAI_API_KEY` without echoing them:
 
 ```bash
 bash scripts/floor-lane.sh SHA --output-dir DIR --long-bound
 read -rs LOOPEX_PROVIDER_API_KEY
 export LOOPEX_PROVIDER_API_KEY
-bash scripts/attended-release.sh --output LOG
-```
-
-Run each once for the tested SHA. `DIR` and `LOG` are new retained-output paths
-outside the repository. For M7 closure, load provider B's `OPENAI_API_KEY` the
-same way and pass the M7 matrix options to the attended runner, which forwards
-them unchanged to the release check and redacts both providers' values from
-its transcript:
-
-```bash
+read -rs OPENAI_API_KEY
+export OPENAI_API_KEY
 bash scripts/attended-release.sh --output LOG \
   --attempts-index /absolute/retained/m7-attempts.jsonl \
   --writer WRITER --host HOST --markers /absolute/retained/m7-markers \
   --m7-config /absolute/retained/m7-config.json --operator Maintainer
 ```
+
+Run each once for the tested SHA. `DIR` and `LOG` are new retained-output paths
+outside the repository; `floor-lane.sh` needs `origin/main` fetched. The
+attended runner forwards the M7 matrix options unchanged to the release check
+and redacts both providers' values from its transcript.
 
 The runner forwards `--attempts-index`, `--writer`, `--host`, `--markers`,
 `--m7-config`, `--operator`, `--pins` and `--resume-matrix`, each at most once.
@@ -176,7 +176,7 @@ applications, and proves the build changed nothing outside its declared
 outputs; it then
 requires the extraction's source identity to be the staged commit and its
 `VERSION` to be `0.3.0`, and prints both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
-`loopex_executor_local`, `loopex_daemon` and the in-process ReqLLM transport-drain witness runs the real-duration proofs the
+`loopex_executor_local`, `loopex_daemon`, `loopex_composition` and the in-process ReqLLM transport-drain witness runs the real-duration proofs the
 fast check excludes. On Linux the cross-UID lane runs the daemon's two
 `--only cross_uid` cases and requires exactly two to execute; it needs a second
 unprivileged user named in `LOOPEX_CROSS_UID_USER` that you may run a command

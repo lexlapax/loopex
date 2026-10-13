@@ -38,10 +38,11 @@ are filled only by the administrative direct child.
 adapters, ignore policy, commit messages over
 `merge-base(origin/main, HEAD)..HEAD`, branch and worktree hygiene, OTP
 application declarations, the suite-summary judge, and `mix loopex.status` over
-the current tree at 3 s), documentation ordering 1 s — where `--docs` stops —
-then the release-runner, escript-inventory, archive-manifest,
-attended-release, and floor-lane fixtures, dependency budget 2–3 s, one
-version 0–1 s, the test build, and the suite.
+the current tree at 3 s), documentation ordering 1 s, the M7 evidence
+validator — where `--docs` stops — then the release-runner, escript-inventory,
+archive-manifest, archive source-binding, attended-release, floor-lane and M6
+demonstration fixtures, dependency budget 2–3 s, one version 0–1 s, the test
+build, and the suite.
 
 Hosted CI: `.github/workflows/agent-bootstrap.yml` runs
 `bash scripts/check.sh --select` after an Elixir/OTP setup step with the
@@ -51,7 +52,7 @@ synthetic merge commit's generated title fails the commit-message check, and
 the check's baseline needs the whole history. A concurrency group per workflow
 and ref cancels a run a newer push supersedes. `--select` reads the
 diff against the integration base: a pull request whose every changed path is
-Markdown runs the documentation mode, anything else — and a push to `main`,
+Markdown outside `apps/` runs the documentation mode, anything else — and a push to `main`,
 whose diff against itself is empty — runs the full check. It is a thin
 wrapper over the repository command: the adapter check in
 `Mix.Tasks.Loopex.Status.Bootstrap` admits only `mix deps.get`,
@@ -116,7 +117,7 @@ FILE` with its `--writer ID --host ID --markers DIR`, `--m7-config FILE
 --operator NAME` and an optional `--pins FILE` of operator overrides for the
 M7 conversation lanes and, for the full matrix only,
 one `--resume-matrix ID`. Zero pairs select the full closure matrix, which
-requires all of them. Its release lanes, fresh-source and the two
+requires all of them except the optional `--pins` and `--resume-matrix`. Its release lanes, fresh-source and the two
 `m7-rollback` lanes are recorded by `mix loopex.m7_matrix` in the index as lane
 `release-matrix` of one logical matrix; a resumed matrix skips completed lanes,
 reruns no completed or started lane and refuses a rebuilt archive manifest
@@ -132,7 +133,7 @@ group plus one of its rows is an ordinary union. `m7-provider` requires
 | `real_provider` | Manifest rows 3 through 11, all nine current unattended real-provider cases |
 | `real-provider-3` through `real-provider-11` | Exactly the named current manifest row |
 | `node_client` | The Node client cases in app server, protocol, daemon and CLI |
-| `long_bound` | The current long-bound cases in core, local executor and daemon, plus the ReqLLM transport-drain case |
+| `long_bound` | The current long-bound cases in core, local executor, daemon and composition, plus the ReqLLM transport-drain case |
 | `cross_uid` | The daemon's two Linux cross-UID cases |
 | `m7-provider` | The unattended paid M7 cases, each recorded in the attempts index |
 | `m7-rollback` | The credential-free M7 rollback cases, recorded when an index is given |

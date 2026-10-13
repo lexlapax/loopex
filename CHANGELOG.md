@@ -11,7 +11,7 @@ release-candidate or stable — see
 
 No installable package is published yet. The `0.4.0`, `0.3.0` and `0.1.0`
 entries record source releases tagged `v0.4.0`, `v0.3.0` and `v0.1.0`; the annotated tag `v0.0.0-m2` is defined as
-the exact integrated M2 source snapshot; neither is a package version, public
+the exact integrated M2 source snapshot; none is a package version, public
 API freeze, or compatibility label. Entries below the first package release record
 repository, planning, and milestone implementation work, and carry no consumer
 compatibility meaning.
