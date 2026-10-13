@@ -125,7 +125,7 @@
           "V10.5"
         ],
         "profiles": [
-          "chat-coding"
+          "chat-coding-appendix"
         ]
       },
       "m7.feature": {
@@ -149,7 +149,7 @@
           "V5.2"
         ],
         "profiles": [
-          "chat-coding"
+          "chat-coding-appendix"
         ]
       },
       "m7.instructions.admitted": {
@@ -249,7 +249,7 @@
           "V6.6.positive"
         ],
         "profiles": [
-          "chat-coding"
+          "chat-coding-appendix"
         ]
       },
       "m7.oversized-source": {
@@ -357,7 +357,7 @@
           "V5.3"
         ],
         "profiles": [
-          "chat-coding"
+          "chat-coding-appendix"
         ]
       },
       "m7.repair": {
@@ -384,7 +384,7 @@
           "V2.5"
         ],
         "profiles": [
-          "chat-coding"
+          "chat-coding-appendix"
         ]
       },
       "m7.restore": {

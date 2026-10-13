@@ -24,10 +24,16 @@ defmodule LoopexCli.M7ProfilesTest do
       {1_500,
        [
          "8e8b7d9e3e980e5393e757294a5c1ba659aaed46c08e2d2df71b82dc07084e65",
-         "aec13e0034a4fd0dadda10c8037a99d29d9e137e5de6ae62ac215ac014642fe5"
+         "aec13e0034a4fd0dadda10c8037a99d29d9e137e5de6ae62ac215ac014642fe5",
+         # Staged fixture cases: the harness appendix for external, feature
+         # (and question-restart), long and repair.
+         "3a25815244ed2842bf49876c8e0b9d4e0381a98bae7656f6e80860dbb786d9c7",
+         "cfe2da6833a99b53e3be6b0d3dd5b18f5f296cfadd35024a72d70a59a123ef8c",
+         "016cb727465c86318b999ab50367d35e979d80f926677a1719d6af42dd9688ac",
+         "5cfd18129d17c983d5b0873d0b3e3338fc261d8be9f30546a9431bb08dabf8ef"
        ]},
     "chat-coding-helpers" =>
-      {2_000, ["6e4be2450e74c4b74fd27d484117201f2bd8c0c08d7247d440905a522686ce1e"]},
+      {2_000, ["ed4d20d2e213ff8f066b42b37775c9db720fa9898b68fb94c846c439355db480"]},
     "chat-read-only" =>
       {1_000, ["3e31a652f4915828f1b7953818b65a16f7a8bfcad10d22c3923d83fc61beff8f"]},
     "daemon-coding" =>
@@ -74,7 +80,7 @@ defmodule LoopexCli.M7ProfilesTest do
 
   test "each case stages exactly its profiles below their ceilings at real and 512-byte paths",
        f do
-    context = %{manifest: f.catalog}
+    context = %{manifest: f.catalog, catalog_root: @fixtures}
 
     for {case_id, entry} <- f.catalog["execution_manifest"]["cases"],
         root <- [

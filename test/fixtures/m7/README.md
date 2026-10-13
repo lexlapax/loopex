@@ -47,8 +47,11 @@ runner sets the attempt's session ceiling to the largest of its case's profile
 ceilings and an enabled helper catalog's to the smallest. The plan target is
 below 1,000; the [maintainer override](../../../docs/developer/agent-context-map.md#disposition-m7-reference-profile-target-2026-10-10)
 admits 1,500 for `chat-coding` and `chat-coding-appendix` and 2,000 for
-`chat-coding-helpers`. `M7ProfilesTest` measures every case's staged system
-class at its real and a 512-byte workspace path and pins each key's preimage
+`chat-coding-helpers`. A staged fixture case also carries the harness
+appendix naming its approved test invocation and seeded files, so it stages
+`chat-coding-appendix`, or the helper parent for `m7.review`.
+`M7ProfilesTest` measures every case's staged system class, appendix included,
+at its real and a 512-byte workspace path and pins each key's preimage
 digests.
 
 `checkpoint-summary.json` is a separate, independently encoded compact UTF-8

@@ -13,7 +13,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Profiles do
 
   `measure/4` takes a case ID, an empty attempt root, the runner context
   (`manifest` is the decoded fixture catalog) and the operator's decoded
-  configuration. Chat cases apply `CaseRunner.case_transform/3`, their
+  configuration. Chat cases apply `CaseRunner.profile_transform/3`, so a
+  staged fixture case carries its harness appendix, then their
   scenario's flags and `ChatConfiguration.load/3`; a helper parent also binds
   its frozen roles and catalog through `ChatConfiguration.helper_parent/2`.
   Ask cases parse their own argv, the ephemeral case uses the demonstration
@@ -23,7 +24,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Profiles do
   (`SessionConfiguration`'s system cost) and a `preimage_digest`: the SHA-256
   of the canonical instruction version, base and appendix with the ordered
   tool generations. The digest omits the environment, whose workspace path,
-  platform and catalog address are per attempt. Cases with no model call
+  platform and catalog address are per attempt, and writes the attempt root
+  in an appendix as `{root}`. Cases with no model call
   measure nothing.
   """
 
@@ -58,7 +60,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Profiles do
     context = Map.put(context, :workspace, workspace)
 
     with {:ok, transform} <-
-           CaseRunner.case_transform(case_id, Path.join(root, "trusted"), context),
+           CaseRunner.profile_transform(case_id, Path.join(root, "trusted"), context),
          {:ok, extras} <- extras(case_id, context) do
       profile =
         config
@@ -170,9 +172,16 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Profiles do
         }
       end)
 
+    # A harness appendix names the attempt's trusted runner; its root is per
+    # attempt, like the environment, so the digest names it by placeholder.
+    root = Path.dirname(workspace)
+
     preimage =
       Canonical.encode(%{
-        "instructions" => Map.take(instructions, ~w(version base appendix)),
+        "instructions" =>
+          instructions
+          |> Map.take(~w(version base appendix))
+          |> Map.update("appendix", nil, &(&1 && String.replace(&1, root, "{root}"))),
         "tools" => Enum.map(tools, &Map.delete(&1, "estimate"))
       })
 

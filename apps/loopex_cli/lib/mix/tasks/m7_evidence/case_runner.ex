@@ -749,12 +749,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # Technical depth: the runner and oracle live outside the workspace and are
   # pinned with the shell, env, interpreter and catalog before preparation.
   defp stage(case_id, root, context) do
-    # The question-restart and ephemeral cases reuse the feature fixture.
-    name =
-      if case_id in ["m7.question-restart", "m7.ephemeral-question"],
-        do: "feature",
-        else: String.replace_prefix(case_id, "m7.", "")
-
+    name = fixture_name(case_id)
     policy_case = "m7." <> name
     entry = FixtureManifest.entry(context.manifest, name)
     workspace = Path.join(root, "workspace")
@@ -790,17 +785,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            pins: pins
          },
          {:ok, conversations} <- plan(case_id, entry, context),
-         {:ok, transform} <- case_transform(case_id, trusted, context),
-         # The ephemeral case runs its own host session, which asks for no run.
-         {:ok, appendix} <-
-           if(case_id == "m7.ephemeral-question",
-             do: {:ok, %{}},
-             else: harness_appendix(trusted, workspace, runner, policy_case)
-           ),
-         transform =
-           &update_in(transform.(&1), ["session", "instructions"], fn options ->
-             Map.merge(options || %{}, appendix)
-           end),
+         {:ok, transform} <- fixture_transform(case_id, trusted, context),
          {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root, transform),
          {:ok, prepared} <-
            M7FixtureChat.prepare(
@@ -928,17 +913,53 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  # Concept: the profile a case's attempt stages, for profile measurement.
+  @doc false
+  def profile_transform(case_id, trusted, context) do
+    if case_id in @held or Scenarios.get(case_id) != nil,
+      do: case_transform(case_id, trusted, context),
+      else: fixture_transform(case_id, trusted, context)
+  end
+
+  # Concept: a staged fixture case's profile is its case profile plus the
+  # harness appendix; attempts and profile measurement build it here alike.
+  # Technical depth: the ephemeral case runs its own host session, which asks
+  # for no run, so it carries no appendix.
+  @doc false
+  def fixture_transform(case_id, trusted, context) do
+    with {:ok, transform} <- case_transform(case_id, trusted, context) do
+      if case_id == "m7.ephemeral-question" do
+        {:ok, transform}
+      else
+        with {:ok, appendix} <- harness_appendix(case_id, trusted, context) do
+          {:ok,
+           &update_in(transform.(&1), ["session", "instructions"], fn options ->
+             Map.merge(options || %{}, appendix)
+           end)}
+        end
+      end
+    end
+  end
+
   # Concept: the harness supplies what a fixture prompt says it supplies: the
   # approved test invocation and, for a small fixture, the workspace's files.
   # Technical depth: the text is the session's instruction appendix, read from
   # the trusted root outside the workspace; it grants nothing, since the fixture
-  # policy still decides each call.
-  defp harness_appendix(trusted, workspace, runner, policy_case) do
+  # policy still decides each call. The inventory is the catalog fixture's
+  # seeded files, so it is fixed per fixture; the external checkout lists none.
+  defp harness_appendix(case_id, trusted, context) do
+    name = fixture_name(case_id)
+    runner = Path.join(trusted, "run.sh")
+    seeded = Path.join([context.catalog_root, name, "workspace"])
+
     files =
-      Path.wildcard(Path.join(workspace, "**/*"), match_dot: false)
-      |> Enum.filter(&File.regular?/1)
-      |> Enum.map(&Path.relative_to(&1, workspace))
-      |> Enum.sort()
+      if name == "external",
+        do: [],
+        else:
+          Path.wildcard(Path.join(seeded, "**/*"), match_dot: false)
+          |> Enum.filter(&File.regular?/1)
+          |> Enum.map(&Path.relative_to(&1, seeded))
+          |> Enum.sort()
 
     inventory =
       if length(files) in 1..40,
@@ -949,7 +970,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
     # The feature runner's one approved argument is the operator's chosen default.
     argv =
-      if policy_case == "m7.feature",
+      if name == "feature",
         do:
           ~s(["/bin/sh", "#{runner}", DEFAULT], where DEFAULT is the chosen default, ) <>
             ~s("empty" or "literal_null"),
@@ -963,6 +984,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     with :ok <- File.write(path, text, [:exclusive]),
          do: {:ok, %{"append_file" => path}}
   end
+
+  # The question-restart and ephemeral cases reuse the feature fixture.
+  defp fixture_name(case_id) when case_id in ["m7.question-restart", "m7.ephemeral-question"],
+    do: "feature"
+
+  defp fixture_name(case_id), do: String.replace_prefix(case_id, "m7.", "")
 
   defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 

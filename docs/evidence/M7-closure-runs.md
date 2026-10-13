@@ -178,7 +178,8 @@ admits 1,500 for the two question-enabled coding chats and 2,000 for the
 helper parent. The preimage digest prefixes name the credential-free pins in
 `apps/loopex_cli/test/m7_profiles_test.exs`: instruction version, base and
 appendix with the ordered tool generations, without the per-attempt
-environment. Each run fills only these rows' Pending values: the exact resolved
+environment; a staged fixture case's harness appendix names its attempt root
+as `{root}`. Each run fills only these rows' Pending values: the exact resolved
 workspace, state root and catalog digest; the measured system-class estimate;
 and the complete instruction/tool/environment/role preimages with their
 retained reference and SHA-256. Runs never add a profile key. Never store
@@ -186,9 +187,9 @@ credential values in this record.
 
 | Profile key | Ceiling | Owning cases | Preimage digest prefixes | Resolved workspace, state root and catalog digest | Measured system-class estimate | Retained preimages, reference and SHA-256 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `chat-coding` | 1,500 | `m7.baseline.durable`, `m7.external`, `m7.feature`, `m7.instructions.declined`, `m7.interrupt`, `m7.long`, `m7.oversized-source`, `m7.pipe-answer`, `m7.policy-denial`, `m7.provider-switch`, `m7.question-restart`, `m7.repair`, `m7.steer-barrier`, `m7.trace.file`, `m7.trace.flag` | `8b691d14f3d0` | Pending | Pending | Pending |
-| `chat-coding-appendix` | 1,500 | `m7.instructions.admitted`, `m7.instructions.changed` | `8e8b7d9e3e98`, `aec13e0034a4` | Pending | Pending | Pending |
-| `chat-coding-helpers` | 2,000 | `m7.review` | `6e4be2450e74` | Pending | Pending | Pending |
+| `chat-coding` | 1,500 | `m7.baseline.durable`, `m7.instructions.declined`, `m7.interrupt`, `m7.oversized-source`, `m7.pipe-answer`, `m7.policy-denial`, `m7.provider-switch`, `m7.steer-barrier`, `m7.trace.file`, `m7.trace.flag` | `8b691d14f3d0` | Pending | Pending | Pending |
+| `chat-coding-appendix` | 1,500 | `m7.external`, `m7.feature`, `m7.instructions.admitted`, `m7.instructions.changed`, `m7.long`, `m7.question-restart`, `m7.repair` | `8e8b7d9e3e98`, `aec13e0034a4`, `3a25815244ed`, `cfe2da6833a9`, `016cb727465c`, `5cfd18129d17` | Pending | Pending | Pending |
+| `chat-coding-helpers` | 2,000 | `m7.review` | `ed4d20d2e213` | Pending | Pending | Pending |
 | `chat-read-only` | 1,000 | `m7.cross-provider-maintenance`, `m7.thinking-bound`, `m7.thinking-cancel`, `m7.thinking-rounds` | `3e31a652f491` | Pending | Pending | Pending |
 | `daemon-coding` | 1,000 | `m7.daemon-detach` | `06ff722b14a5` | Pending | Pending | Pending |
 | `ask-coding` | 1,000 | `m7.trace.json` | `06ff722b14a5` | Pending | Pending | Pending |
