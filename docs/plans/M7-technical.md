@@ -1070,7 +1070,10 @@ second truth writer. Operator timing against a
    provider may answer one request without it. Then submit one further prompt in
    the same subcase, after that completed assistant turn, and assert from bounded
    native-capture classification that its reply used native thinking for each
-   continuation-required cell. For Haiku default and none, require the registered
+   continuation-required cell; the
+   [2026-10-12 maintainer override](../developer/agent-context-map.md#disposition-m7-review-findings-2026-10-12)
+   requires that thinking only for manual cells and a native continuation for
+   adaptive and omitted cells. For Haiku default and none, require the registered
    nil-continuation, no-native-thinking behavior on both requests instead. Each
    cell must match its exact admitted mapping on both. Both prompts are fixed
    steps of the one counted subcase. No private blocks enter the evidence.

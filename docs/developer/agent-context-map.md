@@ -7494,7 +7494,36 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
 - **Fix.** Both M7 lanes are rehearsed end to end on the paired provider build
   before the matrix, and every harness defect found was fixed at its cause
   ([ledger](../evidence/M7-implementation-tasks.md#final-integration-before-the-closure-matrix-2026-10-11)).
-  No assertion was weakened; the thinking join's literal requirement now
-  applies to the manual-thinking cell that forces it. The one product defect
+  Two oracles changed what they prove: the thinking join's literal
+  requirement applies only to the manual-thinking cell, and the review oracle
+  reads the TSV out of a reply with prose around it; the
+  [review disposition](#disposition-m7-review-findings-2026-10-12) records
+  both. The one product defect
   found, CLI runtimes without the artifact store the read tool's oversized
   results need, is fixed in the CLI host.
+
+<a id="disposition-m7-review-findings-2026-10-12"></a>
+### M7 review findings on `2d7ef989`, 2026-10-12
+
+- **Decision.** The maintainer recorded an override of the
+  [M7 technical plan](../plans/M7-technical.md)'s post-terminal thinking
+  oracle: on the further prompt, a manual-thinking cell still needs a native
+  thinking literal, while an adaptive or omitted cell needs only its native
+  continuation, because there the model chooses whether to think. A cell
+  without required continuation still needs none. The maintainer also chose
+  where T17 runs: the release check on macOS, then
+  `bash scripts/check-release.sh --only cross_uid` alone on Linux at the same
+  SHA, together counted as the closure matrix.
+- **Cause.** A read-only review of `2d7ef989` found the thinking change, which
+  the previous entry wrongly called unweakened. It also found that the
+  review oracle trusted an extract of any length, that redactors leaked part of
+  an overlapping credential, that profile pins omitted the harness appendix,
+  that the provider build had no deadline in `setup_all`, and that Darwin's
+  `script(1)` EOF echo failed the attended fixture.
+- **Fix.** A join test pins all four thinking outcomes. The review extract is
+  taken only from a reply within the oracle's 1,024-byte bound whose only
+  tab-bearing lines are the header and one row; anything else reaches the
+  oracle whole. Overlapping credentials redact as one span. Staged fixture
+  cases are measured with their appendix under `chat-coding-appendix`. The
+  cold build is bounded at 300,000 ms. The fixture strips only the exact EOF
+  echo.
