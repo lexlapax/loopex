@@ -449,7 +449,9 @@ m7_line="forwarded: [--attempts-index] [$work/retained/m7 attempts.jsonl] [--wri
 (cd "$repo" && ATTENDED_TEST_MODE=m7_args bash "$runner" \
   --output "$work/retained/human-m7.log" "${m7_args[@]}") >"$work/human-m7.output" 2>&1 ||
   fail 'human terminal path with M7 options failed'
-tr -d '\r' <"$work/retained/human-m7.log" >"$work/human-m7.lines"
+# The fixture's stdin is not a terminal: Darwin script(1) reads its EOF and the
+# terminal echoes ^D and two backspaces. Only that exact echo is removed.
+tr -d '\r' <"$work/retained/human-m7.log" | sed $'s/^\\^D\b\b//' >"$work/human-m7.lines"
 grep -qxF "$m7_line" "$work/human-m7.lines" ||
   fail 'human terminal path did not forward the M7 options exactly'
 grep -qx 'provider a: <REDACTED>' "$work/human-m7.lines" &&
