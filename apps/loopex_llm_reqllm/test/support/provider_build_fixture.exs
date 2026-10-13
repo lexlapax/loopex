@@ -18,6 +18,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
 
   @source_root Path.expand("../../../..", __DIR__)
   @build_ms 300_000
+  @group_tag "loopex-provider-build-group:"
   @launch_keys [:worker_path, :interpreter_path, :worker_sha256, :build_manifest_sha256]
   @wire_modules [
     Loopex.LLM.ReqLLM,
@@ -72,6 +73,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   end
 
   defp build!(build) do
+    deadline = System.monotonic_time(:millisecond) + @build_ms
     # Concept: the selected runner's compiled closure is only an offline seed.
     # Technical depth: the repository build still forces current source and
     # rebinds its archive manifest. Copies prevent mutation of the runner's
@@ -120,6 +122,24 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
         "GIT_OPTIONAL_LOCKS" => "0"
       })
 
+    {output, status} =
+      run_bounded(
+        [elixir, mix, "loopex.provider.build"],
+        Path.join(@source_root, "apps/loopex_llm_reqllm"),
+        environment,
+        deadline
+      )
+
+    File.write!(Path.join(build, "build.log"), output)
+    unless status == 0, do: raise("provider cold build failed (#{status}):\n#{output}")
+  end
+
+  @doc false
+  # Concept: runs one command as its own process group under an absolute
+  # deadline, for the build and its deadline test.
+  # Technical depth: the shell names the group before waiting on it; stdin is
+  # closed before the command can read anything.
+  def run_bounded([command | arguments], cd, environment, deadline) do
     port =
       Port.open({:spawn_executable, "/bin/sh"}, [
         :binary,
@@ -127,37 +147,114 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
         :stderr_to_stdout,
         args: [
           "-c",
-          "exec \"$1\" \"$2\" loopex.provider.build </dev/null",
+          "set -m; \"$@\" </dev/null & printf '#{@group_tag}%s\\n' \"$!\"; wait \"$!\"",
           "provider-build",
-          elixir,
-          mix
+          command | arguments
         ],
-        cd: Path.join(@source_root, "apps/loopex_llm_reqllm"),
+        cd: cd,
         env:
           Enum.map(environment, fn {name, value} ->
             {~c"#{name}", if(value, do: ~c"#{value}", else: false)}
           end)
       ])
 
-    {output, status} = collect(port, System.monotonic_time(:millisecond) + @build_ms, [])
-    File.write!(Path.join(build, "build.log"), output)
-    unless status == 0, do: raise("provider cold build failed (#{status}):\n#{output}")
+    collect(port, deadline, [])
   end
 
   # Concept: the build has its own deadline, since setup_all has none.
-  # Technical depth: on expiry the build's OS process is killed and the build
-  # fails as unavailable evidence; a fresh extraction's build takes about a
-  # minute.
+  # Technical depth: the deadline starts before the input copies, and a result
+  # arriving after it is not accepted. On expiry the build's whole process
+  # group is killed and joined, so no descendant outlives the failure; the
+  # build fails as unavailable evidence. A fresh extraction's build takes
+  # about a minute.
   defp collect(port, deadline, output) do
     receive do
-      {^port, {:data, data}} -> collect(port, deadline, [output | data])
-      {^port, {:exit_status, status}} -> {IO.iodata_to_binary(output), status}
+      {^port, {:data, data}} ->
+        collect(port, deadline, [output | data])
+
+      {^port, {:exit_status, status}} ->
+        if System.monotonic_time(:millisecond) <= deadline,
+          do: {IO.iodata_to_binary(output), status},
+          else: expire(port, output)
     after
-      max(deadline - System.monotonic_time(:millisecond), 0) ->
-        {:os_pid, pid} = Port.info(port, :os_pid)
-        System.cmd("kill", ["-KILL", Integer.to_string(pid)])
-        Port.close(port)
-        raise "provider cold build exceeded #{@build_ms} ms:\n#{IO.iodata_to_binary(output)}"
+      max(deadline - System.monotonic_time(:millisecond), 0) -> expire(port, output)
+    end
+  end
+
+  defp expire(port, output) do
+    output = IO.iodata_to_binary(drain(port, output))
+
+    # The group is named by the shell's line, or, before that line is read,
+    # by the shell's one child; the shell exits by itself once it is gone.
+    group =
+      case Regex.run(~r/^#{@group_tag}([0-9]+)$/m, output) do
+        [_line, group] -> group
+        nil -> shell_child(port)
+      end
+
+    if group do
+      System.cmd("/bin/kill", ["-KILL", "--", "-" <> group], stderr_to_stdout: true)
+
+      unless await_group_gone(group, System.monotonic_time(:millisecond) + 5_000),
+        do: raise("provider cold build group #{group} survived its kill")
+    end
+
+    with {:os_pid, shell} <- Port.info(port, :os_pid),
+         do: System.cmd("/bin/kill", ["-KILL", Integer.to_string(shell)])
+
+    try do
+      Port.close(port)
+    rescue
+      ArgumentError -> :ok
+    end
+
+    raise "provider cold build exceeded #{@build_ms} ms:\n#{output}"
+  end
+
+  defp drain(port, output) do
+    receive do
+      {^port, {:data, data}} -> drain(port, [output | data])
+    after
+      0 -> output
+    end
+  end
+
+  defp shell_child(port) do
+    with {:os_pid, shell} <- Port.info(port, :os_pid),
+         {table, 0} <- System.cmd("/bin/ps", ["-axo", "pid=,ppid="]) do
+      table
+      |> String.split("\n", trim: true)
+      |> Enum.find_value(fn row ->
+        case String.split(row) do
+          [pid, parent] -> if parent == Integer.to_string(shell), do: pid
+          _other -> nil
+        end
+      end)
+    else
+      _gone -> nil
+    end
+  end
+
+  defp await_group_gone(group, deadline) do
+    {table, 0} = System.cmd("/bin/ps", ["-axo", "pgid=,stat="])
+
+    alive? =
+      table
+      |> String.split("\n", trim: true)
+      |> Enum.any?(fn row ->
+        match?([^group, state] when binary_part(state, 0, 1) != "Z", String.split(row))
+      end)
+
+    cond do
+      not alive? ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        false
+
+      true ->
+        Process.sleep(10)
+        await_group_gone(group, deadline)
     end
   end
 
