@@ -12,9 +12,10 @@ This guide is the first stop for a developer. It has two tracks:
 - **Contributing to Loopex** — changing this repository: its toolchain, its
   checks, where each application lives, and how work is planned and closed.
 
-Both tracks start from a source checkout. Nothing is published as a package, and
-no surface is stable yet: every API, option, record, and wire shape named here
-may change between revisions, so pin an exact revision and read
+Both tracks start from a source checkout, such as the `v0.4.0` source release.
+Nothing is published as a binary or package, and no surface is stable yet:
+every API, option, record, and wire shape named here may change between
+revisions, so pin an exact revision and read
 [Compatibility surfaces](compatibility-surfaces.md#concept) before depending on
 one. The guide routes to the pages that own each topic rather than repeating
 them.
@@ -149,10 +150,9 @@ Technical depth: [Adding an adapter](getting-started-technical.md#technical-gett
 ## Contributing: Toolchain and Checks
 
 Development needs Git, Bash, ordinary POSIX tools, Python 3, and the accepted
-Elixir and Erlang/OTP toolchain. Python runs the M6 demonstration fixture in the
-fast check and the automatic attended release runner. Two supported toolchain
-pairs are pinned,
-and the older one is the floor. While editing, run the focused tests for what
+Elixir and Erlang/OTP toolchain. Python runs a demonstration fixture test in
+the fast check and the attended release runner. Two supported toolchain pairs
+are pinned, and the older one is the floor. While editing, run the focused tests for what
 you touched. Before a change is integrated, the fast check runs once: formatting,
 warning-free compilation, dependency direction, documentation structure, and the
 credential-free test suite. A prose-only change has a documentation mode. The

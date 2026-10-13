@@ -79,7 +79,7 @@ Seven constraints shape every embedding:
 - **The host chooses context.** A direct runtime requires an explicit context
   token budget; nothing in core defaults it.
 - **The durable policy identity is explicit across releases.** The reference
-  composition keeps its default policy revision at `"0.2.0"` for rollback;
+  composition keeps its default policy revision at `"0.2.0"`;
   a host whose policy behavior changes supplies its own revision.
 - **The profiles have different trust and lifetime bounds.** Ephemeral hosted
   calls resolve their selected provider key in the host VM, where trusted code,
@@ -156,7 +156,6 @@ unchanged, retains none in journals/events and names only the module in policy
 telemetry. The same allow/deny/defer validation, callback timeout, owner
 cancellation and explicit durable policy identity apply to both forms. Hosts
 must change their policy revision when a context change changes policy behavior.
-This additive Policy-port extension was selected by the maintainer on 2026-10-02.
 
 Optional options:
 
@@ -257,10 +256,10 @@ work has completed.
 | Sessions | `create_session/3`, `creation_startup_status/2`, `resume_session/3`, `session_status/2` |
 | Creation evidence | `lookup_create_result/4`, `creation_provenance/2` |
 | State root and placement | `state_root/0` (reads `LOOPEX_HOME`), `runtime_placement_id/1`; the session catalogue is the daemon index, which hosts write (ADR 0070) |
-| Attachment | `attach/2`, `attach/3`, `command/2`, `command_with_configuration/3`, `command_disposition/2`, `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`, `diagnostic/2` |
+| Attachment | `attach/2`, `attach/3`, `command/2`, `command_with_configuration/3`, `command_disposition/2`, `next_event/1`, `snapshot/1`, `attachment_status/1` |
 | Project skills | `resource_catalog/2`, `read_resource/3` |
 | Artifacts | `open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` |
-| Diagnostics | `trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` |
+| Diagnostics | `diagnostic/2`, `trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` |
 | Recovery | `reconciliation_query/1`, `reconcile/2`, `prepare_resume_session/3`, `prepared_session_configuration/1`, `prepared_session_startup/1`, `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3` |
 
 `lookup_create_result/4` takes the runtime, command ID, original session
@@ -274,7 +273,6 @@ runtime loss returns `{:error, :runtime_unavailable}`.
 A page contains at most sixteen creating-command projections and retains its
 first high-water ordinal; only a nil next cursor proves complete coverage.
 These public reads grant no mutation authority and add no Store callback.
-They were explicitly approved by the maintainer on 2026-10-02.
 
 `create_session/3` and `resume_session/3` require a `:command_id`; an exact
 re-presentation returns the retained result, and changed content under the same
@@ -317,8 +315,9 @@ stops at the acknowledged position rather than the durable tail, so the anchor
 never derives run state from a row delivery is still withholding. Delivery is
 fenced the same way: a row whose owner still holds an unresolved transaction is
 withheld until re-presentation settles it; the fence delays a read and never
-reorders or drops one. `attachment_status/1`, `progress/2`, and `diagnostic/2`
-are transient observations. None of those grants authority or substitutes for
+reorders or drops one. `attachment_status/1` is a transient observation, and
+`diagnostic/2` emits one best-effort item to the runtime's `:diagnostics_to`
+sink. Neither grants authority or substitutes for
 Store history.
 
 <a id="technical-embedding-configure-compaction"></a>
@@ -696,8 +695,8 @@ runtime's `:progress_sink` option describes, and calls
 | `:model` | Optional hosted `provider:model`; default `anthropic:claude-haiku-4-5`. The durable profile refuses `ollama:`. |
 | `:bounds` | Optional map of positive unsigned-64-bit `:max_turns`, `:token_budget` and `:deadline_ms`; omitted members keep runtime defaults. |
 | `:sampling` | Optional exact `%{"max_tokens" => n}` with `n` from 1 to 1,000,000; it sets the captured initial configuration's `max_tokens`. |
-| `:active_tools` | Optional unique list of declared tool IDs, from the four coding tools and `loopex.grep`, `loopex.find`, `loopex.ls`. Omission keeps the coding four active. |
-| `:context_token_budget` | Defaults to `8_192` estimated tokens; an explicit valid value is forwarded unchanged. |
+| `:active_tools` | Optional unique list of declared tool IDs, from the four coding tools, `loopex.grep`, `loopex.find`, `loopex.ls`, and `loopex.ask`, which adds the fixed question definition. Omission keeps the coding four active. |
+| `:context_token_budget` | Omission derives the input allowance from the selected model's captured context window minus its reply allowance, or `8_192` estimated tokens for an unknown window; an explicit valid value is forwarded unchanged. |
 | `:cleanup_grace_ms`, `:process_probe` | Forwarded to the session and executor together, so a run's ending reports the period its cleanup ran under. |
 | `:artifact_transfers` | `false` by default. `true` hands the artifact store to the runtime for public attachment transfers. The composition always owns one transfer process for executor job ranges; both uses share its capacity. |
 | `:recover_stale_writer` | `false` by default; see [recovery](#technical-embedding-recovery). |
@@ -707,8 +706,7 @@ runtime's `:progress_sink` option describes, and calls
 Nonempty durable selections register only the current shipped coding tools:
 read, grep, find and ls at 1.1.0, and write, edit and bash at 1.0.0. Each ID
 selects that one exact definition. Configured chat retains its selection and
-artifact-read capability in v3 genesis. The maintainer's pre-1.0 rule retires
-the superseded read/search definitions and the old default-selection shim.
+artifact-read capability in v3 genesis.
 An empty active selection still starts
 the job transfer owner, because resumed sessions use their retained tools.
 
@@ -908,9 +906,10 @@ the question, the session stays suspended and dispatches nothing rather than let
 a different policy, or a different revision of it, decide what a committed
 answer meant.
 
-A caller reads the open question from `Loopex.attach/2` and `attach/3`, which
-return an `open_interaction` view beside the snapshot, captured at the same
-cursor, and from `Loopex.session_status/2`. The view carries the identity,
+A caller reads the open question from the attachment `Loopex.attach/2` and
+`attach/3` return, whose `Loopex.Attachment.open_interaction/1` view is captured
+at the snapshot's cursor and also appears in the revision-3 snapshot, and from
+`Loopex.session_status/2`. The view carries the identity,
 prompt, choices, expiry, and status, the selected choice only after an answer
 was admitted, and never the `decision_ref`. Transport loss changes no
 interaction state, which is what lets a new server process present the same
@@ -951,8 +950,9 @@ provenance. The answer never authorizes a later effect. Read
 for expiry, restart and terminal precedence, and use
 [chat answers](../operator/coding-sessions.md#operator-sessions-chat-input)
 or the [one-shot responder](#technical-embedding-question-responder) at the
-host boundary. These native events do not activate new foreground or daemon
-wire generations; their serving remains separate work.
+host boundary. The `/3` and `/4` wire generations carry these events, including
+`interaction.answered` and `interaction.declined`; see
+[the protocol records](app-server-protocol-technical.md#technical-protocol-records).
 
 <a id="technical-embedding-transfers"></a>
 ### Bounded Artifact Transfers
@@ -1121,8 +1121,7 @@ none of these facts. Unknown or corrupt required capture returns
 `prepared_startup_too_large`, without truncation. The read shares the existing
 holder/owner fences and neither spends activation nor mutates or dispatches
 work. It exposes no private continuation, credentials or routing handles and
-leaves the prepared configuration result unchanged. This separate public read
-was approved by the maintainer on 2026-10-02.
+leaves the prepared configuration result unchanged.
 
 Reference chat retains `%{"surface" => "chat", "workspace_binding" =>
 %{"revision" => 1, "workspace_ref" => reference}}` in exact genesis options.
@@ -1133,8 +1132,7 @@ pending effect references, abandoning on refusal. An explicit workspace flag
 does not adopt an unbound session. Execution/resource placement still requires
 the outer host's recheck immediately before activation. Configuration inspection
 uses only an equal-width cost marker and never returns or publishes it as an
-identity. These current-format checks implement the approved binding and the
-maintainer's pre-1.0 compatibility retirement.
+identity.
 
 Activating a prepared owner is the host's statement that the process which
 dispatched the last effect is gone, so the coordinator settles that effect

@@ -69,9 +69,10 @@ proves every started component alive:
 
 | Step | Failure class |
 | --- | --- |
+| Provider-binding and creation-defaults preparation, which acquire nothing | `credential_plane_start_failed`, `composition_start_failed` |
 | Placement lock | `placement_active`, `placement_unverifiable`, `placement_lock_failed` |
 | Credential plane (custody and registry) | `credential_plane_start_failed` |
-| Composition edges through `LoopexComposition.start_edges/2` | `composition_start_failed`, or the Store marker classes |
+| Progress sink, then composition edges through `LoopexComposition.start_edges/2` | `composition_start_failed`, or the Store marker classes |
 | Session index open | `session_index_*` |
 | Collaboration owner | `daemon_services_start_failed` |
 | Socket bind and permission read-back | `socket_*` |
@@ -107,8 +108,7 @@ and EventDispatcher, so losing either — even one the runtime's supervisor
 restarts — is `runtime_lost`; and before an orderly stop reports success it
 checks for any owned component lost while the stop ran, so a stop never exits
 zero after one. `teardown_ms` was measured at 119 ms for 512
-initialized, attached connections on the development machine; the closure
-evidence records the measurement on each supported toolchain.
+initialized, attached connections on the development machine.
 
 <a id="technical-daemon-connection"></a>
 ## One Connection's Life

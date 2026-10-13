@@ -41,9 +41,10 @@ used, so what a model was shown stays reconstructible from session records
 after the registry that held them has changed. Those records persist only in
 the durable profile. Registration is append-only and scoped to one runtime.
 A registered tool is not necessarily offered to a model. The reference
-distribution ships seven tools under the reserved
-`loopex.` namespace: `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`.
-The durable default offers the original four coding tools.
+distribution ships seven coding tools under the reserved
+`loopex.` namespace: `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`,
+plus the `loopex.ask` question definition a host may enable. The durable
+default offers the four coding tools `read`, `write`, `edit` and `bash`.
 
 **Context is admitted, not assumed.** Required context — the system block,
 history, steers, and tool definitions — is measured before any optional content
@@ -125,6 +126,13 @@ refused at registration rather than ignored at dispatch.
 `validate/1` is total and returns every reason it found, each a bounded binary
 naming the field. `valid?/1` is the boolean form.
 
+`question_definition/0` returns the one exact interaction definition,
+`loopex.ask`. Its additional `class: "interaction"` member selects definition
+format `loopex.tool_definition.v2` and permits a zero artifact budget for that
+literal generation only; a definition without `class` is an effect tool in
+format v1. Interaction declarations are never narrowed or completed with
+defaults.
+
 `normalize/1` completes a host's partial declaration: it accepts `input_schema`
 as a name for `parameter_schema`, defaults `result_shape` to text, defaults
 `idempotency_class` to `never_blind_retry`, and defaults `budgets` to 120000 ms,
@@ -143,8 +151,8 @@ diagnostics sink at start. That plane is transient: a runtime started with no
 documented on `normalize/1` itself.
 
 `canonical_bytes/1` covers the definition-version tag
-`loopex.tool_definition.v1`, the canonical-encoding version, and all nine
-fields, and raises on an invalid definition rather than returning bytes a caller
+(`loopex.tool_definition.v1`, or `v2` with `class`), the canonical-encoding
+version, and all nine fields plus `class` when present, and raises on an invalid definition rather than returning bytes a caller
 might retain. `definition_digest/1` is its lowercase hexadecimal SHA-256, and
 `generation/1` returns `{tool_id, tool_version, definition_digest}` — the value a
 staged request records, a tool intent journals, and a grant binds. `model_facing/1`
@@ -510,14 +518,14 @@ function, returns the same result, and reports a count of zero.
 the command's output, whose standard error is merged into standard output,
 becomes one progress event carrying `progress_sequence`, `stream: "stdout"`,
 `byte_offset`, and at most 65,536 bytes of `chunk`, and the receipt's
-`progress_count` is exactly the number of events it emitted. The three
+`progress_count` is exactly the number of events it emitted. The six
 filesystem tools emit none and report zero. Either way the coordinator closes
 the operation's domain with a truthful count, and the item reaches a protocol
 client as `tool_progress`.
 
 ### The Host Policy Port
 
-One callback, `decide/1`, receives bounded plain data: session, run, and
+The required callback, `decide/1`, receives bounded plain data: session, run, and
 tool-call identity, the resolved generation triple, validated arguments, effect
 class, idempotency class, and the workspace lease reference. It carries no pid,
 credential, or provider value.
@@ -531,15 +539,15 @@ exhaustive and every path that is not a well-formed allow ends in a denial:
 | --- | --- |
 | `{:allow, context}` in the bounded shape or `nil` | grant issued |
 | `{:allow, context}` outside the bounded shape | `{:deny, :policy_unavailable}` |
-| `{:deny, category}` | durable denial, no dispatch |
+| `{:deny, category}` in `reason_categories/0` | durable denial, no dispatch |
+| `{:deny, category}` outside that enumeration | `{:deny, :policy_unavailable}` |
 | `{:defer, _}` | `{:deny, :interaction_unsupported}` |
 | callback raises, exits, or times out | `{:deny, :policy_unavailable}` |
 | any other return shape | `{:deny, :policy_unavailable}` |
 
 That table is the refusing projection a session with defers disabled uses: it
 has nowhere to put a question, so it reads a `defer` as
-`{:deny, :interaction_unsupported}`. ADR 0070 retired the separate one-shot
-`Loopex.Policy.decide/2` facade.
+`{:deny, :interaction_unsupported}`.
 
 A session that admits defers instead keeps a validated deferred question, as
 `Loopex.Policy.evaluate/2` returns it, under
@@ -586,8 +594,7 @@ cleanup. Production invokes it through configured `cancel/4`; one checked
 formula derives the observation window from the session's committed cleanup
 period. The facade maps every other answer, raise, exit, timeout, malformed
 answer, and the defensive case of a legacy module missing the required callback
-to unconfirmed cleanup. `cancel/4` is the only entry; ADR 0070 retired the
-fixed-bound `cancel/3`.
+to unconfirmed cleanup. `cancel/4` is the only entry.
 
 `Loopex.Executor.Local.cancel/2` answers `{:ok, :cleaned}` only after the job's
 receipt with `cleanup_confirmation: :confirmed` is durably published and its
@@ -683,11 +690,11 @@ reconciliation.
 `CodingTools.present/1` remains conformance-only: nothing in the production path
 calls it.
 
-### The Four Bootstrap Coding Tools
+### The Shipped Coding Tools
 
 `Loopex.Executor.Local.CodingTools.definitions/0` ships seven
-reference-distribution declarations in the reserved namespace. The original
-four coding tools remain the durable default active set:
+reference-distribution declarations in the reserved namespace. These four
+coding tools are the durable default active set:
 
 | `tool_id` | Effect class | Idempotency | Output ceiling |
 | --- | --- | --- | --- |
@@ -696,8 +703,8 @@ four coding tools remain the durable default active set:
 | `loopex.edit` | `workspace_write` | `never_blind_retry` | 4096 bytes |
 | `loopex.bash` | `process` | `never_blind_retry` | 16384 bytes |
 
-M6 adds three read-only definitions. They are available for explicit durable
-selection and the ephemeral `:read_only` preset:
+Three further read-only definitions are available for explicit durable
+selection and, with `loopex.read`, form the ephemeral `:read_only` preset:
 
 | `tool_id` | Effect class | Idempotency | Output ceiling |
 | --- | --- | --- | --- |
@@ -729,7 +736,7 @@ A reached traversal, result, cumulative 16 MiB grep-read or output bound adds
 the final `N<TAB>truncated<LF>` notice. A grep file over its 1 MiB per-file
 limit is instead skipped with `too_large` counted. `<TAB>` and `<LF>` denote
 single bytes, not literal angle-bracket text. See the
-[M6 tool contract](../plans/M6-technical.md#technical-plan-tools)
+[read-only tool contract](../plans/M6-technical.md#technical-plan-tools)
 for the exact grammar, encoding and ceilings.
 
 A 16,384-byte inline ceiling leaves three quarters of the Store's
@@ -805,7 +812,8 @@ tool's own wall-time budget.
 Context policy and Store capacity are independent. Runtime requires one positive
 unsigned-64-bit `:context_token_budget` at the top level; it is not a fourth run
 bound and can never produce `bound_reached`. The reference composition and
-command resolve omission to `8_192`, while direct Runtime omission and every
+command derive omission from the selected model's captured context window minus
+its reply allowance, or `8_192` for an unknown window, while direct Runtime omission and every
 explicit invalid value fail before Runtime Control, session state, or Store.
 Recovery and promoted follow-up work reuse the committed value. Prepared
 `resume` and `cancel` compare an explicit value only after cleanup configuration
@@ -816,9 +824,9 @@ default.
 `loopex.context_bytes.v2` measures the exact final provider-visible messages and
 active model-facing tool projections. Store separately normalizes and measures
 each private record and unstamped public-event payload against its exact 65,536-
-byte item ceiling before that value can commit or authorize later work. The
-M2 reference fixture at its recorded revision, before the M7 compaction of
-the tool descriptions, makes the distinction concrete: system plus four projected
+byte item ceiling before that value can commit or authorize later work. An
+earlier reference fixture with longer tool descriptions makes the distinction
+concrete: system plus four projected
 tools is 2,393 canonical bytes and 799 estimated tokens; the system message
 plus the four full canonical definitions occupy 4,382 component bytes and
 measure 1,462 estimator tokens when each component is measured separately;
@@ -961,8 +969,9 @@ does not approach those structural ceilings.
 
 The resource header has at most 37 rows and 8 KiB metadata. Its identities and
 selection digest bind the frozen run selection; source descriptors bind each
-actual staged body. The resource-aware model-request record uses receipt revision 3 and
-adds the `resource_pack` totals bucket; earlier receipt revisions validate as before.
+actual staged body. The resource-aware model-request receipt keeps provider
+revision 4, adds the `resource_packs` header member, and adds the
+`resource_pack` totals bucket.
 If the metadata cannot fit, resources are withheld before
 content resolution. If any retained body is missing or inconsistent, the entire
 resource class is withheld, including earlier provisional blocks. Root project

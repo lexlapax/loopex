@@ -311,8 +311,9 @@ LOOPEX_HOME="$(mktemp -d)" mix run durable.exs
 nothing. `{:error, :empty}` from the attachment is transient, so the reader
 backs off and asks again. The durable composition also accepts optional
 `:model`, `:bounds`, `:sampling` and `:active_tools` to change its defaults;
-they are validated, not silently ignored. `:active_tools` can select the new
-`loopex.grep`, `loopex.find` and `loopex.ls` read-only tools.
+they are validated, not silently ignored. `:active_tools` can also select the
+`loopex.grep`, `loopex.find` and `loopex.ls` read-only tools and the
+`loopex.ask` question tool.
 
 In the durable profile, the model's streamed text arrives separately as items
 in the `Loopex.ProgressSink` passed as `:progress_sink`, and is never the
@@ -475,8 +476,9 @@ returned:
 
 The holder renews by sending `session.acquire_control` again within the 30 s
 term, and releases with `session.release_control`. The command's live forms —
-`loopex run --daemon SOCKET`, `loopex attach SESSION --daemon SOCKET`, and
-`loopex sessions --daemon SOCKET` — are clients of the same socket, and
+`loopex run --daemon SOCKET`, `loopex resume --daemon SOCKET SESSION`,
+`loopex attach --daemon SOCKET SESSION`, and `loopex sessions --daemon SOCKET` —
+are clients of the same socket, and
 `clients/node/daemon-takeover.mjs` is an independent one. Running and exit statuses are in
 [the operator daemon page](../operator/daemon.md#concept); the processes and
 bounds behind them are in [the daemon pair](daemon-technical.md#technical-depth).
@@ -519,8 +521,8 @@ Concept: [Contributing: toolchain and checks](getting-started.md#concept-getting
 | The fast check, once per integration candidate | `bash scripts/check.sh` |
 | The fast check for a prose-only change | `bash scripts/check.sh --docs` |
 | The mode CI picks from the diff | `bash scripts/check.sh --select` |
-| M6 closure checks for the exact committed candidate | `bash scripts/floor-lane.sh SHA --output-dir DIR --long-bound`, then `bash scripts/attended-release.sh --output LOG` with the history-safe provider credential, pinned Node, running Ollama and `LOOPEX_RELEASE_OLLAMA_MODEL` described in [DEVELOPMENT.md](../../DEVELOPMENT.md) |
-| M7 closure release check for the exact committed candidate | `bash scripts/attended-release.sh --output LOG --attempts-index FILE --writer ID --host ID --markers DIR --m7-config FILE --operator NAME`, with providers A and B's credentials as described in [DEVELOPMENT.md](../../DEVELOPMENT.md) and the [M7 validation runbook](../operator/m7-validation.md) |
+| The floor-pair lane for the exact committed closure candidate | `bash scripts/floor-lane.sh SHA --output-dir DIR --long-bound` |
+| The attended release check for the exact committed closure candidate | `bash scripts/attended-release.sh --output LOG --attempts-index FILE --writer ID --host ID --markers DIR --m7-config FILE --operator NAME`, with the history-safe provider credentials, pinned Node, running Ollama and `LOOPEX_RELEASE_OLLAMA_MODEL` described in [DEVELOPMENT.md](../../DEVELOPMENT.md) and the [validation runbook](../operator/m7-validation.md) |
 
 A local pre-merge fast check counts only from a clean candidate. Retain its
 complete output and exact HEAD SHA outside the repository; otherwise use the
@@ -536,8 +538,8 @@ For the attended runner, load `LOOPEX_PROVIDER_API_KEY` using the
 [history-safe input pattern](../../DEVELOPMENT.md) before running it;
 do not put its value in a shell command line. The direct
 `bash scripts/check-release.sh` remains the underlying release check for
-other workflows; closure does not run it again. For M7 the attended runner
-forwards the matrix options to it.
+other workflows; closure does not run it again. The attended runner forwards
+the matrix options to it.
 
 Each application's test helper excludes the release-only tags —
 `real_provider`, `long_bound`, `node_client`, and `cross_uid` where they occur —
@@ -612,7 +614,7 @@ Start the runtime with `diagnostics_to: self()`, then:
 
 ```elixir
 {:ok, _config} = Loopex.trace(runtime, %{modules: [Loopex.Runtime.Control], level: :calls})
-{:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-1")
+{:ok, _session_id} = Loopex.create_session(runtime, %{}, command_id: "create-1")
 {:ok, status} = Loopex.trace_status(runtime)
 IO.inspect(status, label: "Trace counts")
 :ok = Loopex.trace_stop(runtime)
