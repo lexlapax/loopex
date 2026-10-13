@@ -24,7 +24,8 @@ What you can do:
 
 - run one daemon per state root in the foreground, under a terminal or a
   service manager;
-- import a state root that offline commands have already written;
+- start on a state root that offline commands have already written, with no
+  import step;
 - start sessions, follow them, and take control of one whose controller died;
 - list sessions and read the daemon's status as JSON;
 - stop it in an orderly way and read its exit status.
@@ -337,7 +338,7 @@ class ends the process within 35 s of the first fatal.
 
 | Status | Class | Meaning |
 | --- | --- | --- |
-| 0 | — | Orderly stop, or a successful import |
+| 0 | — | Orderly stop |
 | 1 | — | Command-line refusal; the usage text goes to standard error |
 | 65–75 | `state_root_required`, `state_root_unusable`, `workspace_required`, `workspace_unusable`, `provider_launch_required`, `provider_launch_invalid`, `policy_required`, `policy_unknown`, `provider_credential_required`, `project_skills_unusable`, `cleanup_grace_invalid` | A missing or invalid start input, before any effect |
 | 76–78 | `placement_active`, `placement_unverifiable`, `placement_lock_failed` | The root's placement lock |

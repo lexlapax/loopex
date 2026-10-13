@@ -291,34 +291,39 @@ kinds its replay filter accepts:
 
 | Kind | What it fixes |
 | --- | --- |
-| `session_genesis_v2` | The session's creation: its options and the runtime configuration it committed, written by the runtime-control creation transaction. |
+| `session_genesis_v3` | The session's creation: its original options and the complete captured initial configuration, tool selection, policy defer mode and runtime configuration, written by the runtime-control creation transaction. |
 | `owner_advanced` | The succession that made this coordinator the current owner. |
 | `resource_command_v1` | One settled-session `admit_resources` or `activate_skill` outcome, including a retained stateful refusal. |
-| `prompt_admitted_v2` | One accepted prompt: its content, bounds, cleanup grace, and context ceiling, before any request stages. |
+| `prompt_admitted_v3` | One accepted prompt: its content, the run's bounds and context ceiling, and the configuration version it runs under, before any request stages. |
 | `command_admitted` | One admitted `steer`, `follow_up`, or `abort`, or a prompt the session refused at admission with its reason. |
+| `session_configuration_admitted_v2` | One `configure` command's admission: its changes and, when accepted, the complete next configuration. |
+| `compact_command_admitted_v1`, `compact_abort_admitted_v1` | One `compact` command's admission, or an accepted abort of a pending compaction. |
+| `policy_interaction_answer_admitted_v1` | One bounded answer committed against exactly one open policy question, with its answer digest. |
+| `model_question_response_admitted_v2`, `model_question_abort_admitted_v2` | One accepted answer to an open model-originated question, or an accepted abort while one is open. |
 | `command_admission_refused_v1` | A command refused before admission because its own bytes exceed the Store's item ceiling. |
-| `context_admission_refused_v1` | A request refused at context admission: the dimension, the observed value, the limit, and the descriptor counts behind the digest. |
+| `context_admission_refused_v2` | A request refused at context admission: the dimension, the observed value, the limit, and the descriptor counts behind the digest. |
 | `deadline_staging_failed_v1` | A request whose derived deadline could not be staged: the clock domain or the overflow that refused it. |
-| `model_request_committed` | The exact staged request bytes, its `staged_request_digest`, the applied steer, and the context receipt. |
-| `model_request_committed_resources_v1` | The same for a session with resource admission, with a resource-aware receipt. |
+| `model_request_committed_v2` | The exact staged `loopex.model_request.v2` bytes, its `staged_request_digest`, the applied steer, and the context receipt. |
+| `model_request_committed_resources_v2` | The same for a session with resource admission, with a resource-aware receipt. |
 | `model_attempt_opened_v1` | `run_id`, `turn_id`, `operation_id`, `attempt`, `staged_request_digest`. |
-| `model_attempt_settled_v2` | Those five plus `transport`, `termination`, `conversation`, `next`, `result`, `accounting`; unreadable results retain explicit accounting evidence. |
-| `model_attempt_settled_v1` | Legacy settlement with the same root keys; accepted only before the first version-2 settlement and without ambiguous unreadable reported accounting. |
+| `model_attempt_settled_v3` | Those five plus `transport`, `termination`, `conversation`, `next`, `result`, `accounting`; unreadable results retain explicit accounting evidence. |
 | `model_termination_admitted_v1` | Those five plus `cause`, `deadline`, `observed`. |
-| `effect_intent_committed` | The tool operation's intent, durable before dispatch. |
-| `executor_receipt_committed` | The receipt matched against the dispatched job. |
-| `tool_result_committed` | A terminal tool outcome, including a denial or an unresolvable name. |
-| `outcome_unknown_committed` | An effect whose outcome can no longer be expected, and whose domain is fenced. |
+| `effect_intent_committed_v2` | The tool operation's intent, durable before dispatch. |
+| `executor_receipt_committed_v2` | The receipt matched against the dispatched job. |
+| `tool_result_preparation_state_v1`, `tool_result_reference_prepared`, `tool_result_preparation_failed_v1` | Retention of inline tool results as artifact references (ADR 0041): the reserved storage credit, the prepared reference, or the failure. |
+| `tool_result_committed_v2` | A terminal tool outcome, including a denial or an unresolvable name. |
+| `outcome_unknown_committed_v2` | An effect whose outcome can no longer be expected, and whose domain is fenced. |
 | `run_terminal_committed` | The run's terminal disposition. |
 | `interaction_requested_v1` | One durable question a policy `defer` created: its bounded request, the three distinct digests, the policy identity and revision that asked it, its creation instant and effective expiry. |
-| `interaction_answer_admitted_v1` | One bounded answer committed against exactly one open question, with its answer digest. |
 | `interaction_resolved_v1` | How that question ended: answered and resolved, denied, expired, or cancelled. |
+| `model_question_requested_v1`, `model_question_settled_v2` | One question the model asked through an allowed question-tool call (ADR 0045), and how it settled. |
+| `maintenance_episode_admitted_v1`, `standalone_maintenance_episode_admitted_v1`, `maintenance_request_committed_v1`, `maintenance_attempt_opened_v1`, `maintenance_attempt_settled_v3`, `maintenance_termination_admitted_v1`, `maintenance_episode_terminal_v1`, `compact_command_completed_v1`, `compaction_checkpoint_committed_v1`, `standalone_compaction_checkpoint_committed_v1` | A compaction episode (ADR 0043): its admission, its maintenance-model request, attempt and settlement, its end, and the checkpoint it commits. |
 
 `executor_receipt_candidate` is not committed. It is the kind a projected receipt
 is validated under so an oversized or non-plain receipt becomes a truthful
 unproven outcome rather than an exception that kills the owner.
 
-Version-2 unreadable results carry either exact `accounting_evidence: {kind:
+Unreadable results carry either exact `accounting_evidence: {kind:
 none}` or `validated_reply_compaction_v1` with normalized `usage`, `dimension`,
 `observed`, and `limit`. Bytes retain the Store-normalized full settlement's
 exact external-term size above 65,536; depth retains the first rejected depth,
@@ -331,10 +336,11 @@ reply or contacting a provider. A terminal settlement and its exact consecutive
 `run_terminal_committed` apply accounting, conversation, and outbox effects
 together; an incomplete or mismatched pair refuses recovery. Unknown commits
 re-present the already normalized transaction and its original identity.
-Legacy unreadable reported accounting refuses specifically as
-`ambiguous_legacy_provider_accounting`. The complete shapes and compatibility
-boundary are in
-[ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-decision).
+Retired settlement versions refuse in recovered history. The accounting
+provenance rule is in
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-decision),
+and the current `model_attempt_settled_v3` shape in
+[ADR 0044](../adr/0044-run-model-and-reasoning-configuration-technical.md#technical-depth).
 
 Public event kinds are `user.message_appended`, `run.started`,
 `assistant.message_appended`, `tool.started`, `tool.finished`, `run.finished`,
@@ -366,10 +372,10 @@ sequenceDiagram
     participant X as Executor
 
     H->>S: prompt command with its canonical bytes
-    S->>ST: prompt_admitted_v2 plus user.message_appended
+    S->>ST: prompt_admitted_v3 plus user.message_appended
     ST-->>S: committed
     S->>S: project conversation, then ContextAdmission.evaluate
-    S->>ST: model_request_committed plus model_attempt_opened_v1, and run.started on turn one
+    S->>ST: model_request_committed_v2 plus model_attempt_opened_v1, and run.started on turn one
     ST-->>S: committed
     S->>W: start worker blocked on its permit reference
     S->>C: provider_dispatch with binding and authority
@@ -378,16 +384,16 @@ sequenceDiagram
     W->>M: complete with request, options, progress only while current
     M-->>W: complete reply, or a classified failure
     W-->>S: attempt evidence
-    S->>ST: model_attempt_settled_v2 plus assistant.message_appended
+    S->>ST: model_attempt_settled_v3 plus assistant.message_appended
     ST-->>S: committed
     S->>P: decide for the head tool call
     P-->>S: allow with context, or a closed deny category
-    S->>ST: effect_intent_committed plus tool.started
+    S->>ST: effect_intent_committed_v2 plus tool.started
     ST-->>S: committed
     S->>X: execute with job, grant, options, progress
     X->>X: reserve or join without authority; reconcile and permit exact live holder
     X-->>S: receipt, or an error declaring effect-start
-    S->>ST: executor_receipt_committed plus tool.finished
+    S->>ST: executor_receipt_committed_v2 plus tool.finished
     ST-->>S: committed
     S->>S: Bounds.decide for the next action
     S->>ST: run_terminal_committed plus run.finished
@@ -395,7 +401,7 @@ sequenceDiagram
 
 Staging is refused before any provider call when the request exceeds either
 committed ceiling, and a denial, an unresolvable tool name, or a passed run
-deadline commits a terminal `tool_result_committed` instead of an intent. The
+deadline commits a terminal `tool_result_committed_v2` instead of an intent. The
 loop returns to the next remaining tool call in the assistant's own order and
 reaches the terminal step only when the last one is answered.
 
@@ -485,18 +491,20 @@ Concept: [Five replaceable boundaries](architecture.md#concept-arch-ports).
 | Port | Callbacks |
 | --- | --- |
 | `Loopex.Store` | `transact/2`, `transaction_status/4`, `runtime_command/2`, `ownership_head/3`, `load_records/4`, `load_events/4` |
-| `Loopex.Model` | `complete/3` |
+| `Loopex.Model` | `complete/3`, optional `prepare_configuration/5` |
 | `Loopex.Executor` | `execute/5`, `cancel/2`, optional `retained_receipt/2` |
-| `Loopex.ArtifactStore` | `put/3`, `fetch/2`, `stat/2`, `describe/2`, optional `open_transfer/4`, `read_transfer/3`, `close_transfer/2` |
-| `Loopex.Policy` | `decide/1` |
+| `Loopex.ArtifactStore` | `put/3`, `fetch/2`, `stat/2`, `describe/2`, optional `reserve_transfer/3`, `open_transfer/3`, `read_transfer/3`, `close_transfer/2`, optional `read_job_range/2` |
+| `Loopex.Policy` | `decide/1`, optional `decide/2` for a contextual reference |
 
-The ArtifactStore transfer triple is one optional capability, declared through
+The four ArtifactStore transfer callbacks are one optional capability, declared through
 `@optional_callbacks` and detected with `Loopex.ArtifactStore.supports_transfer?/1`,
 so an adapter without it stays conformant and the facade refuses the family
 rather than crashing on a missing function or falling back to an unbounded
-`fetch/2` ([ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept)).
+`fetch/2`; a partial set counts as unsupported
+([ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept),
+[ADR 0066](../adr/0066-owned-artifact-transfer-opening.md#concept)).
 
-`Loopex.Policy` has exactly one callback, `decide/1`, whose answers are
+`Loopex.Policy` has one required callback, `decide/1`, whose answers are
 `{:allow, context}`, `{:deny, category}`, or `{:defer, request}`. The session
 coordinator resolves it under the session's committed defer mode: a refusing
 session projects a defer to `{:deny, :interaction_unsupported}`, and an admitting

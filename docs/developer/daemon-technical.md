@@ -142,11 +142,14 @@ a write the registry reclaims other connections, unattached first and then
 attached, largest buffer first; a reclaimed attached connection writes `detached` at
 its last emitted cursor, best effort, and closes.
 
-Core delivers progress to `{:session, pid}` sinks as
-`{:loopex_progress, session_id, item}`. `Service` forwards it to the registry,
-which routes it to every connection attached to that session. Each connection
-keeps at most 32 progress records and 512 KiB, written only when no durable
-output is waiting; excess progress is dropped.
+Core offers each session-tagged progress item to the `Loopex.ProgressSink`
+that `Service` opened and passed as the runtime's `progress_sink`. `Service`
+takes each item, offers a copy to the registry's own sink, and releases its
+lease. The registry takes from its sink and offers a copy to the sink of every
+live, initialized connection attached to that session, then releases. Each
+connection's sink holds at most 32 progress records and 512 KiB; a connection
+writes progress only when no durable output is waiting, and a full sink drops
+excess progress.
 
 An attached connection idle for `idle_eviction_ms` (10 minutes) is evicted with
 `detached`; a connection holding a live lease is exempt while it holds it. The

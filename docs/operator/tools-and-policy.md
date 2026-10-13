@@ -277,8 +277,10 @@ the interaction exists only in memory and the host uses `answer/3`. The policy
 is asked again after the answer, which is an input to that decision, never the
 decision itself. The app server's `ask` stance uses the durable path; see
 [app server operations](app-server.md#operator-app-server-launching). The
-`loopex` command and the daemon ship no stance that defers, and the command
-has no way to answer a question.
+`loopex` command and the daemon ship no stance that defers. The one-shot
+`loopex run` command cannot answer a question; `loopex chat` answers the open
+one with `/answer` or `/decline`, as
+[chat input](coding-sessions.md#operator-sessions-chat-input) describes.
 
 Failure fails closed. A policy that raises, times out after five seconds, or
 returns a malformed value becomes a denial rather than falling through to allow.
@@ -347,11 +349,15 @@ another client. The duplication follows from that dependency rule.
 ## Artifacts
 
 A tool whose output exceeds its declared bound does not flood the conversation.
-In a durable session with an artifact store, the excess bytes spill under your
-state root, and the durable event carries the content digest, media type, size,
-role and an opaque retrieval reference. Each shipped tool collects at most
-8 MiB of output; a command that prints more has the remainder dropped, and the
-result says so. For that durable case, the terminal prints the reference beside
+In a durable session with an artifact store, the complete output is retained
+under your state root, and the durable event carries the content digest, media
+type, size, role and an opaque retrieval reference. Each tool's declared
+artifact ceiling bounds the complete output it may retain: `bash` stops
+collecting at 8 MiB and fails the call without retaining a partial artifact,
+and the result says so; `read` refuses a file larger than 64 MiB; `grep`,
+`find` and `ls` fit their complete records and bounded notices in their inline
+output. The model reads retained output back through `read`'s range form, at
+most 4,096 bytes per call. For that durable case, the terminal prints the reference beside
 the tool's outcome as the command that reads it back:
 
 ```text
@@ -446,13 +452,13 @@ Developer companion:
 
 | Tool | Wall time | Output bytes | Artifact bytes |
 | --- | --- | --- | --- |
-| `loopex.read` | 30,000 ms | 16,384 | 8,388,608 |
+| `loopex.read` | 30,000 ms | 16,384 | 67,108,864 |
 | `loopex.write` | 30,000 ms | 4,096 | 8,388,608 |
 | `loopex.edit` | 30,000 ms | 4,096 | 8,388,608 |
 | `loopex.bash` | 120,000 ms | 16,384 | 8,388,608 |
-| `loopex.grep` | 30,000 ms | 16,384 | 1 |
-| `loopex.find` | 30,000 ms | 16,384 | 1 |
-| `loopex.ls` | 30,000 ms | 16,384 | 1 |
+| `loopex.grep` | 30,000 ms | 16,384 | 16,384 |
+| `loopex.find` | 30,000 ms | 16,384 | 16,384 |
+| `loopex.ls` | 30,000 ms | 16,384 | 16,384 |
 
 The read and shell ceilings leave room for both the durable receipt and the next
 staged context inside the Store's 65,536-byte record ceiling. The local executor

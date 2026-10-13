@@ -78,20 +78,88 @@ the shipped hosts are built.
 
 Concept: [Building on: embed a runtime in an Elixir host](getting-started.md#concept-getting-started-embedding).
 
-**Without a model.** A runtime needs only a placement identity, a Store, and a
-context budget. With no model, executor, or tools it creates, attaches to, and
+**Without a model.** A runtime needs a placement identity, a Store, and a
+context budget. To create sessions without a supplied `genesis:` it also needs
+`session_creation_defaults`: the host's captured settings for every new
+session. With no model adapter, executor, or tools it creates, attaches to, and
 recovers sessions, and records commands, but runs no turns. Save this as
 `first.exs` and run `LOOPEX_HOME="$(mktemp -d)" mix run first.exs`:
 
 ```elixir
+defmodule MyHost.Startup do
+  # Creation answers `{:error, :store_unavailable}` until the runtime's
+  # creation startup barrier is ready.
+  def await_creation_ready(runtime) do
+    case Loopex.creation_startup_status(runtime) do
+      {:ok, %{state: :ready}} -> :ok
+      {:ok, %{state: :starting}} ->
+        Process.sleep(10)
+        await_creation_ready(runtime)
+
+      other -> {:error, other}
+    end
+  end
+end
+
 root = System.fetch_env!("LOOPEX_HOME")
 {:ok, runtime_id} = Loopex.runtime_placement_id(root)
 {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(root, "store.log"))
 {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
-{:ok, runtime} =
-  Loopex.start_link(runtime_id: runtime_id, store: store, context_token_budget: 8_192)
+{:ok, instructions} =
+  Loopex.Runtime.Instructions.capture(%{
+    "version" => "my-host.v1",
+    "base" => "Follow the host's instructions.",
+    "environment" => "",
+    "appendix" => ""
+  })
 
+{:ok, configuration} =
+  Loopex.Runtime.SessionConfiguration.resolve(
+    %{
+      "model" => "example:none",
+      "reasoning" => "default",
+      "configuration_version" => 1,
+      "instructions" => instructions,
+      "max_tokens" => 1_024
+    },
+    %{
+      "model" => "example:none",
+      "context_window" => nil,
+      "output_limit" => nil,
+      "reasoning_levels" => [],
+      "source_revision" => "my-host.v1",
+      "source_digest" => String.duplicate("0", 64)
+    },
+    %{
+      "mapping_revision" => "loopex.unregistered.default.v1",
+      "renderer_revision" => "loopex.reqllm.canonical.v1",
+      "continuation_required" => false,
+      "canonical_terminal_tool_history" => false,
+      "thinking_disabled" => false,
+      "thinking" => %{"mode" => "omitted"}
+    },
+    []
+  )
+
+{:ok, genesis} =
+  Loopex.Runtime.SessionGenesis.resolve(%{}, %{
+    genesis_version: "session_genesis_v3",
+    runtime_configuration: %{"cleanup_grace_ms" => 5_000},
+    initial_configuration: configuration,
+    tool_selection: %{"definitions" => [], "names" => %{}},
+    policy_defer_mode: "admit"
+  })
+
+{:ok, runtime} =
+  Loopex.start_link(
+    runtime_id: runtime_id,
+    store: store,
+    context_token_budget: 8_192,
+    session_creation_defaults: Map.drop(genesis, [:kind, "options"])
+  )
+
+:ok = MyHost.Startup.await_creation_ready(runtime)
 {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-1")
 {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 IO.inspect(Loopex.snapshot(attachment))
@@ -99,8 +167,11 @@ IO.inspect(Loopex.session_status(runtime, session_id))
 :ok = Loopex.stop(runtime)
 ```
 
-The snapshot is anchored at event sequence `0`; `Loopex.next_event/1` answers
-`{:error, :empty}` until something commits.
+The defaults are the four string-keyed members of a resolved v3 genesis. Without
+them, implicit creation returns `{:error, :invalid_session_creation}`; core
+invents no instructions or model facts. The snapshot is anchored at event
+sequence `0`; `Loopex.next_event/1` answers `{:error, :empty}` until something
+commits.
 
 **One call with local Ollama.** Start an Ollama server and make the selected
 model available, then save this as `ephemeral.exs` and run
@@ -146,25 +217,41 @@ ReqLLM model adapter, the local executor, and seven defined tools (the original
 four coding tools active by default). It needs a policy (below), the launch
 file from the companion build, and `LOOPEX_PROVIDER_API_KEY` in the
 environment, which it reads once and removes. Define the event reader before
-the composition callback:
+the composition callback. It also drains the host's progress sink: taking an
+item transfers its custody to the host, and releasing the item's lease returns
+its capacity once the host has finished with every copy:
 
 ```elixir
 defmodule MyHost.Events do
-  def until_finished(attachment, backoff \\ 10) do
+  def until_finished(attachment, sink, backoff \\ 10) do
+    drain_progress(sink)
+
     case Loopex.next_event(attachment) do
       {:ok, %{kind: "run.finished"} = event} ->
         {:ok, event}
 
       {:ok, event} ->
         IO.inspect(event.kind)
-        until_finished(attachment, 10)
+        until_finished(attachment, sink, 10)
 
       {:error, :empty} ->
         Process.sleep(backoff)
-        until_finished(attachment, min(backoff * 2, 500))
+        until_finished(attachment, sink, min(backoff * 2, 500))
 
       other ->
         other
+    end
+  end
+
+  defp drain_progress(sink) do
+    case Loopex.ProgressSink.take(sink) do
+      {:ok, lease, _session_id, item} ->
+        if item.kind == :text_delta, do: IO.write(item.text)
+        :ok = Loopex.ProgressSink.release(sink, lease)
+        drain_progress(sink)
+
+      _empty_or_closed ->
+        :ok
     end
   end
 end
@@ -179,31 +266,36 @@ the same file. Then start the durable composition:
 File.mkdir_p!(state_root)
 {:ok, runtime_id} = Loopex.runtime_placement_id(state_root)
 {:ok, [provider_launch]} = :file.consult(~c"_build/prod/loopex_provider.launch")
+{:ok, sink} = Loopex.ProgressSink.open()
 
-LoopexComposition.with_runtime(
-  [
-    runtime_id: runtime_id,
-    state_root: state_root,
-    workspace: File.cwd!(),
-    policy: MyHost.Policy,
-    policy_identity: %{"id" => "my-host-policy", "revision" => "1"},
-    provider_launch: provider_launch,
-    progress_to: self()
-  ],
-  fn runtime ->
-    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-1")
-    {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+result =
+  LoopexComposition.with_runtime(
+    [
+      runtime_id: runtime_id,
+      state_root: state_root,
+      workspace: File.cwd!(),
+      policy: MyHost.Policy,
+      policy_identity: %{"id" => "my-host-policy", "revision" => "1"},
+      provider_launch: provider_launch,
+      progress_sink: sink
+    ],
+    fn runtime ->
+      {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-1")
+      {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-    {:accepted, "prompt-1"} =
-      Loopex.command(attachment, %{
-        type: :prompt,
-        command_id: "prompt-1",
-        content: "List the files in this directory."
-      })
+      {:accepted, "prompt-1"} =
+        Loopex.command(attachment, %{
+          type: :prompt,
+          command_id: "prompt-1",
+          content: "List the files in this directory."
+        })
 
-    MyHost.Events.until_finished(attachment)
-  end
-)
+      MyHost.Events.until_finished(attachment, sink)
+    end
+  )
+
+:ok = Loopex.ProgressSink.close(sink)
+IO.inspect(result)
 ```
 
 Save the policy, event reader and composition code as `durable.exs`. With
@@ -222,10 +314,16 @@ backs off and asks again. The durable composition also accepts optional
 they are validated, not silently ignored. `:active_tools` can select the new
 `loopex.grep`, `loopex.find` and `loopex.ls` read-only tools.
 
-In the durable profile, the model's streamed text arrives separately as
-`{:loopex_progress, item}` messages to the `:progress_to` process and is never
-the durable answer: the committed `assistant.message_appended` event is. The
-ephemeral in-process model call is non-streaming. A queue overflow returns
+In the durable profile, the model's streamed text arrives separately as items
+in the `Loopex.ProgressSink` passed as `:progress_sink`, and is never the
+durable answer: the committed `assistant.message_appended` event is. Only the
+process that opened the sink can take, release, or close it; that process
+receives a payload-free `{:loopex_progress_ready, sink}` notice when items
+wait. The sink holds at most 32 items and 524,288 bytes and drops new progress
+when full. `close/1` returns `:ok` only after every lease is released and the
+runtime has stopped producing; otherwise it returns
+`{:error, :cleanup_unproved}`. The ephemeral in-process model call is
+non-streaming. A queue overflow returns
 `{:disconnected, last_sequence}`; reattach with
 `after_event_sequence: last_sequence`. Every start option, the complete facade,
 and recovery are in [Runtime and embedding](runtime-and-embedding.md#technical-depth).
@@ -311,7 +409,7 @@ commands that follow it:
 
 ```json
 {"method":"initialize","request_id":"c1","generations":["loopex.experimental/3"],"capabilities":[]}
-{"method":"session.create","request_id":"c2","command_id":"Y3JlYXRlLTE","session_options":{}}
+{"method":"session.create","request_id":"c2","command_id":"Y3JlYXRlLTE","session_options":{"version":1}}
 {"method":"session.attach","request_id":"c3","session_id":"<session_id from the admission>","after_event_sequence":"0"}
 {"method":"session.prompt","request_id":"c4","command_id":"cHJvbXB0LTE","content_b64":"ZG8gdGhlIHRhc2s"}
 ```
@@ -320,7 +418,9 @@ The server answers `initialized` with the selected generation, the schema
 digest, the methods, and the limits; an `admission` with `status` `accepted`
 and the new `session_id`; a `snapshot`; and another `admission`. From then on
 `event` records arrive unasked until `run.finished`, with `progress` records
-between them. The complete method, record, and error inventories are in
+between them. `session_options` requires the JSON integer `version: 1`;
+omitting its optional `configuration` and `tools` creates the session with the
+host's captured defaults. The complete method, record, and error inventories are in
 [the protocol technical reference](app-server-protocol-technical.md#technical-depth).
 
 The independent Node client does all of this and more. With
@@ -377,8 +477,7 @@ The holder renews by sending `session.acquire_control` again within the 30 s
 term, and releases with `session.release_control`. The command's live forms —
 `loopex run --daemon SOCKET`, `loopex attach SESSION --daemon SOCKET`, and
 `loopex sessions --daemon SOCKET` — are clients of the same socket, and
-`clients/node/daemon-takeover.mjs` is an independent one. Running, importing an
-older root, and exit statuses are in
+`clients/node/daemon-takeover.mjs` is an independent one. Running and exit statuses are in
 [the operator daemon page](../operator/daemon.md#concept); the processes and
 bounds behind them are in [the daemon pair](daemon-technical.md#technical-depth).
 

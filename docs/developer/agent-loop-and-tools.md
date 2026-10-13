@@ -257,7 +257,8 @@ whether the call took effect is unknown.
 ### Two Request Digests
 
 `Loopex.Model.request/3` builds one closed semantic projection —
-`canonicalization_version` (`loopex.model_request.v1`), `model`, `messages`,
+`canonicalization_version` (`loopex.model_request.v2`, the only admitted
+generation), `model`, `messages`,
 `tools`, `sampling`, `deadline`, and `continuation` — and returns it with
 `canonical_request_bytes` and `staged_request_digest`. The coordinator commits
 those bytes before an adapter sees them, and `validate_request/1` recomputes the
@@ -266,10 +267,14 @@ representation self-consistently is refused.
 
 `:sampling` and `:deadline` are required and neither has a default here: a
 request without a declared `max_tokens` is refused rather than truncated at
-dispatch by a number no record names. `continuation` is structurally present,
-always `nil`, and never read, written, or compared; it exists so a later
-adapter-private continuation handle can land without changing what the
-canonicalization covers. The declared limits are a model identifier of 1 to 512
+dispatch by a number no record names. `continuation` is always present and
+inside the ordered semantic projection, so the digest covers it. An exchange's
+first request carries `nil`; a later request may carry a source-bound
+content-reference envelope (`loopex.anthropic.content_refs.v1`, ADR 0044) whose
+entries name the committed run, turn, operation, attempt and settlement digest
+they continue. `Loopex.Model.Continuation.expand/3` validates it against the
+request's own model and messages within a 16,384-byte budget, and an invalid
+envelope refuses the request before dispatch. The declared limits are a model identifier of 1 to 512
 bytes, 1 to 1024 messages, at most 256 tool definitions, and `max_tokens` in
 1..1_000_000. Tools are complete definition records, not the model-facing
 projection.
@@ -288,7 +293,7 @@ One name for both rules would carry two opposite retry meanings, which is why
 they have two names.
 
 The staged digest is identity, not dispatch authority. First staging commits
-`model_request_committed` and `model_attempt_opened_v1` together; a request row
+`model_request_committed_v2` and `model_attempt_opened_v1` together; a request row
 without its consecutive open row exposes no dispatchable request. After the open
 fact is durable, Runtime Control validates the complete current owner,
 operation, attempt, digest, journal position, worker, permit reference, and
@@ -463,8 +468,9 @@ fields that kind declares — no more, so nothing unbounded rides along, and no
 fewer, so an item that says nothing is never sequenced and published — its
 payload is plain data, and every field it carries totals at most 65536 bytes,
 measured by encoding anything whose size the named clauses do not otherwise
-know. Progress items reach a host as `{:loopex_progress, item}` messages to the
-runtime's `:progress_to` pid; diagnostics arrive as `{:loopex_diagnostic, item}`.
+know. Progress items reach a host through the runtime's leased
+`:progress_sink` (`Loopex.ProgressSink`, ADR 0058), which the host drains with
+`take/1` and `release/2`; diagnostics arrive as `{:loopex_diagnostic, item}`.
 
 While its coordinator remains authoritative, a domain is owed exactly one
 content-free closing item — `model_stream_closed` or `tool_stream_closed` —
@@ -641,8 +647,10 @@ only the opaque object locator, calls validated `stat` then `fetch`, and neither
 reconstructs nor accepts private provenance.
 
 `Loopex.Executor.Local` bounds its own output through `CodingTools.bound_output/2`,
-collects at most the tool's declared 8 MiB artifact ceiling and drops the rest,
-and hands what it collected to the Core facade its host composed, with the exact
+collects at most the tool's declared artifact ceiling (8 MiB for `bash`; a
+command that exceeds it fails without retaining a partial artifact, and `read`
+refuses a file above its 64 MiB ceiling), and hands the complete output to the
+Core facade its host composed, with the exact
 validated session, run, operation, attempt, and tool-call identities. A
 truncated result carries `ArtifactStore.truncation_notice/3` naming the compact
 reference, and the receipt carries that reference in `artifacts`. The artifact
@@ -819,8 +827,10 @@ estimated tokens. None of those estimates claims provider capacity, billing, or
 tokenizer equality.
 
 Admission is checked in a fixed order and the first failure decides:
-`system_class_tokens` against a strict ceiling of 1,000 — a host-owned class
-measuring exactly 1,000 refuses — then `context_tokens` against the committed
+`system_class_tokens` against the strict ceiling captured in the session's
+committed configuration (`system_class_tokens`, 1,000 when the host declared
+none; ADR 0042) — a host-owned class measuring exactly the ceiling refuses —
+then `context_tokens` against the committed
 budget, then the candidate record's `context_record_depth` (12) and
 `context_record_cardinality` (1,024), then `context_record_bytes` against the
 65,536-byte item ceiling. Those five names are the closed dimension set, and a
@@ -833,7 +843,7 @@ it before any budget the operator named is consulted.
 Optional project content that alone exceeds context is withheld whole with a
 compact declined receipt — the whole class is removed and the request
 re-canonicalized, never trimmed. Required system, history, steer, or tool
-context overflow commits `context_admission_refused_v1` and the run's `failed`
+context overflow commits `context_admission_refused_v2` and the run's `failed`
 terminal in one transaction, opens no model attempt, and publishes exactly five
 members: `category`, `retryable: false`, `dimension`, `observed`, and `limit`.
 
@@ -987,7 +997,7 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    exactly one attempt-scoped model stream domain and is the provider-dispatch
    linearization point even where late receipt prevents the provider call.
 3. On reply or failure — validate the provider-neutral result and atomically
-   commit `model_attempt_settled_v2` with its accounting, conversation
+   commit `model_attempt_settled_v3` with its accounting, conversation
    disposition, and retry/continue/terminal choice. A valid canonical reply
    closes from its own `delta_count` and commits the assistant message and
    event. Exact pretransport `not_dispatched` on attempt one charges nothing and
@@ -1001,7 +1011,7 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    resolve the model's tool name against the session's active set, build the
    job, consult the policy, mint the grant, and commit effect intent *before*
    dispatch. That record emits `tool.started`. A denial, an unresolvable name,
-   or a passed deadline commits a terminal `tool_result_committed` record
+   or a passed deadline commits a terminal `tool_result_committed_v2` record
    instead, which emits `tool.finished`, and the loop continues.
 5. `effect_dispatched` — the Local executor first reserves or joins the job
    without granting effect authority, then answers one serialized permit request
@@ -1013,7 +1023,7 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    between open-entry and marker publication installs no token and leaves
    quarantine truth instead of a permit. This state is never restarted by
    recovery; an intent without a fact is reconciled.
-6. On receipt — one `executor_receipt_committed` record matches the receipt
+6. On receipt — one `executor_receipt_committed_v2` record matches the receipt
    against the dispatched job, appends the `tool_result` element, and emits
    `tool.finished`. The turn returns to `effect_pending` while calls remain and
    reaches `turn_settled` when the last one is answered.

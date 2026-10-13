@@ -123,8 +123,9 @@ Technical depth: [Credential](daemon-technical.md#technical-daemon-credential).
 `session.list` reads a daemon-owned, bounded index of the sessions the root
 holds. The index is for finding sessions only: whether a session exists is
 always asked of core, and adding or failing to add an index row never creates
-or reverses a session. A root written by an earlier release has no index, and
-the daemon refuses it until the operator runs the strict one-time import.
+or reverses a session. Offline commands write the same index, so a root has one
+catalog. A root whose sessions exist only in the retired offline catalog is
+refused as `session_catalog_retired`; it is never imported (ADR 0070).
 
 Technical depth: [The session index](daemon-technical.md#technical-daemon-index).
 

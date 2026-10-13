@@ -78,7 +78,8 @@ needs a running local Ollama server and model, but no provider key, state root,
 or companion at runtime. Its hosted path reads the selected provider key in the
 host VM during each call; it is not a credential-isolation boundary from tools
 or trusted host code. A direct runtime can also start with no model or tools:
-it creates, attaches to, and recovers durable sessions but runs no turns.
+given the host's captured session-creation settings, it creates, attaches to,
+and recovers durable sessions but runs no turns.
 
 The full contract is [Runtime and embedding](runtime-and-embedding.md#concept);
 the turn machine behind it is [Agent loop and tools](agent-loop-and-tools.md#concept).
@@ -112,8 +113,10 @@ protocol: one JSON object per line, with an exact generation negotiated first. T
 foreground app server speaks it over standard input and output for one client at
 a time, and a daemon speaks it over a Unix-domain socket for many clients that
 may observe one session while one controls it. Both are launched by a host that
-chooses the store, model, tools, and policy; a client drives sessions but never
-configures them.
+chooses the store, provider authority, defined tools, and policy. A client
+drives sessions and, within those host choices, may pick a new session's
+initial settings and tools or reconfigure a settled session, but never supplies
+those host inputs.
 
 The protocol is strict on purpose — a client that relies on a lenient parser is
 not conformant — and it separates durable events, which advance a client's

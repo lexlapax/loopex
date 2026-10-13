@@ -167,7 +167,7 @@ Optional options:
 | `:maintenance_instructions` | `nil`, or exactly `%{"version" => version, "body" => body}` with version up to 64 bytes and nonempty UTF-8 body up to 2,048 bytes. Startup captures its exact rendering and digest. |
 | `:cleanup_grace_ms` | `Loopex.Executor.default_cleanup_grace_ms/0`, `5_000`; the committed cleanup period every job and terminal carries. |
 | `:session_creation_defaults` | `nil`, or the host's closed captured v3 template with exactly the string keys `initial_configuration`, `tool_selection`, `policy_defer_mode` and `runtime_configuration`. Startup validates the complete settings, selected model and exact registered tool generations before children start. |
-| `:progress_to` | A pid receiving `{:loopex_progress, item}`, or `{:session, pid}` receiving `{:loopex_progress, session_id, item}` so a host serving many sessions can route each item. |
+| `:progress_sink` | `nil` (progress is discarded), or a `Loopex.ProgressSink` the host opened with `open/0` and binds to this one runtime. The opening process receives a payload-free `{:loopex_progress_ready, sink}` notice, takes `{:ok, lease, session_id, item}`, releases each lease after discarding or fully writing every copy, and closes the sink after the runtime stops. It holds at most 32 items and 524,288 bytes; a full sink drops new progress (ADR 0058). |
 | `:diagnostics_to` | A pid receiving `{:loopex_diagnostic, item}`. |
 | `:attachment_capacity` | `64` queued events per attachment, at most `65_536`. |
 | `:artifact_store` | `%{module:, handle:}` for bounded transfers; absent means the transfer family is refused. |
@@ -254,7 +254,7 @@ work has completed.
 | Group | Functions |
 | --- | --- |
 | Runtime | `start_link/1`, `stop/1`, `version/0` |
-| Sessions | `create_session/3`, `resume_session/3`, `session_status/2` |
+| Sessions | `create_session/3`, `creation_startup_status/2`, `resume_session/3`, `session_status/2` |
 | Creation evidence | `lookup_create_result/4`, `creation_provenance/2` |
 | State root and placement | `state_root/0` (reads `LOOPEX_HOME`), `runtime_placement_id/1`; the session catalogue is the daemon index, which hosts write (ADR 0070) |
 | Attachment | `attach/2`, `attach/3`, `command/2`, `command_with_configuration/3`, `command_disposition/2`, `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`, `diagnostic/2` |
@@ -290,6 +290,9 @@ the option combines submitted options with the runtime's captured
 Core manufactures no instructions or model facts. Explicit exact genesis
 remains available without runtime defaults. This follows the
 [centralized configuration decision](agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04).
+Creation refuses `store_unavailable` until the runtime's original creation
+startup completes; `creation_startup_status/2` reports `state: :ready` once it
+has, without reserving the creation slot.
 `command/2` accepts maps with `:type` and `:command_id`:
 `:prompt`, `:steer`, and `:follow_up` carry binary `:content`; `:abort` carries
 nothing else; `:interaction_answer`, `:admit_resources`, and `:activate_skill`
@@ -667,6 +670,8 @@ with seven defined tools (the original four active by default) and the
 companion ReqLLM model adapter:
 
 ```elixir
+{:ok, sink} = Loopex.ProgressSink.open()
+
 {:ok, runtime} =
   LoopexComposition.start(
     runtime_id: runtime_id,
@@ -674,9 +679,13 @@ companion ReqLLM model adapter:
     workspace: workspace_path,
     policy: MyHost.Policy,
     provider_launch: provider_launch,
-    progress_to: self()
+    progress_sink: sink
   )
 ```
+
+The calling process owns `sink`: it takes and releases progress items as the
+runtime's `:progress_sink` option describes, and calls
+`Loopex.ProgressSink.close/1` after stopping the runtime.
 
 | Option | Meaning |
 | --- | --- |
@@ -692,7 +701,7 @@ companion ReqLLM model adapter:
 | `:cleanup_grace_ms`, `:process_probe` | Forwarded to the session and executor together, so a run's ending reports the period its cleanup ran under. |
 | `:artifact_transfers` | `false` by default. `true` hands the artifact store to the runtime for public attachment transfers. The composition always owns one transfer process for executor job ranges; both uses share its capacity. |
 | `:recover_stale_writer` | `false` by default; see [recovery](#technical-embedding-recovery). |
-| `:resource_manifest`, `:project_manifest`, `:project_decision`, `:progress_to`, `:diagnostics_to` | Passed to the runtime unchanged. |
+| `:resource_manifest`, `:project_manifest`, `:project_decision`, `:progress_sink`, `:diagnostics_to` | Passed to the runtime unchanged. |
 | `:credential_plane` | A shared credential plane; see below. |
 
 Nonempty durable selections register only the current shipped coding tools:
@@ -954,14 +963,16 @@ A caller holding an artifact reference reads the object back through its
 attachment in three calls:
 
 ```elixir
-request = %{object: object, use_locator: reference.use_locator, start: 0}
+request = %{use_locator: reference.use_locator, start: 0}
 {:ok, transfer} = Loopex.open_artifact_transfer(attachment, request)
 {:ok, chunk} = Loopex.read_artifact_chunk(attachment, transfer.transfer_ref, 8_192)
 :ok = Loopex.close_artifact_transfer(attachment, transfer.transfer_ref)
 ```
 
-The request names an artifact the caller already holds, a non-negative `start`,
-and an optional `length`. The store verifies the complete immutable object once
+The closed request names the `use_locator` of an artifact use this session may
+read, a non-negative `start`, and an optional `length`; the attachment supplies
+the session, and a caller-selected object is refused as
+`invalid_artifact_request`. The store verifies the complete immutable object once
 at open, before any chunk exists, and the response carries `total_size`,
 `window_start`, `window_length`, the `object_digest`, and an opaque
 `transfer_ref` — and no placement. Each chunk carries its `offset`, `bytes`, and
@@ -980,6 +991,8 @@ safety ceilings, not throughput promises:
 | `object_bytes` | 67,108,864 |
 | `open_deadline_ms` | 60,000 |
 | `open_work_bytes` | 134,217,728 |
+| `metadata_read_bytes` | 131,073 |
+| `cleanup_deadline_ms` | 5,000 |
 | `chunk_bytes` | 32,768 |
 | `read_deadline_ms` | 5,000 |
 | `lifetime_ms` | 600,000 |
@@ -988,7 +1001,16 @@ safety ceilings, not throughput promises:
 
 A transfer belongs to the attachment that opened it: another attachment gets
 `unknown_transfer`, a superseded attachment gets `stale_attachment`, and
-replacement, detach, or caller loss releases every transfer the attachment held.
+replacement, detach, or caller loss revokes access at once. Capacity is held by
+the original connection holder and survives detach and replacement: its two
+slots count pending, live, retiring and unacknowledged entries, and a slot
+returns only after Store retirement proof, receipt acknowledgement and the
+original actors' joins; an uncertain slot stays held until that proof
+([ADR 0066](../adr/0066-owned-artifact-transfer-opening-technical.md#technical-adr-0066-custody)).
+The same holder has a cumulative 1,073,741,824-byte work allowance: every
+opening debits at least 1,048,576 bytes, verification and metadata work are
+charged once without refund, and returned snapshot bytes are additional. An
+opening past the allowance refuses `open_work_budget_exhausted`.
 Refusals are distinct and stable — `invalid_window`, `artifact_use_mismatch`,
 `unknown_artifact_use`, `artifact_digest_mismatch` for corruption anywhere in
 the object, `open_deadline_exhausted` and `open_work_budget_exhausted` for an
@@ -998,15 +1020,17 @@ that expired or was closed.
 
 The capability is optional on the port. `Loopex.ArtifactStore.supports_transfer?/1`
 asks the composed module, and a runtime composed without an artifact store, or
-with an adapter that lacks the three callbacks, answers
+with an adapter that lacks any of the four callbacks `reserve_transfer/3`,
+`open_transfer/3`, `read_transfer/3` and `close_transfer/2`, answers
 `artifact_transfer_unsupported` rather than falling back to an unbounded
 `fetch/2`. The contract is
-[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept), with one known
-divergence: the implementation counts concurrent transfers per attachment rather
-than per connection and enforces no cumulative per-connection work allowance, as
-the [operator transfer page](../operator/app-server.md#operator-app-server-artifacts)
-discloses; its remediation is deferred beyond M5. The witnesses
-are in `apps/loopex_store_local/test/artifact_transfer_test.exs`.
+[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) with the owned
+opening of [ADR 0066](../adr/0066-owned-artifact-transfer-opening.md#concept);
+the wire projection is in
+[the protocol reference](app-server-protocol-technical.md#technical-protocol-artifacts).
+The witnesses are in `apps/loopex/test/artifact_transfer_contract_test.exs`,
+`apps/loopex/test/artifact_transfer_custody_test.exs` and the
+`artifact_*transfer*_test.exs` files in `apps/loopex_store_local/test/`.
 
 <a id="technical-embedding-recovery"></a>
 ### Recovery

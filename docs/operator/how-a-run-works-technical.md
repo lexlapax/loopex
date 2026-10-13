@@ -57,14 +57,14 @@ settles. Nothing in this table is published from a mutation reply.
 | Skill manifest retained | Complete verified snapshot under its manifest digest, before resource admission | nothing; installation and retention do not grant session trust |
 | Resources admitted or declined | `resource_command_v1` with the exact manifest and decision binding | no new public event; the matching active catalog is available through the facade query |
 | Skill selected | `resource_command_v1` with source, name, pack digest and ordered supporting labels; the selection is frozen for the next run | no new public event |
-| Prompt admitted | `prompt_admitted_v2` — command digest, run id, content, the run's bounds and context ceiling | `user.message_appended`, echoed as `> ...` |
-| Request staged | `model_request_committed` (canonical request bytes and their digest, applied steer, context receipt), `model_request_committed_resources_v1` when resources are admitted, **and** `model_attempt_opened_v1`, in one transaction | `run.started`, on the first turn only |
+| Prompt admitted | `prompt_admitted_v3` — command digest, run id, content, the run's bounds and context ceiling, and the configuration version | `user.message_appended`, echoed as `> ...` |
+| Request staged | `model_request_committed_v2` (canonical request bytes and their digest, applied steer, context receipt), `model_request_committed_resources_v2` when resources are admitted, **and** `model_attempt_opened_v1`, in one transaction | `run.started`, on the first turn only |
 | Model called | nothing | streamed text, transient |
-| Reply settled | `model_attempt_settled_v2` | `assistant.message_appended` |
-| Tool authorized | `effect_intent_committed` — the whole executor job **and** the host grant | `tool.started` |
-| Tool finished | `executor_receipt_committed` | `tool.finished` with the outcome and any artifact references |
-| Tool never ran | `tool_result_committed` | `tool.finished` carrying the reason, so a started call always finishes |
-| Run ends | `run_terminal_committed`, or `outcome_unknown_committed` | `run.finished` |
+| Reply settled | `model_attempt_settled_v3` | `assistant.message_appended` |
+| Tool authorized | `effect_intent_committed_v2` — the whole executor job **and** the host grant | `tool.started` |
+| Tool finished | `executor_receipt_committed_v2` | `tool.finished` with the outcome and any artifact references |
+| Tool never ran | `tool_result_committed_v2` | `tool.finished` carrying the reason, so a started call always finishes |
+| Run ends | `run_terminal_committed`, or `outcome_unknown_committed_v2` | `run.finished` |
 
 Two orderings are load-bearing.
 
@@ -118,8 +118,8 @@ application environment, and a command that finds neither refuses.
 Sizes and their refusals: one journal frame is at most 4 MiB and one log at most
 256 MiB, past which the log accepts no further append; one artifact is at most
 64 MiB and is refused rather than stored as a prefix; one tool may retain at most
-8 MiB of spilled output. Nothing collects artifacts, so that directory only
-grows.
+its declared artifact ceiling (8 MiB for `bash`, `write` and `edit`, 64 MiB for
+`read`). Nothing collects artifacts, so that directory only grows.
 
 Three integrity properties turn into refusals you may see. The store holds the
 log's *file identity*, not its path, and re-checks it after opening the append
@@ -302,7 +302,7 @@ Concept: [When a daemon holds the root](how-a-run-works.md#concept-run-daemon).
 | Clients of one session | One | Any number observing, one controlling under a lease |
 | Ctrl-C, `SIGTERM`, `SIGHUP`, `SIGQUIT` on the command | Abort the run | Release control within 5 s and exit `0`; the run continues |
 | Stopping the work | Ctrl-C through the launcher, or `loopex cancel` once nothing holds the root | The daemon's orderly `SIGTERM`, then `loopex cancel` if needed |
-| Transport | None | Generation-2 JSON lines over the root's Unix-domain socket |
+| Transport | None | Generation-4 JSON lines over the root's Unix-domain socket |
 
 The journal, receipts, artifacts and recovery rules on this page are the same in
 both columns. See the [daemon page](daemon.md#technical-depth) for its grammar,
@@ -324,7 +324,8 @@ Concept: [What makes this safe](how-a-run-works.md#concept-run-safe).
 A policy that raises, times out or returns a malformed value becomes a denial
 rather than falling through to allow. A policy may also `defer`, which opens a
 durable question a client answers; the command's stances never defer, and the
-command cannot answer one (see [host policy](tools-and-policy.md#operator-tools-policy)).
+one-shot `loopex run` command cannot answer one, while `loopex chat` answers
+with `/answer` (see [host policy](tools-and-policy.md#operator-tools-policy)).
 The decision is made on the tool's generation triple rather than the
 model-supplied name, so it cannot be steered by what the model chose to call
 something.

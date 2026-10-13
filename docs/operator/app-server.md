@@ -27,8 +27,11 @@ Constraints:
 - The protocol generation is named `loopex.experimental/3`. The word
   "experimental" is part of the name, so no client can mistake it for a released
   contract; it may change without a migration path.
-- A client drives a session; it never configures one. Every choice that
-  matters is made at launch.
+- The host's choices are made at launch: the store, workspace, provider
+  launch and credential, the tools it defines, and the policy. A client never
+  names any of them. Within those choices a client may pick a new session's
+  initial settings and tools, and change a settled session's model, reasoning,
+  instructions and ceilings with `session.configure`.
 
 Related: [Runtime operations](runtime.md#concept) for the embedded runtime
 beneath this, [How a run works](how-a-run-works.md#concept) for the flow of one
@@ -280,14 +283,15 @@ client can check what it received without the server re-reading the object.
 
 The server caps objects at 64 MiB; the opening verification at 60 seconds and
 128 MiB of storage work; chunks at 32 KiB with five seconds per read; an open
-transfer's lifetime at ten minutes; and concurrency at two transfers per
-attachment and four per runtime. These are safety ceilings, not a service-level
-promise. Accepted [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept)
-states the concurrency unit as the connection and adds 1 GiB of cumulative
-transfer work per connection; the implementation counts per attachment and
-enforces no cumulative work allowance. That divergence is recorded in the
-[M5 plan](../plans/M5.md#concept); its remediation is deferred beyond M5. A transfer belongs to
-the attachment that opened it and is released when that attachment goes.
+transfer's lifetime at ten minutes; concurrency at two transfers per
+connection and four per runtime; and cumulative transfer work at 1 GiB per
+connection, where every opening counts at least 1 MiB. These are safety
+ceilings, not a service-level promise. A transfer belongs to the attachment that
+opened it, and detaching or replacing that attachment ends access at once. The
+connection's slots and work allowance survive detach and replacement: a slot
+returns only once the server has proved the transfer's cleanup, and a transfer
+whose cleanup is uncertain keeps its slot
+([ADR 0066](../adr/0066-owned-artifact-transfer-opening.md#concept)).
 
 <a id="operator-app-server-limits"></a>
 ## Frame and Connection Limits

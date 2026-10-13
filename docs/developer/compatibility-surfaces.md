@@ -109,7 +109,7 @@ surface it belongs to under
 | Artifact transfer capability | the optional transfer callbacks and the facade transfer family | 6 and 5 | Experimental |
 | Tool definition contract | `LoopexProtocol.ToolDefinition`, `LoopexProtocol.Canonical` | 2 and 3 | Unstable |
 | Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable |
-| Durable interaction records | `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental; refused by older readers |
+| Durable interaction records | `interaction_requested_v1`, `policy_interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental; refused by older readers |
 | Public event shapes | `Loopex.attach/3`, `Loopex.next_event/1` | 2, public protocol | Unstable |
 | App-server wire protocol | generation `loopex.experimental/3`: methods, records, error codes, identities, limits | 2, public protocol semantics | Experimental; exact generation agreement only |
 | Daemon wire protocol | generation `loopex.experimental/4` over the daemon's Unix-domain socket | 2, public protocol semantics | Experimental; exact generation agreement only |
@@ -161,8 +161,8 @@ job: `{:ok, receipt}`, `:absent`, or `{:error, term()}`, with
 `{:error, :effect_in_flight}` reserved for a job the executor still holds.
 `Loopex.Executor.retained_receipt/3` bounds that call and reports an absent
 callback, a raise, a malformed answer, or the bound elapsing as distinct errors
-that leave reconciliation host-driven. The ArtifactStore transfer triple is
-optional as well.
+that leave reconciliation host-driven. The four ArtifactStore transfer
+callbacks are optional as well, as one capability.
 
 An executor that refused a job before its effect started says so by returning
 `{:error, {:refused_before_effect, reason}}`; the runtime commits that as a
@@ -236,7 +236,9 @@ the payload ceiling is total: a field whose size the named measurements do not
 know is measured by encoding it. A reply's usage map is closed to
 `input_tokens` and `output_tokens`; a third key settles the attempt as
 `unreadable_model_answer`, and omitting either key normalizes as unreported.
-Accounting settlements are `model_attempt_settled_v2` under
+Accounting settlements are `model_attempt_settled_v3` under
+[ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept), which
+keeps the accounting provenance of
 [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept);
 the details are in
 [the agent loop](agent-loop-and-tools.md#technical-depth).
@@ -307,15 +309,17 @@ reported through the existing startup/cleanup results. This experimental
 extension supplies no runtime reference or per-prompt trace mutation through
 the opaque session handle.
 
-**Operator command.** The subcommands are `ask`, `run`, `sessions`, `resume`,
-`attach`, `cancel`, `artifact`, `skill`, and `daemon`; leading `-p` aliases
-`ask`. Each admits its own flags,
+**Operator command.** The subcommands are `ask`, `chat`, `config validate`,
+`config show`, `run`, `sessions`, `resume`, `attach`, `cancel`, `artifact`,
+`skill`, and `daemon`; leading `-p` aliases `ask`. Each admits its own flags,
 and an unrecognised flag is refused rather than ignored, so admitting a flag on
 one more subcommand is observable and withdrawing one is breaking:
 
 | Subcommand | Flags |
 | --- | --- |
 | `ask`, `-p` | `--model`, `--output text\|json`, repeatable `--skill-dir` (up to four), `--tools none\|coding\|read-only`, required `--policy`, `--cwd`, `--max-steps`, `--deadline-ms`, `--state-root`, `--trace`, `--no-trace`, `--trace-level`, repeatable `--trace-module`, `--trace-max-entry-bytes`, `--trace-max-entries-per-second`, `--trace-max-queue-entries` |
+| `chat` | required `--config`, `--workspace`, `--state-root`, `--model`, `--reasoning`, `--compaction-model`, `--max-steps`, `--deadline-ms`, `--token-budget`, `--max-tokens`, `--context-token-budget`, `--system-class-tokens`, `--cleanup-grace-ms`, `--system-prompt-file`, `--append-system-prompt-file`, `--tools`, repeatable `--skill-dir`, `--policy`, `--output`, `--no-helpers`, `--resume`, and the seven `ask` trace flags |
+| `config validate`, `config show` | The same flags as `chat` without `--resume` or the trace flags; `config show` also requires `--effective` |
 | `run` | `--policy`, `--state-root`, `--workspace`, `--steer`, `--follow-up`, `--cleanup-grace-ms`, `--context-token-budget`, `--skill`, `--skill-resource` |
 | `resume`, `cancel` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |
 | `sessions`, `artifact` | `--state-root` |
@@ -367,13 +371,15 @@ question is resumed only by the same policy identity and revision that asked
 it. The answer is bounded evidence for a host-policy decision, never an
 authorization, and the host's `decision_ref` is never projected.
 
-**Artifact transfer capability.** Three optional ArtifactStore callbacks —
-`open_transfer/4`, `read_transfer/3`, `close_transfer/2` — and the facade family
+**Artifact transfer capability.** Four optional ArtifactStore callbacks —
+`reserve_transfer/3`, `open_transfer/3`, `read_transfer/3`, `close_transfer/2` —
+and the facade family
 `Loopex.open_artifact_transfer/2`, `read_artifact_chunk/3`, and
 `close_artifact_transfer/2`, under
-[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept). The object and
+[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) and
+[ADR 0066](../adr/0066-owned-artifact-transfer-opening.md#concept). The object and
 use identities and the opaque `use:<sha256>` locator are unchanged by it, and no
-artifact format migrates. An adapter without the triple stays conformant and
+artifact format migrates. An adapter without all four stays conformant and
 the facade refuses rather than falling back to an unbounded fetch. The ceilings
 are part of the surface and are listed in
 [Runtime and embedding](runtime-and-embedding.md#technical-embedding-transfers).
@@ -395,8 +401,8 @@ Neither changes a durable format, and removing either needs no migration.
 | --- | --- | --- |
 | A root written before conversation, tool-generation, steer, follow-up, and cancellation records existed (the M1 era) | Not readable; start on a fresh state root | — |
 | `model_attempt_settled_v1` and `model_attempt_settled_v2` settlements | Refused before activation; only `model_attempt_settled_v3` is read, so start on a fresh state root | — |
-| `resource_command_v1`, `model_request_committed_resources_v1` | Replayed; even a refused resource command creates this boundary | A reader without resource records refuses the session at load |
-| `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1` | Replayed | A reader without interaction records refuses the session before any effect |
+| `resource_command_v1`, `model_request_committed_resources_v2` | Replayed; even a refused resource command creates this boundary | A reader without resource records refuses the session at load |
+| `interaction_requested_v1`, `policy_interaction_answer_admitted_v1`, `interaction_resolved_v1` | Replayed | A reader without interaction records refuses the session before any effect |
 | A root whose sessions exist only in the retired offline `sessions/` directory | Refused as `session_catalog_retired` by the daemon and by offline listing, recording and resume (ADR 0070); start on a fresh state root | — |
 
 M6's ephemeral sessions have no row in this table: they leave no durable
