@@ -3184,7 +3184,8 @@ Concept: [Open questions and decision triggers](vision.md#concept-vision-open-qu
 **Accepted M7 dispositions.** ADR 0041 selects complete inline staged requests
 with retained artifacts for bulky tool output; ADR 0044 selects bounded plaintext
 private continuation with raw-history retention; ADR 0049 selects explicit
-reference profiles. Their required evidence remains to be proved. The rows below
+reference profiles. M7's closure on 2026-10-13 recorded their required
+evidence in its [closure runs](evidence/M7-closure-runs.md). The rows below
 remain triggers for further decisions outside that accepted scope; M7 does not
 settle an unrestricted sidecar or permanent profile policy.
 

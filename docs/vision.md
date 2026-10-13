@@ -646,8 +646,9 @@ Listing a question does not authorize work or assign it to a milestone.
 
 **Accepted M7 dispositions.** ADRs 0041, 0044 and 0049 decide the inline/artifact
 boundary, bounded private continuation retention and explicit reference profiles
-for M7. Their evidence obligations remain open; plan acceptance does not prove
-those outcomes or select a permanent default profile.
+for M7. M7 closed on 2026-10-13 with that evidence recorded in its
+[closure runs](evidence/M7-closure-runs.md); closure does not select a
+permanent default profile.
 
 <a id="concept-vision-name-license"></a>
 ### 28. Name and license
