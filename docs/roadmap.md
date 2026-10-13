@@ -145,7 +145,8 @@ questions, conversational chat, bounded helpers and operator validation;
 later accepted ADRs through 0070 settle its implementation boundaries.
 The [M8 installed durable operator plan](plans/M8.md#concept) is Open for
 planning: installation, home configuration, service lifecycle, an attached
-conversation, and backup and restore. The store engine and governed extension
+conversation with service-hosted helpers, current-format roots with backup and
+restore, and provider sign-in. The store engine and governed extension
 runtime [drafts](drafts/README.md) for M9 and M10 follow. All three remain
 unaccepted; this roadmap grants no release version or publication authority.
 

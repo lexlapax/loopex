@@ -22,9 +22,9 @@ its last `Closed` row identifies the last closed product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M7` — 2026-10-13 |
-| Blockers | `M8` is open and not accepted; the maintainer must accept its plan pair; `M8` waits on ADR 0037, ADR 0038, ADR 0071, and ADR 0072 before the outcomes that depend on them |
+| Blockers | `M8` is open and not accepted; the maintainer must accept its plan pair; `M8` waits on ADR 0037, ADR 0038, ADR 0071, ADR 0072, and ADR 0073 before the outcomes that depend on them |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Accept or reject the `M8` plan pair; disposition [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept), [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept), [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept), and [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) |
+| Next maintainer decision | Accept or reject the `M8` plan pair; disposition [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept), [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept), [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept), [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept), and [ADR 0073](../adr/0073-provider-oauth-sign-in.md#concept) |
 | Next transition | Record the acceptance governance row and move `M8` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
@@ -50,7 +50,11 @@ baseline and `M8` became the Open milestone; the
 lists what changed. The same day the maintainer rescoped `M8` to the delivered
 M7 baseline and selected its `0.5.0` label and two hosts; the
 [scope record](../process/agent-context-map.md#disposition-m8-scope-2026-10-13)
-lists the decisions. Open `M8` carries no implementation authority.
+lists the decisions. Later that day the maintainer accepted proposals P1, P2
+and P4 to P8, added service-hosted helpers and provider sign-in as outcome 8,
+and settled the remaining design choices; the
+[detail record](../process/agent-context-map.md#disposition-m8-detail-2026-10-13)
+lists them. Open `M8` carries no implementation authority.
 No partially accepted subset authorizes dependent implementation.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the

@@ -17,16 +17,20 @@ wire generations, provider custody, host ledger, record inventory, restore
 transition and source identity are M8's baseline, as delivered rather than as
 planned.
 
-| Decision | Outcomes | Acceptance point |
-| --- | --- | --- |
-| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | 2, 4 | Freeze the discovery, writer, lifecycle and readiness grammar against the delivered CLI and daemon before implementing it |
-| [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | 1, 6, 7 | Fill the pinned build recipe, allowed libraries and each host's minimum base from the retained build before release-build or install code |
-| [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept) | 4, 5 | Fill the method mapping against `loopex.experimental/4` and the daemon's configuration rules before the attached command or daemon configuration reader |
-| [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) | 3, 7 | Fill the marker name and bytes, the backup layout and capture record, and the restore command's plan construction before marker, backup or restore code |
+Each decision below is accepted before the implementation that depends on it,
+not before unrelated work. None leaves a value to be fixed at acceptance.
 
-Accepted decisions constrain M8 without being reopened:
-[ADR 0051](../adr/0051-current-format-physical-restore.md#concept) owns the
-restore transition, its inputs, limits and outcomes;
+| Decision | Outcomes | Accepted text it amends or clarifies | Acceptance point |
+| --- | --- | --- | --- |
+| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | 2, 4; the `--service` start for 5 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept): one home-reading exception for `LoopexCli.Home`. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): `--config` optional when a home is selected. Reuses ADRs 0031, 0032 and 0046 | Before `LoopexCli.Home`, the configuration writers, `ServiceStart`, `Service`, `paths`, `doctor` or `daemon.readiness` |
+| [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | 1, 6; the installed refusal and restore step of 7 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept) obligation 4: "no compiler" read as "no build toolchain". Applies [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) and ADR 0034 to the relocated companion unchanged | Before the release definition in the umbrella `mix.exs`, `scripts/release/`, the launcher's installed mode, `loopex-verify`, `--relocatable` or `loopex version` |
+| [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept) | 4 (the service's configuration reader), 5 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): nullable `trace` and `policy` in the status record. [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept): the activation ceiling, which counts helper children as decided on 2026-10-13, with any consequent [ADR 0046](../adr/0046-child-session-tool.md#concept) refusal-order clause ADR 0071 states. [ADR 0055](../adr/0055-remote-session-creation-options.md#concept): creation options on a helper-enabled service. Applies ADRs 0033, 0046, 0056 and 0069 | Before `daemon --config`, `AttachedChat`, `DaemonSession`, `ChatProjection`, the `ExitStatus` block 111 to 115, or any helper-parent creation in the daemon |
+| [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) | 3, 7 | [ADR 0051](../adr/0051-current-format-physical-restore.md#concept), two clauses: the absence of a backup CLI, and the latest-backup-only restriction relaxed by `--discard-later-work` for a lost source. Takes the operator backup and restore work out of Proposed ADR 0036 | Before `RootFormat`, the marker checks in `Placement` and `compose/1`, `StoreAdmin`, `LoopexCli.Store`, the `RestoreCodec` discard form or the `ExitStatus` block 116 to 119 |
+| [ADR 0073](../adr/0073-provider-oauth-sign-in.md#concept) | 8; the sign-in precheck in 4 and the sign-in hint in 5 | [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept): the host-held access token and the `token_exchange` invocation. [ADR 0029](../adr/0029-bounded-provider-failure-diagnostics.md#concept): the public `provider_sign_in_required` reason. [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept): custody rotation by a host refresher. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept): sign-in routes resolve from composition-owned custody. [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept): the `oauth` form, `vertex` members and same-account live rotation. Also one sentence of Proposed ADR 0037 and this plan's credential non-goal | Before any `SignIn.*` module, binding-grammar change, Core category admission, schema or vector change, `loopex auth`, or the `ExitStatus` block 120 to 123 |
+
+Accepted decisions constrain M8 without being reopened beyond those named
+amendments: [ADR 0051](../adr/0051-current-format-physical-restore.md#concept)
+owns the restore transition, its inputs, limits and outcomes;
 [ADR 0066](../adr/0066-owned-artifact-transfer-opening.md#concept) owns
 transfer accounting; and
 [ADR 0070](../adr/0070-pre-1-superseded-surface-retirement.md#concept) owns
@@ -34,74 +38,135 @@ the retired surfaces.
 
 The store engine decision (ADR 0036) and typed policy inputs (ADR 0035) are not
 M8 prerequisites and are deliberately not linked here; the first follows from
-proposal P2. No typed policy input, new credential source or publication
-enters through these prerequisites. Public-name clearance remains a separate
-decision.
-
-**Before acceptance.** These are planning obligations, not product proof:
-
-1. Fill every cell the four Proposed pairs mark as fixed at acceptance,
-   against the delivered M7 code.
-2. Record the maintainer's selections for proposals P1, P2 and P4 to P8 in the
-   Concept plan. Decisions D1 to D4 are already recorded; P3 is superseded.
-3. Obtain independent review of the reconciled pair and its four ADR pairs.
+the accepted proposal P2. No typed policy input, API-key file or command
+source, or publication enters through these prerequisites. Public-name
+clearance remains a separate decision.
 
 <a id="technical-plan-ownership"></a>
 ### Ownership and Rejoin
 
 Concept: [Workstreams](M8.md#concept-plan-workstreams).
 
+Paths are relative to the repository root; tests named in the
+[evidence mapping](#technical-plan-evidence) belong to the workstream that
+owns the code they prove. A path in two rows below is a shared file: the
+integrator owns it, and the second change lands at rejoin.
+
 | Workstream | Owns | Rejoins at |
 | --- | --- | --- |
-| Integration | Launcher, discovery, configuration reader and writers, lifecycle commands, readiness, attached conversation | The first installed workflow |
-| Packaging | Release recipe, manifest, companion relocation, install lane | The first installed workflow, with a locally built archive |
-| Backup and restore | Current-format marker, backup producer, `store backup` and `store restore` over ADR 0051 | After the first installed workflow, before the installed demonstration |
+| W1 Integration | `apps/loopex_cli`: `Home`, `ConfigWriter`, `ConfigOptions`, `ConfigInspection`, `ConfigFile`, `ServiceStart`, `Service`, `Live`, `Daemon`, `HostOptions`, `Chat`, `ChatDriver`, `ChatProjection`, `ChatControl`, `AttachedChat`, `DaemonSession`, `DaemonClient` and the `LoopexCli` dispatch table. `apps/loopex_daemon`: `Command`, `ExitStatus`, `Service`, `ServiceReadiness`, `Request`, `SocketConnection`, `WireRecords`, `Owner`, `ConnectionRegistry`. `apps/loopex_protocol/priv/schema` and `priv/vectors`, `clients/node`. `LoopexComposition.Placement`'s lock primitive extraction. `LoopexComposition.Delegation.Helper`'s classification code (ADR 0072's readiness code). `VERSION` at the candidate | The first installed workflow |
+| W2 Daemon helpers (W1's integrator, after the attached conversation) | `LoopexCli.ChatConfiguration`'s split into `helper_roles/1`, `helper_catalog/3` and `helper_parent_genesis/3`; `LoopexCli.HostOptions.helpers/1`; `LoopexComposition.Delegation.create_parent_detailed/7` and `Helper.create_parent/2`; `Loopex.Runtime.create_session_with_genesis_detailed/4`; helper hosting and activation counting in `LoopexDaemon.Service`, `Owner`, `ConnectionRegistry` and `SocketConnection.create_task/4` | After the first installed workflow, before the installed demonstration |
+| W3 Packaging | The umbrella `mix.exs` `releases/0` and `installed_layout/1`; `scripts/release/` (`toolchain.env`, `build.sh`, `assemble.sh`, `write-manifest.sh`, `assert-linkage.sh`, `smoke.sh`, `linux/Dockerfile`, `linux/Dockerfile.smoke`); `apps/loopex_cli/bin/loopex` and `bin/loopex-verify`; `apps/loopex_llm_reqllm/lib/mix/tasks/loopex.provider.build.ex`'s `--relocatable`; `LoopexCli.ProviderLaunch.options/0`; the `loopex version` module; the `installed-artifact` lane in `scripts/check-release.sh` | The first installed workflow, with a locally built archive |
+| W4 Backup and restore | `LoopexComposition.RootFormat`, `StoreAdmin`, `StoreAdmin.Codec`; the marker step in `Placement.acquire/2` and `LoopexComposition.compose/1`; `Restore.IO`'s `root_inventory` and `backup_copy` operations; `Restore.Audit`'s session-identifying failure; `Restore.Workflow`'s discard-form validation; `Loopex.Executor.Local.RestoreCodec`'s discard form; `LoopexCli.Store` and the marker checks for `sessions` and `artifact` | The marker first, before W1's daemon and CLI changes; adopt, backup and restore after the first installed workflow, before the installed demonstration |
+| W5 Provider sign-in | `apps/loopex_llm_reqllm`: `Loopex.LLM.ReqLLM.SignIn.*`, the `Guards` provider table, `HostBindings`, `NativeRequest`'s per-route header seal, the `chatgpt` mapping, `drain/5`'s reply ceiling, `in_process.ex`'s sign-in resolution and the companion's `token_exchange` kind. `apps/loopex_composition`: `LoopexComposition.SignIn.*` (store, backends, refresh lock, `Route` edge), the credential plane's registration of sign-in custody, and `test/support/fake_oauth_server.ex`. `apps/loopex` (Core): the `provider_sign_in_required` admission in `SessionCoordinator`, `ProviderAttempt` and `SessionState`. `apps/loopex_protocol`: `Session.Outcome` and `Session.CompactResult`. `apps/loopex_cli`: `LoopexCli.Auth` and its sign-in hint function. The `real-sign-in-*` lanes in `scripts/check-release.sh` | After the first installed workflow and after W1's `daemon.readiness` schema change; before the installed demonstration |
 
-Packaging and backup and restore use non-overlapping paths and one worktree
-per writer. One integrator owns rejoin, conflicts and post-rejoin
-verification. Documentation follows the same accepted grammar as the commands.
+Shared files and their single owner:
+
+- `LoopexDaemon.ExitStatus` and `apps/loopex_daemon/test/command_test.exs`:
+  W1. Each ADR's block lands in numeric order, 111 to 115 (114 retired), then
+  116 to 119, then 120 to 123, each block once its ADR is accepted.
+- `apps/loopex_protocol/priv/schema`, `priv/vectors`, the pinned digest in
+  `LoopexCli.DaemonClient`, `clients/node/contract-manifest.mjs` and
+  `clients/node/daemon-client.mjs`: W1. `daemon.readiness` lands first; W5's
+  failure reason rebases on it and the integrator lands the regenerated
+  manifests and schema proof.
+- `LoopexComposition.Placement`: W1 extracts the lock primitive into one
+  shared private module before anything else uses it; W4 then owns
+  `Placement.acquire/2`'s marker step; W5's refresh lock and W1's
+  configuration-writer lock call the primitive.
+- The `LoopexCli` dispatch table, `scripts/check-release.sh` lane list and
+  `scripts/check.sh`: W1 wires each workstream's entry module or lane at its
+  rejoin.
+- The chat, attached chat and `ask` sign-in hint: W5 provides the line in
+  `LoopexCli.Auth`; W1 calls it from the drivers at W5's rejoin.
+- `LoopexCli.ServiceStart`'s precheck of sign-in routes: W1, calling W5's
+  metadata reader after W5's rejoin. Until then the schema refuses `oauth`
+  bindings.
 
 Constraints that hold across workstreams:
 
 - **One resolver.** No second configuration resolver, role schema or provider
-  schema. Discovery and writers wrap ADR 0049's reader.
+  schema. Discovery and writers wrap ADR 0049's reader; ADR 0073's members are
+  additive to schema version 1.
 - **One session owner.** The attached conversation is a client. It owns no
   runtime, no durable conversation state and no alternate loop.
 - **One restore.** The restore command calls
-  `LoopexComposition.Restore.restore/2` and `lookup/3`. It adds no second copy
-  or audit of the root format and no second transition.
+  `LoopexComposition.Restore.restore/2` and `lookup/3`. It adds no second copy,
+  audit or transition.
+- **One lock algorithm.** The configuration-writer lock (ADR 0037) and the
+  sign-in refresh lock (ADR 0073) use the extracted placement primitive on
+  their own directories, never `Placement.acquire/2`, whose first step admits a
+  state root under ADR 0072 and must not mark a lock directory.
 - **Closed schema.** The M9 capacity option needs a versioned successor to ADR
-  0049's closed schema or its explicit amendment. Installed discovery and
-  writers refuse that future member under version 1. M8 adds no capacity
-  member merely because it manages files.
-- **Helper concurrency.** The delivered M7 boundary holds: one active helper
-  per parent conversation, with independent parents permitted to overlap.
-  Installation adds no runtime-wide slot.
+  0049's closed schema or its explicit amendment. M8 adds no capacity member.
+- **Helper concurrency.** One active helper per parent conversation, with
+  independent parents permitted to overlap, in the foreground and the service.
+  The service adds no service-wide slot; the router's 4,096 shared rows and
+  ADR 0032's activation ceiling bound it.
+- **No credential in tests or logs.** Every test uses temporary `HOME`,
+  `LOOPEX_HOME` and keychains; no test touches a real keyring or login
+  keychain.
+
+<a id="technical-plan-order"></a>
+### Implementation Order
+
+Concept: [Workstreams](M8.md#concept-plan-workstreams).
+
+Each step names its first dependency; steps on one line may run in parallel
+in separate worktrees.
+
+1. **Acceptance.** The plan pair and each ADR it depends on, as listed in the
+   prerequisites. Unrelated work does not wait.
+2. **Foundation (W1).** Extract the placement lock primitive; add
+   `ExitStatus` blocks as their ADRs are accepted.
+3. **Root marker (W4)** under ADR 0072: `RootFormat`, `Placement.acquire/2`
+   and `compose/1` admission, the read-only checks, daemon statuses 116 to
+   119, and every existing fixture that opens a root brought to a marked root.
+   **Packaging (W3)** starts in parallel under ADR 0038.
+4. **Home and service (W1)** under ADRs 0037 and 0071: `Home`, writers,
+   `daemon --config`, `ServiceStart`, `daemon.readiness`, `service`, `paths`
+   and `doctor`, then `AttachedChat` with `DaemonSession` and
+   `ChatProjection`. **Provider sign-in (W5)** starts in parallel under ADR
+   0073 with the token store, refresh, routes and the reply ceiling, behind
+   the fake OAuth server.
+5. **First installed workflow.** W1 and W3 rejoin: install a locally built
+   archive, `init`, `chat --service`, detach, reconnect, `service stop`.
+6. **Daemon helpers (W2)** under ADR 0071 decision 10 and its activation
+   counting. **Adopt, backup and restore (W4)**. **Sign-in rejoin (W5)**: the
+   public reason in Core and the protocol, the start-on-demand precheck, the
+   daemon statuses 120 to 123 and the hints.
+7. **Failure matrices.** Process races, fault cuts, restart and signal cases
+   for every workstream, on both toolchain pairs.
+8. **Demonstration and candidate.** The `installed-artifact` lane on both
+   hosts, the attended record with `m8.service-review`, the `real-sign-in-*`
+   lanes whose clients exist, `VERSION` advanced to `0.5.0`, documentation and
+   the evidence scaffold.
 
 <a id="technical-plan-inherited"></a>
 ### What M8 Inherits From M7
 
 Concept: [Scope and non-goals](M8.md#concept-plan-scope).
 
-Each delivered fact creates an obligation that its owning ADR fixes before
-acceptance.
+Each delivered fact creates an obligation that its owning ADR now fixes.
 
 | Delivered M7 fact | M8 obligation | Owner |
 | --- | --- | --- |
-| `loopex chat` owns a foreground durable runtime and accepts no daemon socket | Outcome 5 maps every conversation action onto `loopex.experimental/4` and the controller lease | ADR 0071 |
-| The foreground server serves only `loopex.experimental/3`; the daemon serves only `loopex.experimental/4`, whose methods include `session.acquire_control`, `session.release_control`, `session.configure` and `session.compact` | The attached command and the Node client lane use `/4`; a method it lacks is a named addition with vectors | ADR 0071 |
+| `loopex chat` owns a foreground durable runtime and accepts no daemon socket | Outcome 5 maps every conversation action onto a delivered `loopex.experimental/4` member and the controller lease | ADR 0071 |
+| The foreground server serves only `loopex.experimental/3`; the daemon serves only `loopex.experimental/4`, whose methods include `session.acquire_control`, `session.release_control`, `session.configure` and `session.compact` | The attached command and the Node client lane use `/4`; the one addition is `daemon.readiness`, with schema, vectors and pinned digests | ADRs 0071 and 0037 |
 | Daemon clients detach and reattach at a cursor without cancelling the run, proved by `m7.daemon-detach` | The attached conversation reuses that path; quitting, end of input and interrupt detach | ADR 0071 |
-| The daemon's startup flags are `--state-root`, `--workspace`, `--provider-launch`, `--policy`, `--cleanup-grace-ms` and `--socket`, with environment fallbacks; it reads one credential from `LOOPEX_PROVIDER_API_KEY` into ADR 0070's one-route plane and reads no configuration file | The service reads ADR 0049's file at startup; a client still names no host value; each flag, environment input and the single credential get explicit rules under a file | ADR 0071 |
-| The foreground conversation aborts active work on quit, end of input and interrupt | Attached, the same three detach and the run continues, as existing daemon commands do on a signal | ADR 0071 |
-| The daemon asks about a workspace `AGENTS.md` before it listens, and no flag admits project resources non-interactively | A start on demand does not prompt and leaves them unadmitted, and readiness says so | ADR 0037 |
-| The daemon activates at most 64 sessions per lifetime | Unchanged; the refusal is shown to the operator and documented for a long-running service | ADR 0071 |
-| Trace controls exist on `chat` and `ask` only; the daemon exposes none, and a client gains no trace authority | Any service trace control comes from the service's own startup inputs; attached chat rejects trace flags | ADR 0037 |
-| Durable admission stays closed until helper-history classification completes, bounded at 60,000 ms per start and resumable | Readiness reports "serving", "classifying" with its two counts, "closed" with the named session, or "unavailable" with a code and no session; start-on-demand does not report ready early | ADR 0037 |
-| One unreadable session history closes the durable host until the root is restored from backup | The backup and restore commands exist; the service's readiness report names the session | ADR 0072 |
-| ADR 0051 delivers host-embedded `LoopexComposition.Restore.restore/2` and `lookup/3` from a complete, unexcluded, idle backup copy into an empty root on the same machine. The host owns backup creation, the capture record, plan construction and the attestation; there is no backup or restore command | `store backup` produces that backup and capture record; `store restore` builds the plan and calls the delivered functions | ADR 0072 |
-| Session replay refuses a record kind outside the current inventory as `invalid_private_history`; a root with only the retired session catalogue is refused (`session_catalog_retired`, exit 85); `daemon prepare-index` is gone | No second record inventory. The refusal of an unsupported root moves before any write, because the Store takes its writer marker and may repair a torn tail before replay | ADR 0072 |
-| Per-connection transfer accounting with a 1,073,741,824-byte cumulative allowance is enforced under ADR 0066 | None; the earlier outcome 8 is dropped | — |
-| `config show` and chat's startup report give value origins from a closed set: `flag`, `env`, `file#pointer`, `default` and `committed` | A discovered file reuses the `file#pointer` origin; inspection also states which file was selected and why, without adding an origin member | ADR 0037 |
+| The daemon's startup flags are `--state-root`, `--workspace`, `--provider-launch`, `--policy`, `--cleanup-grace-ms` and `--socket`, with environment fallbacks; it reads one credential from `LOOPEX_PROVIDER_API_KEY` into ADR 0070's one-route plane and reads no configuration file | `daemon --config FILE` reads ADR 0049's file before any lock; flags precede the file; `LOOPEX_PROVIDER_API_KEY` is discarded unread; `--provider-launch` with a file refuses 112; the provider launch comes from the build | ADR 0071 |
+| The daemon opens the helper owner, classifies, recovers stop-only and guards helper history, but creates no helper parent and refuses no file | The service captures roles before any lock, freezes the catalog after placement, creates helper parents through `create_parent_detailed/7`, and counts helper children toward its activation limit | ADR 0071 |
+| The foreground conversation aborts active work on quit, end of input and interrupt | Attached, the same three detach and the run continues | ADR 0071 |
+| The daemon asks about a workspace `AGENTS.md` before it listens, and no flag admits project resources non-interactively | A start on demand runs with `/dev/null` input and leaves them unadmitted; `service start` at a terminal asks and passes the digest-bound `--admit-project-resources` | ADR 0037 |
+| The daemon activates at most 64 sessions per lifetime | Unchanged; helper children count toward it; the refusal is shown to the operator and documented for a long-running service | ADR 0071 |
+| Trace controls exist on `chat` and `ask` only; the daemon exposes none | The file's `trace` member starts the service's trace; failure exits 115; attached chat refuses trace flags | ADR 0071 |
+| Durable admission stays closed until helper-history classification completes, bounded at 60,000 ms per start and resumable | Readiness reports `serving`, `classifying` with its two counts, `closed` with the named session, or `unavailable` with a code; a start waits at most 75,000 ms | ADR 0037 |
+| One unreadable session history closes the durable host until the root is restored from backup | The readiness report names the session and code; `store restore --source lost` recovers it, with `--discard-later-work` for an older backup | ADR 0072 |
+| ADR 0051 delivers host-embedded `LoopexComposition.Restore.restore/2` and `lookup/3`; the host owns backup creation, the capture record, plan construction and the attestation; there is no command | `store backup` produces the backup and capture record; `store restore` builds the plan from the operator's statements and calls the delivered functions | ADR 0072 |
+| Replay refuses an unknown record kind as `invalid_private_history`; a root with only the retired catalogue is refused; the Store takes its writer marker and may repair a torn tail before replay | The marker check runs before the placement lock and before composition starts a Store; `store adopt` audits an unmarked root in full before marking it | ADR 0072 |
+| Per-connection transfer accounting with a 1,073,741,824-byte cumulative allowance is enforced under ADR 0066 | None | — |
+| Hosted provider routes take only environment references; the public model failure is `model_call_failed` | Sign-in routes with host-held tokens, and the public `provider_sign_in_required` reason before dispatch | ADR 0073 |
+| `config show` and chat's startup report give value origins from a closed set: `flag`, `env`, `file#pointer`, `default` and `committed` | A discovered file reuses `file#pointer`; inspection prints which file was selected and why; a sign-in binding shows its form and source only | ADRs 0037 and 0073 |
 
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
@@ -110,19 +175,58 @@ Concept: [Outcomes](M8.md#concept-plan-outcomes).
 
 Concept: [Verification](M8.md#concept-plan-verification).
 
-| # | Required proof | Release check |
+Test files are new unless marked extended. "Fast" means `bash
+scripts/check.sh`; release lanes run under `bash scripts/check-release.sh
+--only LANE` before a merge that changes their boundary and once in the
+closure matrix. Every case uses temporary `HOME`, `LOOPEX_HOME` and
+workspaces.
+
+| # | Fast-check proof | Release check |
 | --- | --- | --- |
-| 1 | Exact manifest and external checksum; provider companion identity verified before launch; native linkage confined to the allowed base set; install from the retained archive on a clean `darwin-arm64` host and a clean Ubuntu 22.04 `linux-x86_64` container; a simulated quarantined download on macOS cleared by the documented step | Yes |
-| 2 | Explicit-file and discovered-file equivalence; default-home selection; per-value origins; unknown schema and unknown member refusal; atomic-write fault cuts leave prior bytes; stale-lock refusal; no credential value read during inspection | No |
-| 3 | `store backup` refuses a held root and a remaining writer marker; its backup's complete canonical manifest equals an independent walk of the source; `store restore` returns ADR 0051's committed receipt into an empty root, and refuses a nonempty target, a changed backup and a held source; an interrupted restore resolves through the same transaction; a restored root starts with no preparation step; a root with one unreadable session history is named by the readiness report and serves again after restore of an earlier backup | No, except the restore step of 6 |
-| 4 | Concurrent start converges under existing placement ownership; readiness distinguishes serving, classifying, closed and unavailable; stop drains within the existing bound; the diagnostic command reports references, marker and placement without resolving credentials or scanning history; on-demand start refuses by name when a configured reference is absent, never prompts, and reports unadmitted project resources | No |
-| 5 | Every conversation action through a real daemon on terminal and piped input; quit, end of input and each signal detach with the run active and its identity unchanged; reconnect delivers the snapshot, contiguous events and a pending question; a killed client's lease lapses and a second terminal acquires control; a stale writer epoch is refused; a second conversation is refused while control is held; attached chat refuses every host and trace flag; the foreground conversation refuses a root a service holds | Attended reconnect case |
-| 6 | Installed real-provider workflow on each supported host with complete output and archive evidence; an identified operator follows the runbook, including backup and restore | Yes, attended |
-| 7 | A root without the current marker, with an unknown marker, or with a retired catalogue is refused by name before any write, by every command that opens a root, and its complete manifest is unchanged afterward; a fresh root receives the marker before any other write; a backup taken by the candidate restores under the candidate and serves | Yes, the same-build restore step |
+| 1 | The existing escript, provider-companion and launcher suites stay green with the relocatable launch pair; `apps/loopex_cli/test/service_start_test.exs` proves the installed command is resolved from the escript's own location | `installed-artifact` (ADR 0038): build with pinned inputs and the linkage table, manifest and verifier, a quarantined download cleared by the documented step on macOS, clean-host assertions, loaded-image probe and `loopex version`, on `darwin-arm64` and in a clean Ubuntu 22.04 `linux-x86_64` container. The closure matrix runs the full release check on one host and `--only installed-artifact` on the other |
+| 2 | `apps/loopex_cli/test/home_test.exs`, `config_inspection_test.exs` (extended), `config_writer_test.exs` | Installed lane step 3 |
+| 3 | `apps/loopex_composition/test/store_backup_test.exs`, `store_restore_command_test.exs` (both attestation forms, `--resume`, every refusal), `restore_workflow_test.exs` (extended), `delegation_readiness_code_test.exs`; `apps/loopex_executor_local/test/restore_codec_test.exs` (extended); `apps/loopex_cli/test/store_command_test.exs`; `apps/loopex_daemon/test/readiness_closed_root_test.exs` | Installed lane step 5, the restore half |
+| 4 | `apps/loopex_cli/test/service_start_test.exs`, `service_command_test.exs`, `service_detach_pty_test.exs`, `live_service_test.exs`, `daemon_configuration_test.exs`; `apps/loopex_daemon/test/readiness_method_test.exs`, `command_test.exs` (extended); the Node contract lane decoding `daemon.readiness` | Installed lane step 4's status and diagnostic commands |
+| 5 | `apps/loopex_cli/test/attached_chat_grammar_test.exs`, `attached_chat_test.exs`, `attached_chat_detach_test.exs`, `attached_chat_signal_test.exs`, `attached_chat_lease_test.exs`, `attached_chat_reconnect_test.exs`, `live_daemon_test.exs` (extended), `daemon_helpers_test.exs`, `daemon_helper_restart_test.exs`, `chat_configuration_test.exs` (extended), with ADR 0071's helper-child activation-counting cases; `apps/loopex_daemon/test/helper_route_guard_test.exs` (extended); `apps/loopex/test/runtime_create_with_genesis_detailed_test.exs` | Attended: the reconnect case and `m8.service-review` in the outcome-6 record |
+| 6 | — | `installed-artifact` steps 1 to 6 on each host with complete output and archive evidence; the attended record on macOS by an identified operator in a separate user account, following the runbook through install, `chat --service`, close and reconnect, `m8.service-review` (M7's `m7.review` profile through the service, a detach while a helper runs, and `service stop` during a second helper with the stop-only result after restart), backup, restore and removal |
+| 7 | `apps/loopex_composition/test/root_format_test.exs`, `placement_root_format_test.exs`, `composition_root_format_test.exs`, `store_adopt_test.exs`; `apps/loopex_cli/test/store_marker_entrypoints_test.exs`; `apps/loopex_daemon/test/daemon_root_format_test.exs` | Installed lane step 5: an unmarked M7-written root refused by name and byte-identical, and a backup taken by the candidate restored under it and served |
+| 8 | `apps/loopex_llm_reqllm/test/sign_in_profiles_test.exs`, `sign_in_routes_test.exs`, `chatgpt_reply_ceiling_test.exs`, `provider_bridge_test.exs` (extended); `apps/loopex_composition/test/sign_in_store_test.exs`, `sign_in_refresh_test.exs`, `credential_plane_test.exs` (extended), `chatgpt_summarizer_test.exs`; `apps/loopex/test/sign_in_required_settlement_test.exs`; `apps/loopex_protocol/test/sign_in_required_vectors_test.exs`; `apps/loopex_cli/test/auth_command_test.exs`, `daemon_sign_in_test.exs`, `ask_sign_in_test.exs`; `apps/loopex_daemon/test/command_test.exs` (extended); the Node client decoding the new vectors. The tagged `sign_in_keychain_test.exs` (`:macos_keychain`, temporary keychain) and `sign_in_secret_service_test.exs` (`:secret_service`, under `dbus-run-session`) each need one retained passing run on a host with that backend; their absence elsewhere is evidence unavailable, not a pass | Attended, each gated on its provider's client: `real-sign-in-openai` (login, one `chatgpt:` conversation through the installed service, a forced refresh, logout with revocation); `real-sign-in-gemini` (the same for `vertex:` through the `loopex` and `adc` sources against a maintainer-owned project); `real-sign-in-anthropic` (refused `sign_in_unavailable` until a sanctioned registration exists, which is its expected result). Tokens are redacted from retained outputs |
+
+ADR 0073's nine verification items (refresh-token invalidation, partner
+client, allowed models, launch date, scope classification, token lifetime,
+ADC field names, regional Vertex host, Anthropic's terms) are
+implementation-time checks in W5, each recorded where it lands; none becomes
+a silent default.
+
+If a provider's client is unavailable at closure, its real sign-in lane is
+evidence unavailable, not a pass. Closing outcome 8 without that lane's
+positive proof is a deferral that needs the maintainer's recorded decision.
 
 The two repository checks and the closure matrix apply unchanged. The evidence
 page is `docs/evidence/M8-closure-runs.md`, created and indexed on its actual
 candidate, with complete immutable outputs outside the repository.
+
+<a id="technical-plan-open"></a>
+### Open for the Maintainer
+
+Concept: [Design decisions](M8.md#concept-plan-decisions).
+
+These are actions with providers, not design gaps. Each gates only its
+`real-sign-in-*` lane; nothing else in M8 waits on them.
+
+1. **OpenAI client.** Confirm that Loopex registers by Sign in with ChatGPT's
+   dynamic registration as a locally run open-source app, and approve the
+   `agent_name_hint` it presents; if OpenAI requires a partner client, submit
+   its interest form. Gates `real-sign-in-openai`.
+2. **Google client.** Create Loopex's Google OAuth desktop client in a
+   maintainer-owned Google Cloud project and decide when to pass verification
+   for the `cloud-platform` scope. Until verification, users see an
+   unverified-app screen, the app is capped at 100 users, and in Testing status
+   refresh tokens expire after 7 days. The `adc` source does not need it.
+   Gates the `loopex`-source half of `real-sign-in-gemini`.
+3. **Anthropic sanction.** Ask Anthropic whether it will sanction an OAuth
+   client registration for Loopex and on what terms. Until it does, `claude:`
+   stays disabled and `real-sign-in-anthropic` proves the refusal.
 
 <a id="technical-plan-compatibility"></a>
 ### Compatibility
@@ -131,15 +235,18 @@ Concept: [Non-goals](M8.md#concept-plan-scope).
 
 Concept: [Rollout](M8.md#concept-plan-rollout).
 
-| Surface | Proposed boundary |
+| Surface | Boundary |
 | --- | --- |
-| Local storage container | Retained until M9's explicit engine migration; the current-format marker identifies the root format and proves nothing about other builds |
-| Durable records and host ledger | Delivered M7 versions as the current format; no older-reader or older-root promise |
-| Restore transition | Accepted ADR 0051, unchanged; the commands are its operator front end |
-| Daemon protocol | `loopex.experimental/4`. Any method the attached conversation or readiness needs and that generation lacks is a named addition with vectors, settled in ADR 0071 or ADR 0037 before acceptance |
-| Foreground protocol and embedded API | `loopex.experimental/3` and the delivered embedded API, unchanged |
-| Configuration | ADR 0049's versioned schema and resolver; discovery, writers and daemon-startup loading added by ADRs 0037 and 0071 |
-| Existing commands | The foreground `chat` keeps its grammar and exit semantics. `run`, `resume`, `attach` and `sessions` keep theirs against a running service; under P8, `run` and `resume` additionally start the service on demand when they use the home's socket |
+| Local storage container | Retained until M9's explicit engine migration; the `loopex-root-format 1` marker identifies the root format and proves nothing about other builds |
+| Durable records and host ledger | Delivered M7 versions as the current format; the settled-attempt record and run terminal admit the `provider_sign_in_required` category; no older-reader or older-root promise |
+| Backup layout and its records | New experimental current-format contracts under ADR 0072: `loopex_store_backup_capture_v1`, `loopex_store_restore_attestation_v1` and `loopex_store_restore_continuation_v1` |
+| Restore transition | Accepted ADR 0051 with ADR 0072's two clause amendments: the commands are its operator front end, and the discard attestation form admits an older backup for a lost source; a latest-form plan's bytes are unchanged |
+| Daemon protocol | `loopex.experimental/4` gains `daemon.readiness` and the `provider_sign_in_required` reason, each with schema, vectors and pinned digests updated in place |
+| Foreground protocol and embedded API | `loopex.experimental/3` gains the `provider_sign_in_required` reason; the embedded API is unchanged except an undocumented `Loopex.Runtime.create_session_with_genesis_detailed/4` |
+| Configuration | ADR 0049's schema version 1 and resolver; discovery and writers by ADR 0037, the daemon's reader by ADR 0071, the `oauth` form and `vertex` members by ADR 0073 |
+| Credentials | Environment references unchanged; sign-in tokens in the operating system's keyring or an owner-only file under `<home>/auth/`, outside the state root and every backup |
+| Existing commands | The foreground `chat` keeps its grammar and exit semantics. `run`, `resume`, `attach` and `sessions` keep theirs; with `--service`, `run` and `resume` start the service on demand |
+| Daemon exit statuses | 65 to 110 unchanged; 111 to 115 (114 retired), 116 to 119 and 120 to 123 added |
 | Installed archive | New experimental packaging contract under ADR 0038 |
 
 <a id="technical-plan-migration"></a>
@@ -154,19 +261,25 @@ proof; that retirement is a scope change, not passing evidence. Current-format
 restart, uncertain-effect nonredispatch, authority, cleanup and backup and
 restore remain required.
 
-The candidate writes the current-format marker into a new root before any
-other write, under the placement lock. Every command that opens a root checks
-the marker first. It refuses a missing or unknown marker by name, before it
-takes a lock, writer marker or socket inside the root and before any Store
-repair. A root written by the M6 or M7 source builds carries no marker and is
-refused, even if its records would happen to decode. The exact marker and
-refusal classes are ADR 0072's to fix.
+The candidate publishes `STATE_ROOT/loopex-root-format`, exactly
+`loopex-root-format 1` and a line feed, into an absent or empty root before
+any other write, by hard-link publication that never replaces. Every path that
+opens a root checks it before the placement lock and again before composition
+starts a Store. It refuses `root_unmarked`, `root_format_unknown` or
+`root_marker_unreadable` before any lock, writer marker, socket or Store
+repair; the daemon exits 116 to 119.
+
+A root the M6 or M7 source builds wrote carries no marker and is refused. `loopex
+store adopt` may then audit it read-only with ADR 0051's decoders and audit
+and, only when every record decodes and the root did not change, write the
+marker and nothing else. A root adopt refuses, such as one holding only the
+retired catalogue or an undecodable record, is unchanged; it is recovered by
+the M7 build's host-embedded ADR 0051 restore, about which M8 claims nothing.
 
 Recovery from a refused or unservable root uses the build whose format the
-root is in. A backup taken by `0.5.0` restores under `0.5.0`. For a root that
-an M7 source build wrote, the M7 build's host-embedded ADR 0051 restore is the
-only path; M8 claims nothing about it. Never remove records to make any build
-start. Engine migration and interrupted import are M9 work.
+root is in. A backup taken by `0.5.0` restores under `0.5.0`. Never remove
+records to make any build start. Engine migration and interrupted import are
+M9 work.
 
 <a id="technical-plan-packaging"></a>
 ### Packaging
@@ -181,11 +294,14 @@ the daemon readiness record and the artifacts, so the eventual tag and
 `VERSION` agree. M6's released `0.3.0` and M7's source release `v0.4.0` are
 not repurposed.
 
-The two supported hosts (D4) are `darwin-arm64` and `linux-x86_64` built in an
-Ubuntu 22.04 container with glibc 2.35 as its base. The macOS archive is not
-signed or notarized: the operator guide verifies the archive against its
-checksum and manifest, then removes the quarantine attribute with a
-documented command. No dependency framework, configuration library or service
-layer is implied. Any native dependency is owned by its adapter and included
-in the pinned build and linkage proof. Service-manager units, distribution
+The two supported hosts (D4) are `darwin-arm64`, macOS 15.0 or later, built on
+the Mac with mise's precompiled Erlang/OTP 29.0.5, and `linux-x86_64`, glibc
+2.35 or later, built from source in a pinned `ubuntu:22.04` container with
+OpenSSL 3.5.7 statically linked (D9). The archive carries no build toolchain;
+the OTP `compiler` application ships only as Elixir's runtime dependency
+(D10). The macOS archive is not signed or notarized: the operator guide
+verifies the archive against its checksum and manifest, then removes the
+quarantine attribute with a documented command. Sign-in keyrings are reached
+through `/usr/bin/security` and `/usr/bin/secret-tool` as subprocesses, so no
+native library enters the linkage set. Service-manager units, distribution
 packages and publication are outside M8.

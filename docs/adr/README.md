@@ -229,25 +229,49 @@ runs inside M5.
 0036 to 0038 were proposed for the earlier installed-operator plan. The current
 sequence places their work in M8 installation/readiness and M9 store migration,
 after M7 coding-agent proof. ADR 0037 extends M7's explicit configuration with
-installed discovery, writers and lifecycle commands; it introduces no separate
-role/provider schema. All three remain Proposed. On 2026-10-13 the maintainer
-selected M8's `0.5.0` label, its two hosts and the macOS quarantine-removal
-path, which ADR 0038 now records; before 1.0 no retained rollback artifact is
-required. The engine version remains M9's to select.
+installed discovery, writers, lifecycle commands, start on demand and the
+`daemon.readiness` report; it introduces no separate role/provider schema. On
+acceptance it narrowly amends ADR 0003's ban on reading a user home, for the
+installed reference host's home discovery only, and ADR 0049's grammar so that
+`--config` is optional when a home is selected. ADR 0038 records M8's `0.5.0`
+label, its two hosts, their build environments and the macOS quarantine-removal
+path; on acceptance it clarifies ADR 0003's "a minimal runtime distribution
+carries no compiler" as "carries no build toolchain", so the OTP `compiler`
+application ships as Elixir's runtime dependency. Before 1.0 no retained
+rollback artifact is required. All three remain Proposed; the engine version
+remains M9's to select.
 
 0071 and 0072 were proposed on 2026-09-30 with the
 [M8 plan](../plans/M8.md#concept), numbered 0050 and 0051 on its planning
 branch and renumbered when that branch was rebased onto the closed M7 baseline.
-0071 lets the conversation command attach to the running service and makes the
-service read ADR 0049's configuration file at startup. 0072 takes the operator
-backup and restore work out of 0036, so the installed release does not wait on
-the engine experiment; 0036 keeps the engine selection, migration and capacity
-refusal for the M9 draft. That split is the M8 plan's proposal P2, an author
-proposal until the maintainer selects it. On 2026-10-13 the four M8
-prerequisites 0037, 0038, 0071 and 0072 were reconciled with the delivered M7
-contracts. 0072 now amends accepted ADR 0051 only by adding the operator
-commands in front of its restore, and adds the current-format root marker;
-ADR 0051, ADR 0070 and the pre-1.0 rule settle the rest.
+0071 lets the conversation command attach to the running service, makes the
+service read ADR 0049's configuration file at startup, and makes the service
+host M7's read-only helper roles, with helper children counted toward the
+daemon's activation limit. On acceptance it narrowly amends ADR 0049's
+conversation status record, ADR 0032's activation ceiling and ADR 0055's
+creation options on a helper-enabled service. 0072 takes the operator backup
+and restore work out of 0036, so the installed release does not wait on the
+engine experiment; 0036 keeps the engine selection, migration and capacity
+refusal for the M9 draft. The maintainer accepted that split, the M8 plan's
+proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
+`store adopt`, `store backup` and `store restore`, and on acceptance amends
+exactly two clauses of accepted ADR 0051: its statement that no backup CLI is
+added, and its latest-backup-only restriction, which `--discard-later-work`
+relaxes for a lost source. ADR 0051's other decisions, ADR 0070 and the
+pre-1.0 rule settle the rest.
+
+0073 was proposed on 2026-10-13 when the maintainer added provider sign-in to
+M8 as outcome 8. It lets a provider binding name an `oauth` credential on
+three new routes: `chatgpt:` for Sign in with ChatGPT, `vertex:` for Gemini on
+Google Cloud, and `claude:`, reserved until Anthropic sanctions a client
+registration for Loopex. Tokens are host-held in the operating system's
+keyring or an owner-only file outside the state root, and Loopex uses only its
+own client identities. On acceptance it amends named clauses of accepted ADRs
+0019, 0029, 0034, 0039 and 0048, including the new public failure reason
+`provider_sign_in_required` in ADR 0029's bounded vocabulary, and one sentence
+of Proposed ADR 0037. M8's daemon exit statuses are 111 to 115 for 0071 (114
+retired), 116 to 119 for 0072 and 120 to 123 for 0073. All five M8
+prerequisites remain Proposed.
 
 0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on
 2026-09-27. It adds an ephemeral composition profile beside the durable one,

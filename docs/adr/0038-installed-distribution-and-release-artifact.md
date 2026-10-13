@@ -7,7 +7,9 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
 - **Date:** 2026-09-21; reconciled with the delivered M7 baseline and the
   maintainer's 2026-10-13 host and label decisions; build recipe, manifest,
   linkage inventory, install contract and failure names detailed on 2026-10-13;
-  the maintainer's ADR 0003 compiler reading recorded on 2026-10-13
+  the maintainer's ADR 0003 compiler reading recorded on 2026-10-13; the
+  attended reconnect and installed-service helper case `m8.service-review`
+  added to the installed demonstration on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
@@ -155,6 +157,12 @@ A refused archive or install names its reason: a checksum or manifest
 mismatch, an unexpected file, a file writable by others, the wrong platform or
 a base system older than the minimum. Nothing runs from the archive until the
 verifier has passed.
+
+The attended installed demonstration runs the conversation through the
+installed service. It reconnects to a running task from a second terminal,
+and it runs ADR 0071's helper case `m8.service-review`: a review with helper
+roles through the service, a detach and reconnect while a helper runs, and a
+service stop during a helper followed by the stop-only result after restart.
 
 The same source archive M5 produces still builds the escript pair from source
 on either supported toolchain pair. The source tree keeps working exactly as

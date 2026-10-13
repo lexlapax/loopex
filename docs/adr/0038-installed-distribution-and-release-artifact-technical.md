@@ -471,11 +471,39 @@ macOS user account whose shell profile loads no mise or Homebrew.
    in the container less `/proc`, `/sys` and `/dev`; on macOS it is the
    invoking user's home, `/private/tmp`, `$TMPDIR` and `/Users/Shared`.
 
+**Attended record.** M8 outcome 6's attended record runs on `darwin-arm64`
+in the separate macOS user account above, from a verified extraction of the
+candidate's archive, by an identified operator following the operator
+runbook. Every step uses the installed command and the home `init` created.
+After steps 1 to 3 it runs:
+
+1. **Reconnect.** `loopex chat --service` starts the service on demand and
+   begins a task with the first pinned provider. The operator closes that
+   terminal while the run is active, opens another, runs
+   `loopex chat --service --resume SESSION`, and sees the transcript and the
+   result, with the run identity unchanged and nothing run twice.
+2. **`m8.service-review`**, ADR 0071's attended helper case. The home's
+   configuration enables delegation with M7's `m7.review` fixture profile:
+   roles `investigate` and `review` on the second pinned provider, the parent
+   on the first. Through `loopex chat --service` the operator asks for a
+   review, detaches while a helper runs, reconnects with `--resume`, and sees
+   each `task` result with its role, model, child session, outcome and
+   separate and combined usage. The operator then asks again and runs
+   `loopex service stop` while the second helper runs, starts the service by
+   reconnecting, and sees the parent's `task` call carry the stop-only result.
+   `loopex service status` reports `classifying` or `serving`, never a session
+   admitted before classification completes.
+
+It then completes steps 5 and 6. The record names the operator, the archive
+digest, both providers and each session identifier.
+
 **Evidence retained** outside the repository, each with its SHA-256 on the
 closure evidence page: the archive, its `.sha256` file and manifest copy,
 `build.log`, `linkage.log`, the smoke transcript, the loaded-image report, the
-clean-host assertions, the two inventories and their difference, and the
-`dpkg -l` list on Linux.
+clean-host assertions, the two inventories and their difference, the
+`dpkg -l` list on Linux, and the attended record's transcript with its
+reconnect and `m8.service-review` sections, with provider credentials
+redacted.
 
 <a id="technical-adr-0038-failures"></a>
 ### Failure Modes and Refusals
