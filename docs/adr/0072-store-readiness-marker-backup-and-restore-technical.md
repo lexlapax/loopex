@@ -366,7 +366,7 @@ statement excepted). `BACKUP` is required.
 **No exclusion.** Backup copies every file of the root under ADR 0051's
 complete manifest; it excludes nothing. Provider sign-in tokens stay out of
 the copy because ADR 0037's
-[separation invariant](0037-host-configuration-and-path-discovery-technical.md#technical-depth)
+[separation invariant](0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation)
 keeps the token directory physically outside every state root, not because
 backup filters files. The disposable job-index cache removed at step 6 is
 deleted from the source before the manifest, not left out of the copy.

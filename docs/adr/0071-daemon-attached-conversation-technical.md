@@ -205,9 +205,10 @@ New `LoopexDaemon.ExitStatus` classes, after the delivered 65 to 110:
 
 Numbers are kept stable rather than closed up, so no text that already names
 115 changes meaning. ADR 0072's root refusals and ADR 0073's sign-in statuses
-take the statuses after 115, in that order: 116 to 119 and 120 to 123. The
+take the statuses after 115, in that order: 116 to 119 and 120 to 123;
+ADR 0072's `root_adopting` takes 124. The
 module's "every integer from 65 through 110" statement becomes, once all three
-records land, "every integer from 65 through 123 except 114, which is
+records land, "every integer from 65 through 124 except 114, which is
 retired"; `ExitStatus.classes/0` omits 114 and `fetch/1` refuses it. ADR
 0037's separation refusal `auth_root_overlap` reuses 111 (table above) and takes no
 number of its own. A helper role that cannot be captured is `configuration_invalid`

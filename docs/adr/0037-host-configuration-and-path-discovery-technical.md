@@ -141,10 +141,11 @@ could later create `A` inside the selected root.
 **Statuses.** A CLI command prints `loopex: auth_root_overlap <pointer>` with
 the hint `the sign-in directory <A> and the state root must not contain each
 other; select a different state root` and exits `1`, as every refusal in this
-record does. `loopex daemon` exits [ADR 0071](0071-daemon-attached-conversation-technical.md#technical-adr-0071-decision)'s
+record does; `loopex auth` exits 76 from its own status table in
+[ADR 0073](0073-provider-oauth-sign-in-technical.md#technical-depth). `loopex daemon` exits [ADR 0071](0071-daemon-attached-conversation-technical.md#technical-adr-0071-decision)'s
 `111`, `configuration_invalid`, with class `auth_root_overlap` and the
 pointer on its diagnostic line. No new daemon status is assigned. The M8 set
-stays every integer from 65 through 123 except 114, which ADR 0071 retires.
+is every integer from 65 through 124 except 114, which ADR 0071 retires.
 
 #### Command grammar
 

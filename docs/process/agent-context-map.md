@@ -7849,7 +7849,7 @@ attempt (ADR 0073); the auth and state-root path separation, nonblocking
 readiness during classification and a closed `service status` result (ADR
 0037); the helper permit registry operation (ADR 0071); two-phase adoption and
 cooperative marker publication (ADR 0072); the Linux build recipe's `PATH` and
-writable Mix, Hex and Rebar locations (ADR 0038); exit statuses 65 to 123
+writable Mix, Hex and Rebar locations (ADR 0038); exit statuses 65 to 124
 except 114, each used once; and the amendment inventories, which now list ADR
 0073's additive ADR 0049 schema-version-1 members and ADR 0071's amendment of
 ADR 0046's refusal order. All five prerequisite ADRs remain Proposed and M8

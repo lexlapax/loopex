@@ -141,7 +141,7 @@ stored.
   `sign_in_incomplete`.
 - `<home>` is ADR 0037's home. That `auth/` and every selected state root are
   physically disjoint is ADR 0037's
-  [separation invariant](0037-host-configuration-and-path-discovery-technical.md#technical-depth),
+  [separation invariant](0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation),
   which owns the check and its refusal. This record relies on it: the store
   applies that check before every token write, so ADR 0072's complete-copy
   backups never capture tokens and restore never overwrites them. ADR 0051's
@@ -339,11 +339,11 @@ pool, cleanup and selected-value guard is unchanged.
   `sign_in_route_lost` (123) is a fail-stop when a running `SignIn.Route` edge
   exits, like `custody_lost`.
 - `LoopexDaemon.ExitStatus`'s moduledoc range and `fetch/1` spec extend
-  through 123. With this record the daemon's status set is exactly 65 to 123
+  through 124. With ADRs 0071 and 0072 the daemon's status set is exactly 65 to 124
   except 114, which ADR 0071 retired: every other integer in that range maps
   to exactly one class, and `fetch/1` refuses 114. The assertion in
   `apps/loopex_daemon/test/command_test.exs`, which today checks
-  `Enum.to_list(65..110)`, becomes `Enum.to_list(65..123) -- [114]`.
+  `Enum.to_list(65..110)`, becomes `Enum.to_list(65..124) -- [114]`.
 - A transient refresh failure at startup does not refuse start. The service
   serves and the route stays unavailable until a refresh succeeds.
 - ADR 0037's start-on-demand presence check reads only the metadata file. It
@@ -924,7 +924,7 @@ use temporary homes and never touch a real keyring.
 | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` (extended) | The `token_exchange` invocation: credential frame, closed failure classes, no raw body crossing, cleanup proof. The access-token echo guard withholds a reply containing the token |
 | `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. A login whose ID token fails verification writes nothing. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`. The ADC metadata path |
 | `apps/loopex_cli/test/daemon_sign_in_test.exs` | Statuses 120 to 123, each refused start leaving no socket; start-on-demand presence check; revoked mid-service → next call `not_dispatched` with no fallback to another route, and the attached client's terminal outcome is `failed` with `provider_sign_in_required` and the `auth login` hint; re-login adopted and the next turn succeeds without restart |
-| `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers exactly `Enum.to_list(65..123) -- [114]`, each status once; `fetch/1` refuses 114 |
+| `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers exactly `Enum.to_list(65..124) -- [114]`, each status once; `fetch/1` refuses 114 |
 | `apps/loopex_llm_reqllm/test/chatgpt_reply_ceiling_test.exs` | Through the fake server: a stream longer than the ceiling ends with completion `limit`, text whose `Loopex.Bounds.estimate/1` is at most the ceiling and is a prefix of what the server sent, a cut on a UTF-8 boundary, no tool calls, nil reported usage, and the server observing the connection closed; a stream that completes below the ceiling is unchanged; a ceiling of 1; a cut during a streamed tool call; the request body never contains `max_output_tokens`. Each case runs through both actual callers: the companion worker's `drain/5`, where the halt calls `StreamResponse.close/1` and no `StreamServer` or HTTP task survives the invocation, and the in-process caller through `OneShotHTTP1`, where the halt is followed by the owner's existing tagged-pool teardown proof before the result, and no progress delta is emitted. A source check finds one ceiling implementation, `ReplyCeiling`, called from both |
 | `apps/loopex_composition/test/chatgpt_summarizer_test.exs` | A maintenance summary on a `chatgpt:` route through the fake server, with a summary longer than ADR 0043's ceiling, settles as a `limit` reply within the ceiling and is handled as any limit-truncated summary, once through a durable composition (companion caller) and once through an ephemeral composition's maintenance model (in-process caller) |
 | `apps/loopex/test/sign_in_required_settlement_test.exs` | `{:not_dispatched, "provider_sign_in_required"}` settles attempt one as `not_dispatched`, accounting `none`, next `terminal` with no retry; the run ends `failed` with that reason; the record replays. **Route availability changes between attempts:** attempt one settles `not_dispatched`/`model_call_failed` with `retry`, custody then becomes `:missing`, and attempt two settles terminal with `provider_sign_in_required`; the two-attempt history replays to the same terminal. The category with `dispatched_or_unknown`, accounting other than `none`, `next` other than `terminal`, or a termination other than abort or deadline is invalid history; a maintenance run reports the category |
