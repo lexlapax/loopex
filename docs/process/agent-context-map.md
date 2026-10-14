@@ -8312,7 +8312,7 @@ A third internal holistic review round at `ab20e0d1` closed most round-2
 findings and found further findings, chiefly two unrecorded amendments of
 accepted ADRs (0032 by D42, 0016 by D45), the sign-in route's ownership in
 foreground and ephemeral hosts, and release-runner resumption. The
-maintainer kept sign-in in M8 and decided D48 to D53 on 2026-10-14; the
+maintainer kept sign-in in M8 and decided D48 to D54 on 2026-10-14; the
 other items were fixed without a new decision. All five prerequisite ADRs
 remain Proposed and M8 remains Open.
 
@@ -8343,3 +8343,31 @@ remain Proposed and M8 remains Open.
    a backstop-style halt; stores 121 and 122 in `ask` mapped to
    `composition_unavailable`; the compiled `@disabled_sources` list for D43;
    the model list held in a protected ETS table.
+
+<a id="disposition-m8-holistic4-2026-10-14"></a>
+### M8 internal holistic review round 4 answered — 2026-10-14
+
+A fourth internal holistic review round at `eac84cda` found no new P2 in ADRs
+0037 and 0071 and a small number elsewhere: the resource-pack ledger's
+path-derived identity under adopt's rebinding, the sign-in route's companion
+executor needing a bound trace capability and custody, D40's reach into other
+vision passages, D54 with a home file, and an ended campaign's index being
+appendable. The maintainer decided D55 to D58 on 2026-10-14; the other items
+were fixed without a new decision. All five prerequisite ADRs remain Proposed
+and M8 remains Open.
+
+1. **Resource-pack ledger (D55)**, **vision passages (D56)**, **`ask` routes
+   with a file (D57)** and **`run`, `resume` and `skill` with a sign-in route
+   (D58)**.
+2. **Row text and notes.** D12's gating wording was aligned with D16 and D43
+   in round 3; notes were added to D6, D22, D30, D39, D45 and D50.
+3. **Choices made in the fixes without a maintainer decision, listed for
+   acceptance**, in addition to the holistic 2 and 3 lists: the recorder's
+   `stop KEY` form without a log, which writes its own `prestart-*.json`; D46
+   applied to a runner killed between a pre-start copy and its stop (a
+   recorder killed mid-append is a torn tail under D49); an `m8-operator`
+   `withheld` verdict ending the campaign; a campaign whose lower numbers
+   were all skipped counting as the first; D54's `--config` flag on `ask`, a
+   malformed discovered file failing `ask` as `command_failed`, and an
+   ephemeral `ask` without a usable `HOME` selecting no file; D49's torn
+   bytes recorded by offset and length in the ended index.
