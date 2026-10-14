@@ -279,10 +279,12 @@ registration for Loopex. Tokens are host-held in the operating system's
 keyring or an owner-only file outside the state root, and Loopex uses only its
 own client identities, except that its `adc` source presents the client of
 gcloud's Application Default Credentials file. On acceptance it amends named
-clauses of accepted ADRs 0018, 0019, 0021, 0029, 0034, 0039, 0043 and 0048,
-including the new public failure reason `provider_sign_in_required` in ADR
+clauses of accepted ADRs 0018, 0019, 0021, 0029, 0034, 0039, 0043, 0048 and
+0049, including ADR 0019's closed private-protocol kinds, ADR 0034's
+custody-refusal row, ADR 0039's pre-call refusal and, by D37, its host-VM
+credential audience, ADR 0049's closed terminal schema, the new public failure reason `provider_sign_in_required` in ADR
 0029's bounded vocabulary, ADR 0018's Model callback boundary, settlement
-categories and valid-combination table, ADR 0021's settled-attempt result
+categories and valid-combination table and terminal precedence, ADR 0021's settled-attempt result
 schema and ADR 0043's episode failure union; adds the `oauth`
 binding form and `vertex` members to ADR 0049's schema version 1 as additive
 members; and amends one sentence of Proposed ADR 0037. M8's daemon exit statuses are 111 to 115 for 0071 (114
