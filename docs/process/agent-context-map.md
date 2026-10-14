@@ -8407,3 +8407,13 @@ Proposed and M8 remains Open.
    `--socket` canonicalized with or without `--config` (D53); D58 for an
    `oauth` binding however it arrives; the anchor line and standing
    authorization for successions (D47).
+3. **Choices made in the fixes without a maintainer decision, listed for
+   acceptance:** an absent plan on `--resume` refused as `backup_invalid`;
+   a scan code outside the three closed codes mapped to readiness
+   `{:unavailable, :unexpected}`; the D58 line's pointer
+   `/providers/ROUTE/credential/oauth` and its hint naming `loopex ask`; the
+   service record removed only after the placement lock is released, a
+   record left by a fail-stop or an exit 76 pruned later; `config validate`
+   refusing a disabled source while `config show` shows it; `Model.reference/2`
+   also taking `:sign_in_routes`; a `FILE.ended` marker naming its one
+   successor; `predecessor_not_ended`.
