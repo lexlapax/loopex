@@ -4,7 +4,7 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck; the maintainer's D33 to D35 (time-zone-independent lock and writer-marker records, the `m7-adopt` prerequisites, the ADR 0056 amendment) and an internal review's fixes recorded on 2026-10-14; the maintainer's D45 (adopt rebinds a ledger bound through an alias) and a second internal review's fixes recorded on 2026-10-14; the maintainer's D48 (the rebinding carries the ledger's open authority, amending ADR 0016) and a third internal review's fixes recorded on 2026-10-14; the maintainer's D55 (the path-derived identity of `resource-packs/receipts`) and a fourth internal review's fixes recorded on 2026-10-14; the maintainer's D59 (no rebinding of `resource-packs/receipts` holding a receipt) and a fifth internal review's fixes recorded on 2026-10-14; a sixth internal review's fixes recorded on 2026-10-14
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck; the maintainer's D33 to D35 (time-zone-independent lock and writer-marker records, the `m7-adopt` prerequisites, the ADR 0056 amendment) and an internal review's fixes recorded on 2026-10-14; the maintainer's D45 (adopt rebinds a ledger bound through an alias) and a second internal review's fixes recorded on 2026-10-14; the maintainer's D48 (the rebinding carries the ledger's open authority, amending ADR 0016) and a third internal review's fixes recorded on 2026-10-14; the maintainer's D55 (the path-derived identity of `resource-packs/receipts`) and a fourth internal review's fixes recorded on 2026-10-14; the maintainer's D59 (no rebinding of `resource-packs/receipts` holding a receipt) and a fifth internal review's fixes recorded on 2026-10-14; a sixth internal review's fixes recorded on 2026-10-14; the maintainer's D66 (`store restore --abandon`) and a seventh internal review's fixes recorded on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It narrowly amends accepted [ADR 0016](0016-configured-cancellation-observation.md#concept) in one clause (D45, D48): `store adopt`, under the placement lock, the `adopting` fence and the `--old-writer stopped` attestation, may replace a ledger generation bound through the selected alias with a fresh-epoch generation bound to the physical path, carrying the open index, markers and receipts unchanged, and for `resource-packs/receipts`, whose identity is path-derived, only while it holds no open effect and no receipt, and with the physical path's identity (D55, D59). It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendments](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It narrowly amends accepted [ADR 0056](0056-host-helper-ledger-recipe.md#concept) in one clause, stated in five sentences: the helper job index is left out of ADR 0051's audit (D35). It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0056](0056-host-helper-ledger-recipe.md#concept) for the helper ledgers the audit decodes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the physical root path every opener receives, the configuration writer, `doctor` and the readiness report
@@ -346,6 +346,20 @@ uncertain result it prints the transaction and the exact command that
 re-presents it, which reuses the retained plan byte for byte. The command adds no copy, audit or transition of
 its own.
 
+**Abandoning a restore that stopped early (D66).** A restore killed after it
+claimed its roots and before its copy of the backup was complete cannot be
+re-presented: ADR 0051 continues only a complete copy and requires an
+explicit cleanup of an incomplete one. `loopex store restore --abandon TX_ID
+--previous-restore stopped|rebooted BACKUP DESTINATION` is that cleanup.
+After the checks a re-presentation makes, it removes the partial destination
+and then releases the transaction's claims, so the original root opens again
+and a new restore can start; it writes nothing else. It refuses a
+transaction that completed its copy, which `--resume` continues, or
+committed. Rerunning it after a crash finishes what remains. Two cuts are
+left to the maintainer: a kill just after the copy, inside the step that
+starts the restore's own records, and a claim a kill left without its owner
+record; [the open items](#concept-adr-0072-open) describe both.
+
 <a id="concept-adr-0072-readiness"></a>
 ### Readiness Facts
 
@@ -470,10 +484,28 @@ record amends exactly two clauses of ADR 0051 and one each of ADRs 0056 and
 <a id="concept-adr-0072-open"></a>
 ### Open for the Maintainer
 
-Technical depth: [Resolved choice](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-open).
+Technical depth: [Open items](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-open).
 
-Nothing remains open. The older-backup choice was decided on 2026-10-13 as
-decision 9, with the amendment above.
+The older-backup choice was decided on 2026-10-13 as decision 9, with the
+amendment above. Acceptance of this record includes the fix choices the M8
+internal review 2 and holistic dispositions list for it
+([disposition](../process/agent-context-map.md#disposition-m8-holistic7-2026-10-14)).
+
+Two restore cuts are recovered by neither `--resume` nor `--abandon`, and
+each needs a decision:
+
+1. A kill after the copy completed, while the restore was starting its own
+   records in the destination and before its intent record existed. The
+   copy no longer equals the backup, so `--resume` refuses, and D66 refuses
+   `--abandon` after the copy. Recommended: let `--abandon` also end this
+   state, in which no intent can exist, which leaves ADR 0051's transition
+   unchanged.
+2. A claim a kill left without its owner record, inside its acquisition or
+   its release. ADR 0051 holds such a claim stranded, and it keeps its root
+   closed. Recommended: let `--abandon` remove a claim that holds no owner
+   record, or only an unfinished one, at a root the plan names, under the
+   operator's `--previous-restore` statement, which amends ADR 0051's
+   stranded rule.
 
 ## Governance Record
 
