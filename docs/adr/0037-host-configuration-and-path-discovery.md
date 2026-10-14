@@ -73,12 +73,15 @@ They are recorded here as decided, not proposed.
    report states. `loopex service start` at a terminal shows the project
    resources and asks, as the daemon does in the foreground today. Concurrent
    starts converge on one service through the existing placement lock. A
-   command that finds the root held by a process whose socket does not
-   answer waits only while a start is visibly in progress, its own or
-   another command's recent one; otherwise, including when a foreground
-   command took the root just before its own service could, it refuses at
-   once as held, naming that process, because no wait would end a
-   foreground command.
+   service started from a configuration file alone, as a start runs it,
+   records its own process incarnation in that file's log directory before it
+   takes the lock, so the lock's holder shows whether it is a service. A command that finds the root held by a process
+   whose socket does not answer waits only when that holder is a service;
+   any other holder is a foreground command, and the command refuses at once
+   as held, naming that process, because no wait would end a foreground
+   command. A command whose own service lost the lock judges the holder the
+   same way, so starters that all lost to a foreground command never wait on
+   one another.
 7. **Readiness is reported as it is.** The running service answers one new
    query, `daemon.readiness`: serving; still classifying helper history, with
    ADR 0046's two counts; closed, with the session whose history could not be
