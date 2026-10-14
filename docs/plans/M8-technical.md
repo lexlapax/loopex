@@ -277,7 +277,12 @@ campaign and genesis digest of the M8 index and the committed pre-candidate
 head digest and count, and predeclares `Pending` slots for the index path,
 the final head digest and count, and, for each run root (the `serenity` run's
 `$retain/m7-runs` and the macOS run's `--writer-retain`), one cell holding
-the count and SHA-256 of its ordered invocation-log reference list.
+the count and SHA-256 of its ordered invocation-log reference list. For
+each campaign that ended before the candidate's (D30, item 1 below) it
+holds one row: the ended index's path, its final head digest and count, the
+candidate commits it recorded, and the SHA-256 of its unresolved-case list,
+whose lines the page lists as unresolved. No case of an ended campaign is
+counted toward closure.
 
 <a id="technical-plan-release-check"></a>
 ### Release-Check Changes
@@ -321,17 +326,32 @@ below is `loopex.m7_matrix.ex`.
    closure matrix's final head goes only into the evidence scaffold's
    `Pending` slots named above.
 
-   A consumed non-pass (`fail`, `unavailable`, or a `started` case never
-   finished) ends campaign `m8-closure-N`: continuation refuses
-   `consumed_lane_failure`, a join refuses `consumed_matrix_failure`, and a
-   later candidate's new matrix refuses `post_head_consumed_case`
-   (`attempt_events.ex:256-274`, `:416-417`). No production code appends the
-   `reviewed` or `authorized_next_candidate` records the delivered
-   authorization rule reads, and none is added. The next candidate instead
+   Succession is a fresh campaign (D30). This is the maintainer's
+   2026-10-14 amendment, for M8 only, of the succession obligation of ADR
+   0057 ([technical](../adr/0057-attempts-event-bodies-technical.md#technical-adr-0057-records),
+   lines 107-114: a `succession` event naming the predecessor head, carried
+   rows, the unavailable interval and the maintainer authorization) and ADR
+   0065 ([technical](../adr/0065-private-attempts-io-prerequisite-technical.md#technical-adr-0065-decision),
+   lines 45-50: no replacement campaign merely because an acknowledgement
+   was lost). A consumed non-pass (`fail`, `unavailable`, or a `started`
+   case never finished, including one whose `started` reply was lost) ends
+   campaign `m8-closure-N`: continuation refuses `consumed_lane_failure`, a
+   join refuses `consumed_matrix_failure`, and a later candidate's new
+   matrix refuses `post_head_consumed_case` or, once that head is committed,
+   `prior_failure_unauthorized` (`attempt_events.ex:256-283`, `:416-417`).
+   No production code appends the `reviewed`, `authorized_next_candidate`
+   or `succession` records, and none is added. The next candidate instead
    gets a new index file, created as above with `--campaign
-   m8-closure-<N+1>`, and its own anchor line; `AttemptHeads.select/2`
-   ignores the earlier campaign's lines (`attempt_heads.ex:58-63`). The
-   ended index stays retained.
+   m8-closure-<N+1>` after campaign N ended, and its own anchor line;
+   `AttemptHeads.select/2` ignores the earlier campaign's lines
+   (`attempt_heads.ex:58-63`), and nothing from the ended index is
+   imported, so every case runs again in the new one. The ended index is
+   retained unchanged. Its cases left `started` are unresolved: one line
+   each, `<lane> <case> <attempt> <sequence>`, retained beside it and
+   listed on the evidence page's row for that campaign, never counted. A new
+   campaign never runs on a candidate an ended campaign recorded; the
+   closure review checks the candidate against those rows.
+
    The recorder's `--concept` (`:255`) names `docs/plans/M8.md`, and
    `CaseRunner`, which reads `docs/plans/M7.md` today (`case_runner.ex:120`),
    gains `--concept FILE`, which the runner passes for the M7 conversation
@@ -432,9 +452,9 @@ below is `loopex.m7_matrix.ex`.
    matrix ID; closure also needs macos-closure joined to it)`; an indexed
    macOS run prints `PASS (macos-closure joined to matrix ID)`; an unindexed
    selection keeps `PASS (selection-only: not full closure evidence)`.
-   Closure is read from the index: on one candidate and matrix, every case of
-   the `release-matrix` lane, of the M7 conversation lanes and of
-   `macos-closure` completed `pass`.
+   Closure is read from the current campaign's index alone: on one
+   candidate and matrix, every case of the `release-matrix` lane, of the M7
+   conversation lanes and of `macos-closure` completed `pass`.
 5. **Attended lanes.** `m8-operator` and the three `real-sign-in-*` lanes are
    attended. Like the delivered attended rows (`:372-374`), they keep the
    invoking terminal as standard input and read any manifest on another
@@ -487,24 +507,39 @@ below is `loopex.m7_matrix.ex`.
    `lane` (`release-lane.sh:312-330`) sends `unavailable` when the lane's
    redactor and tee succeeded and its summary counted no executed case, and
    `fail` for every other non-pass. Each new lane's host probe (session
-   bus or Docker) runs before its `start`; a refusal retains a
-   refusal log and sends the delivered `stop KEY LOG`, which records that
-   case and every later case of the lane `not_dispatched` with
-   `evidence_incomplete_pre_dispatch`
-   (`matrix.ex:161-186`). Once the host is fixed, the lane continues on the
-   same commit, with `--resume-matrix` on `serenity` or the same
-   `--join-matrix` on macOS, without dispatching a completed case again. The
-   runner prints evidence unavailable and exits 2 for an unavailable or
+   bus or Docker) and every other host prerequisite runs before its
+   `start`; a refusal retains a refusal log and sends the delivered `stop
+   KEY LOG`, which records that case and every later case of the lane
+   `not_dispatched` with `evidence_incomplete_pre_dispatch`
+   (`matrix.ex:161-186`). The recorder reads and hashes LOG on its own host
+   and otherwise refuses `lane_log_unavailable` (`:276-283`). On `serenity`
+   LOG is the refusal log. In a macOS run the runner first copies it into
+   `--writer-retain` as `prestart-macos-closure-<case>-<16 hex>.log`, the
+   suffix from eight fresh random bytes, by item 4's protocol: exclusive
+   create, SHA-256 checked on `serenity`, at most three retries each under a
+   fresh suffix. `stop` then names that copy. The name needs no attempt ID
+   and no `start` is sent to get one. When the retries are spent no `stop`
+   is sent: the runner prints evidence unavailable with the local refusal
+   log's path, closes the recorder and exits 2, and the case, with no
+   record, consumes nothing. Once the host is fixed, the lane continues on
+   the same commit, with `--resume-matrix` on `serenity` or the same
+   `--join-matrix` on macOS, without dispatching a completed case again.
+
+   The runner prints evidence unavailable and exits 2 for an unavailable or
    stopped case, or when the M7 wrapper exits 2, as it does when its writer
    open refuses `attempt_writer_contention` (`case_runner.ex:151-152`, `:236`,
    replacing the RED exit at `check-release.sh:466`), and exits 1 for a
-   failure.
+   failure. The wrapper's complete output, which ends with its refusal line
+   `m7-fixture-chat: evidence unavailable: REASON` (`case_runner.ex:236`),
+   passes through the lane redactor into `$retain/<lane>.log`, so the
+   retained evidence keeps the underlying refusal. Exit 2 is never a pass:
+   closure counts only `pass` records (item 4).
 
    Interruptions, replays and duplicates keep the delivered barriers:
 
    - An unsynced `start` is never acknowledged, so its lane never runs.
-   - A runner killed, or an SSH connection lost, after a `started` reply
-     ends the recorder's standard input once no process holds it; the
+   - A runner killed, or an SSH connection lost, after a `start` is
+     synced, whether or not its reply arrived, ends the recorder's standard input once no process holds it; the
      recorder closes the writer at end of input (`matrix.ex:67`,
      `:123-124`), or the lock goes with its VM. Until then the recorder
      keeps the lock and every other invocation refuses. A dropped connection
@@ -515,7 +550,9 @@ below is `loopex.m7_matrix.ex`.
      consumed attempt: the campaign ends as item 1 states.
    - A failed copy is retried as item 4 states; a partial copy keeps its
      exclusive name and no retry or later attempt reuses it. Only when the
-     retries are spent does `finish` record the case unavailable.
+     retries are spent does `finish` record the case unavailable. A runner
+     killed between a pre-start copy and its `stop` leaves an unreferenced
+     copy and no record; the next invocation copies under a fresh suffix.
    - While a lost connection holds the `serenity` lock, every other
      invocation on either host refuses `attempt_writer_contention`
      (`attempt_writer.ex:215-221`), so two recorders never write.
@@ -556,6 +593,13 @@ below is `loopex.m7_matrix.ex`.
      in a separate OS process that is killed after its `started` reply, and
      one whose standard input closes there, each leave the case `started`
      and the lock free, and continuation refuses `consumed_lane_failure`.
+     D30: a consumed failure, and a `start` synced but its reply discarded
+     before the transport closes, each end the campaign; an
+     `m8-closure-2` index created after them admits on the next candidate
+     and plans every case `plan run`, including one that passed in the
+     ended index; the ended index is byte-unchanged after the new
+     campaign's run; and the recorder on the ended index refuses a new
+     matrix and a join, so no case of it reaches a PASS line.
    - `apps/loopex_cli/test/m7_matrix_runner_test.exs` (new). The runner's
      own `lane` and recorder helpers from `scripts/lib/release-lane.sh`, in
      a disposable tree as `scripts/test/check-release-test.sh` builds one,
@@ -567,14 +611,22 @@ below is `loopex.m7_matrix.ex`.
      the case passes, and one that fails every retry records the case
      unavailable; a lane that counts no case records `unavailable` and
      prints evidence unavailable, never PASS; and a host-probe refusal records `not_dispatched` for that
-     case and the later ones, which continue on the same commit.
+     case and the later ones, which continue on the same commit. A macOS
+     run's refused host prerequisite, with distinct source and writer
+     directories, sends no `start`, copies the refusal log to a
+     `prestart-` name under the writer directory and sends `stop` with it;
+     the `not_dispatched` rows reference that copy, whose bytes still match
+     after the source directory is removed, and the same `--join-matrix`
+     then runs the stopped cases. A pre-start copy that fails every retry
+     sends no `stop`, exits 2 and leaves the index unchanged.
    - `apps/loopex_cli/test/m7_case_runner_test.exs` (extended). `--concept`
      admits against the named file's heads and refuses when that file has
      none for the index's campaign.
    - `scripts/test/check-release-test.sh` (extended). The macOS selection
      rules, the four new options' refusals, `--attempts-index` refused with
      any other selection, an M7 wrapper exit 2 printed as evidence
-     unavailable with exit 2, and the final lines.
+     unavailable with exit 2 and its refusal line kept in the retained lane
+     log, and the final lines.
 
    The closure run itself proves the SSH transport.
 
