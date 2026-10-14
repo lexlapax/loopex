@@ -353,7 +353,7 @@ fixed refusal order, plus the service's activation limit:
 | Parent attachment | The parent's committed events and progress for the `task` call, as for any tool call, and the tool result carrying the role, catalog digest, model, child session, outcome, text, truncation flag and usage. `ChatProjection` renders them exactly as the foreground does; no rendering is added |
 | Child | `session.attach`, `session.inspect` and `session.history` on the child's identity, all read-only and unguarded, while the child is active in this lifetime. A dormant child needs `session.resume`, which refuses `helper_session_owned`, so after a restart a child is read through its parent's receipt. Children are not added to the session index; `sessions --service` lists parents |
 | `/status` | The parent's committed state as for any session; helper usage is in the receipts, not in the status record |
-| Classification | `daemon.readiness` `classifying` with its counts; every mutation and creation refuses `helper_classification_incomplete` |
+| Classification | Until it completes, `daemon.readiness` answers `classifying` with its counts, `closed` or `unavailable` ([ADR 0037](0037-host-configuration-and-path-discovery-technical.md#technical-adr-0037-decision)), and every mutation and creation refuses `helper_classification_incomplete` |
 
 **Route guard over `/4`.** Unchanged: `route_guard/3` refuses every command
 type outside `Delegation.guard/3`'s read-only set on a helper child, so
