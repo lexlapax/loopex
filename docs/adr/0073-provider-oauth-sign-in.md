@@ -6,7 +6,8 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
 - **Status:** Proposed
 - **Date:** 2026-10-13; the maintainer's decisions on the `chatgpt:` reply
   ceiling, the public failure reason, daemon exit statuses and outcome
-  numbering recorded the same day
+  numbering recorded the same day; the host-to-store sign-in context and the
+  lifetime-scaled custody deadline specified the same day
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0019](0019-host-owned-provider-protection.md#concept),
@@ -87,7 +88,10 @@ new provider protocol.
    private file in the Loopex home, readable only by its owner. The token
    directory and every selected state root must lie physically apart, under
    ADR 0037's separation invariant, which refuses an overlapping selection
-   before any token or root write. So backups never contain tokens. Tokens never enter
+   before any token or root write. The installed host checks the paths once
+   and hands the token store the checked paths; the store and its refreshers
+   repeat that check before every token write and never look for a root
+   themselves. So backups never contain tokens. Tokens never enter
    journals, public events, progress, diagnostics, traces, fixtures, executor
    jobs or project resources.
 6. **An access token travels exactly like an API key.** For each provider call
@@ -96,7 +100,10 @@ new provider protocol.
    selected-credential echo guard, trace exclusion and cleanup proofs then
    apply unchanged, with the access token as the selected credential.
 7. **The host refreshes, and refuses rather than guesses.** The process that
-   holds the route refreshes the token before it expires. A lock serializes
+   holds the route refreshes the token before it expires, and stops using it
+   a margin before its expiry that scales with the token's lifetime, at most
+   one minute. A provider reply granting a token that lives under ten seconds
+   is refused as a failed sign-in. A lock serializes
    refreshes across every Loopex process that shares the home. A provider
    that rejects the refresh token leaves the route unusable. Its calls are
    then refused before dispatch, by name: sign-in required. Nothing falls back

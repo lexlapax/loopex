@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -105,15 +105,26 @@ held the sign-in directory would put tokens into a backup. This record makes
 that impossible by refusing the layout rather than by leaving files out of a
 backup:
 
-- After following symbolic links and other aliases, the sign-in directory and
-  a state root may not be the same directory, and neither may contain the
+- After following symbolic links, and recognizing an existing directory
+  reached through a mount alias such as a bind mount, the sign-in directory
+  and a state root may not be the same directory, and neither may contain the
   other. The same holds for the backup and destination directories the store
-  commands name.
-- The installed host's home module owns the rule. It checks before any token
-  is written, any root is created or opened, and before `store adopt`, `store
-  backup`, `store restore`, `config set` and every daemon or service start.
-  `auth login` also refuses when any directory above the sign-in directory is
-  a marked state root.
+  commands name. It holds for paths that do not exist yet: each is compared
+  from its deepest existing directory. Where separation cannot be proved, as
+  when two not-yet-created names could be one name on a case-insensitive
+  volume, the layout is refused. A mount that places part of a root somewhere
+  under the home, with no link between the two paths' own directories, is
+  outside what the check can see; mounts are the host administrator's.
+- The installed host's home module owns the rule and decides which paths each
+  command checks. It checks before any token is written, any root is created
+  or opened, and before `store adopt`, `store backup`, `store restore`,
+  `config set` and every daemon or service start. Every command also refuses
+  when any directory above the sign-in directory is a marked state root.
+- The home module hands the checked sign-in directory and the exact roots it
+  checked to the sign-in token store and its background refreshers. They
+  repeat the same check on those paths immediately before every token write,
+  never find a root of their own, and refuse a filesystem that changed after
+  startup.
 - A violation is refused as `auth_root_overlap`, naming where the root was
   chosen, before anything is written. A command exits `1`, as every refusal in
   this record does. `loopex daemon` exits with ADR 0071's existing `111`,
