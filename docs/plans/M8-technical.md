@@ -162,8 +162,9 @@ in separate worktrees.
    once ADR 0071 is accepted. Land the recorder and runner changes of the
    [release-check list](#technical-plan-release-check), each new lane's
    registration landing later with its lane, then create campaign
-   `m8-closure-1` on `serenity` and commit its anchor line (item 1), so the
-   indexed pre-merge lanes record from here on.
+   `m8-closure-1` on `serenity` and commit its anchor line (item 1). From
+   here on the indexed selections item 4 admits record in it; every other
+   pre-merge `--only` lane runs unindexed, as selection-only evidence.
 3. **Root marker and separation (W4)** under ADRs 0072 and 0037:
    `RootFormat`, `Placement.acquire/2` and
    `compose/1` admission, the read-only checks, daemon statuses 116 to 119,
