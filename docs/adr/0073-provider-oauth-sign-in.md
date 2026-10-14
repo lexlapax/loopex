@@ -16,7 +16,8 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   `chatgpt:` model admission, the store-failure and lock-contention rules
   and the explicit Secret Service bus specified the same day; the
   maintainer's decision that the model list is part of a `chatgpt:` sign-in
-  (D25) recorded on 2026-10-14
+  (D25) recorded on 2026-10-14, and the lock-failure and fail-stop decision
+  (D32) recorded the same day
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -156,7 +157,13 @@ new provider protocol.
    <provider>` revokes the token with the provider and removes it locally.
    A refresh holds the lock for up to one provider exchange, so a login or
    logout that meets one for more than ten seconds fails as busy, changes
-   nothing and can be run again.
+   nothing and can be run again. The maintainer decided on 2026-10-14 (D32)
+   that a lock that cannot be verified or taken, as opposed to one another
+   process holds, fails as `sign_in_lock_failed` with the same exit status
+   73 and the same no-change behaviour, printing the lock primitive's cause
+   so the operator can repair it; and that an unexpected exit of the
+   process holding a route's sign-in stops foreground chat and `ask` as it
+   stops the daemon (exit status 123).
 9. **Loopex enforces the `chatgpt:` reply ceiling itself.** A plan-billed
    request cannot carry a maximum output length. Loopex ends the reply stream
    once the configured ceiling is reached and records the reply as cut at its
