@@ -157,9 +157,12 @@ admitted that finished `failed`. A run still active at detach does not count.
 `config` and `admit-project-resources` (ADR 0037); `--admit-project-resources`
 without `--config` is a parser refusal, status `1`. Without `--config` every
 M7 rule is unchanged, except that ADR 0037's `HOME` read and separation check
-run after the delivered input checks, before `Sentinel.run/2`, so an
-unusable `HOME` exits 111, `home_unavailable`, and the root opens as its
-[physical path](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-root).
+run after the state root input is read (`apps/loopex_cli/lib/daemon.ex` :81)
+and before `paths/2` (:82), so an unusable `HOME` exits 111,
+`home_unavailable`; the root's
+[physical path](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-root),
+and an explicit `--socket` canonicalized the same way (D53), are what
+`Paths.startup/2` measures.
 
 | Daemon input | With `--config` |
 | --- | --- |
@@ -203,7 +206,7 @@ New `LoopexDaemon.ExitStatus` classes, after the delivered 65 to 110:
 
 | Status | Class | Meaning |
 | --- | --- | --- |
-| 111 | `configuration_invalid` | ADR 0049's reader, schema, selection or resolution refused, ADR 0037 found `HOME` unusable (class `home_unavailable`), or its [auth separation](0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation) refused the selected state root (class `auth_root_overlap`); before the lock the refusal line adds its class and pointer. The one refusal after the lock, step 3's catalog capture below, is a startup failure that releases the lock (`finish_startup_failure/2`, `apps/loopex_daemon/lib/loopex_daemon/service.ex` :880-892), which latches no fatal line, so the service first writes `loopex daemon refused to start: configuration_invalid <pointer>` on standard error, the delivered refusal form (`apps/loopex_cli/lib/daemon.ex` :110) |
+| 111 | `configuration_invalid` | ADR 0049's reader, schema, selection or resolution refused, ADR 0037 found `HOME` unusable (class `home_unavailable`), or its [auth separation](0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation) refused the selected state root (class `auth_root_overlap`), or ADR 0073's configuration resolution refused a disabled sign-in route (class `sign_in_unavailable`, D52); before the lock the refusal line adds its class and pointer. A refusal after the lock, step 3's catalog capture below or an ADR 0073 composition refusal at a route's start (`auth_root_overlap`, 111; 120 to 122), is a startup failure that releases the lock (`finish_startup_failure/2`, `apps/loopex_daemon/lib/loopex_daemon/service.ex` :880-892), which latches no fatal line, so the service first writes `loopex daemon refused to start: <class> <pointer>` on standard error, the delivered refusal form (`apps/loopex_cli/lib/daemon.ex` :110), `<class>` being `configuration_invalid` for the catalog capture |
 | 112 | `provider_launch_conflict` | `--provider-launch` with `--config` |
 | 113 | `provider_credential_absent` | A configured reference is absent; the line adds the pointer |
 | 114 | — | Retired before use: an earlier draft of this record assigned it to a refusal of enabled delegation, which the service now hosts. No class maps to it and the daemon never exits with it |
@@ -258,7 +261,7 @@ delegation, the frozen catalog, parent creation and the evidence below.
 | 3. Freeze the catalog, after placement | `Service`, calling the host's `{LoopexCli.HostOptions, :helper_catalog, [helpers]}` with the placement identity | `Catalog.digest(runtime_id, providers, roles)` and one capture of the parent instructions with `enabled_roles` and `catalog_digest`, exactly as `ChatConfiguration`'s `capture_instructions/2` does; the result is kept in the service's state for its lifetime | `configuration_invalid` (111) as a startup failure that releases the lock, with the refusal line above |
 | 4. Compose | `LoopexComposition.start_edges/2` | The handle's `enabled: true` registers the fixed `loopex.task` generation through `Delegation.definitions/1`; bind and the first 60,000 ms classification as delivered | As delivered |
 | 5. Bind the activation permit, after the collaboration services start and before the listener | `Service` | `Helper.bind_activation_permit(helper, {LoopexDaemon.HelperActivation, [registry]})` (below); the call returns the sessions the owner activated before it had a permit, which the service accounts to the registry | A refused bind is the delivered `daemon_services_start_failed` |
-| 6. Keep classifying, after step 5 | `Service` | ADR 0037's further 60,000 ms `Helper.classify/2` slices from a linked task until coverage completes or a session is named; no slice runs before the bind, so none delays it or recovers a child uncounted | — |
+| 6. Keep classifying, after step 5 | `Service` | ADR 0037's further 60,000 ms `Helper.classify/2` slices from a linked task until coverage completes or a session is named, after which the task ends normally; no slice runs before the bind, so none delays it or recovers a child uncounted | — |
 | 7. Serve | `LoopexDaemon.Owner` | The connection context carries `helper_parents: %{handle, catalog, prepare}` to every connection, as it carries `runtime` today | — |
 
 Steps 5 and 6 also run on a service with delegation disabled whose owner
@@ -385,25 +388,35 @@ reaches the registry inside the collaboration services, so an owner still
 classifying or creating a child after `:collaboration` stopped would exit
 and turn a clean stop into `runtime_lost`. M8 adds three steps:
 
-1. `:sign_in_routes`, first: every `SignIn.Route` the composition started is
-   sent `:shutdown` at once and given up to 60,000 ms, ADR 0073's route
-   shutdown, before `:kill`, so a refresh in progress writes its rotated
-   token. Composition owns each route's custody and `SignIn.Route` only
+1. `:sign_in_routes`, first: the service removes every `SignIn.Route` the
+   composition started from its components, unlinks and monitors it, and
+   sends each `Process.exit(route, :shutdown)` at once, ADR 0073's route
+   shutdown, so a refresh in progress writes its rotated token. A route
+   whose `DOWN` reason is `:shutdown` has stopped: unlike
+   `stop_classified/3` (:1517-1545), which counts only `@owner_stop_reason`,
+   this step counts the reason a trapping route exits with when sent
+   `:shutdown`. A route still alive at the smaller of 60,000 ms and the
+   teardown deadline is killed, and it, or a route that exits with any other
+   reason, ends the stop as `sign_in_route_lost`, as a late component ends
+   any step. Composition owns each route's custody and `SignIn.Route` only
    rotates it (ADR 0073), so the delivered `:custody` step later stops every
    custody as before and sees no loss. While the service runs, a route that
    exits is a fail-stop: the route edges join the running classes
-   (`service.ex` :103-114) as `sign_in_route: :sign_in_route_lost` (123,
+   (`service.ex` :104-115) as `sign_in_route: :sign_in_route_lost` (123,
    D42), and the delivered `fatal_reason/1` (:1428) sends
    `fatal:sign_in_route_lost` in `daemon.stopping`, the reason D42 adds to
    that record's closed enum.
-2. `:helper_quiesce`, before `:collaboration`: the slice loop's task is
-   stopped, so no slice starts, and then one `Helper.quiesce/1` (new) call
+2. `:helper_quiesce`, before `:collaboration`: the slice loop's task, a
+   plain process that answers no `sys` stop request, is removed from the
+   service's components, unlinked and killed with `Process.exit(task,
+   :kill)`, and the step waits for its `DOWN`, so no slice starts; a slice
+   it was waiting on runs on in the owner. Then one `Helper.quiesce/1` (new) call
    sets the owner's `closed` flag and replies. The owner answers it only
    after the callback it is in, a slice or a creation, so every permit call
    that callback makes finds the registry. Core quiesce can leave sessions
    unsettled (`stop_record/1`'s `unsettled`, :1093), so executor jobs may
    still launch; a `launch` after the call refuses `helper_admission_closed`,
-   which precedes the permit in ADR 0046's order (`@order`, `helper.ex` :47),
+   which precedes the permit in ADR 0046's order (`@order`, `helper.ex` :48),
    so nothing acquires a permit once `:collaboration` stops. The call waits
    until the shared teardown deadline, as `stop_classified/3` (:1517) waits
    for each step, not for a slice's 60,000 ms budget: `Helper.classify/2`
@@ -533,16 +546,20 @@ so no `jobs` row counts against `router_registration_capacity` (:417) and a
 later launch of the same `job_id` is not answered `effect_unresolved`
 (:432). Only the installed child-creation object and the job's index entry
 remain, which the next coverage publication removes as it removes every
-refused registration's (`publish_coverage/1`, :1118-1124). `cancelled_before_reservation` still applies
-whenever its cancel wins before the append; the permit taken for that call is
-then released.
+refused registration's (`publish_coverage/1`, :1118-1124). The delivered
+`helper_index_unavailable` refusal (:515) returns the same earlier state. A
+cancel that wins before the launch callback refuses
+`cancelled_before_registration` (:412) before any permit is taken; within the
+callback (:249-255), which runs the checks, the permit, the reserve commit
+and the child creation, no cancel can intervene, because `cancel` (:269-283)
+is a separate call to the same serial owner.
 
 *Permit lifecycle.*
 
 | Moment | Registry effect |
 | --- | --- |
 | `acquire` answers `activation_ceiling_reached` | The call returns `{:error, {:refused_before_effect, :helper_activation_limit}}`; no ledger frame, slot or allowance is touched |
-| The reserve append, a cancel or any step before Core's child creation fails | `settle(permit_id, :no_activation)`: the charge is released, as for a client create that activated nothing |
+| The reserve append or any step before Core's child creation fails | `settle(permit_id, :no_activation)`: the charge is released, as for a client create that activated nothing |
 | Core's `create_session_with_genesis_detailed/4` answers `{:ok, %{session_id, disposition}}` | `settle` with `{:activated, session_id}`, or `:no_activation` for a replay |
 | It answers `{:error, :commit_unknown, %{disposition: d}}` | `settle(permit_id, {:commit_unknown, d})`. With `:activated`, Core started a coordinator whose session is not named: one anonymous activation, permanent, as `account_create_promotion/3` counts a client create. With `:no_activation`, Core started none in this call but the commit may exist: the charge stays `unknown`. The owner fences the operation as ADR 0056 requires for an unresolved effect |
 | It answers any other `{:error, reason, %{disposition: d}}` | `settle` with `{:activated, nil}` or `:no_activation` from `d` |
@@ -665,8 +682,8 @@ another application is named.
 | `live_daemon_test.exs` (extended) | Real daemon | The activation-ceiling refusal shown to the operator; the foreground conversation's refusal of a service-held root with its hint |
 | `daemon_helpers_test.exs` | Real daemon with two saved roles, using the provider isolation fixture the daemon tests use | Startup captures both roles; an attached conversation's prompt makes the parent call `task`; the child completes and the result carries `child`, `delegation`, `parent` and `combined_tokens`, with combined equal to parent plus child; the workspace tree digest is unchanged by the child; a second `task` in the same parent while one runs refuses `helper_slot_occupied`; two parents each run one helper concurrently; the parent's committed original options equal the client's `session_options`; `configuration.instructions` and `tools` each refuse `helper_parent_option_unsupported`; a repeated create identity returns the same parent and spends no second activation; a role whose instruction file is unreadable exits 111 naming `/roles/NAME` with no lock, log entry or socket; a service-created parent resumes under the foreground conversation and a foreground-created parent under the service |
 | `daemon_helper_restart_test.exs` | Process fault, real daemon | `SIGTERM` and `SIGKILL` to the service after the child is prompted and while its provider reply is held; the restart reports `classifying` then `serving`; the child is aborted and its provider receives no second prompt; the parent's `task` result is the stop-only outcome; the slot is released on conclusive evidence and stays occupied otherwise; a torn final ledger frame recovers under ADR 0056; `session.create` and every mutation during classification refuse `helper_classification_incomplete`; a restart with delegation disabled classifies and guards the same history; each prepared owner recovery starts is counted in `activations_used` (a count past 64 is `helper_activation_registry_test.exs`'s); **stop order**: `SIGTERM` while a classification slice is held at a gated store adapter for longer than 65,000 ms (the gate released before the teardown deadline) and while a child creation is held in Core each exit `0`, with the owner and its writer gone before the placement lock file is removed; a `task` launch that reaches the owner after the quiesce call refuses `helper_admission_closed` and calls no `acquire`; a startup failure injected after step 5 exits with its class, with the slice task, the owner and its writer gone before the lock file is removed |
-| `daemon_helper_activation_test.exs` | Real daemon at the delivered limit of 64, using the provider isolation fixture; no test-only limit | One parent whose children spend activations until the 64th: the next `task` call returns `helper_activation_limit` as its tool result, writes no ledger frame, charges no child count or tokens, and the parent's run completes; mixed: client sessions and children together reach 64, after which `session.create` refuses `activation_ceiling_reached` and a `task` call `helper_activation_limit`; release: a permit whose call is refused by a later failure, cancelled before the reserve append, or whose child creation activates nothing is returned and the next call succeeds; a child creation held at Core and answered `commit_unknown` keeps its charge in `activations_used` until the operation resolves; one-way: a child that completes, fails or is stopped through its parent keeps its activation counted; `daemon.status` reports children in `activations_used`; the attached conversation shows the refusal in the transcript |
-| `apps/loopex_composition/test/delegation_activation_permit_test.exs` | Unit, fake permit module | The refusal is decided after `ledger_capacity` and the job-index write and before the reserve commit, and the job's index entry it leaves is removed by the next coverage publication; every earlier refusal, `helper_index_unavailable` included, is returned without calling `acquire`; an owner with no bound pair never refuses and leaves the order as accepted; each acquired permit is settled exactly once on every path, with Core's disposition for `{:ok, _}`, `commit_unknown` with each disposition, other errors and cancel; a failure injected after Core's answer (the child ledger append, the prompt) leaves the settlement already made and makes no second one; a repeated identical settle reuses its `permit_id` and changes nothing; 4,097 calls refused `helper_activation_limit` leave the owner's `jobs` unchanged, so `router_registration_capacity` is not reached, and the same `job_id` launched again after a refusal is not answered `effect_unresolved`; recovery calls `account` with the permit and never `acquire`; an `unknown` permit is released on conclusive absence and converted on recovery; `{permit_id, session_id}` pairs recovered before `bind_activation_permit/2` are returned by it |
+| `daemon_helper_activation_test.exs` | Real daemon at the delivered limit of 64, using the provider isolation fixture; no test-only limit | One parent whose children spend activations until the 64th: the next `task` call returns `helper_activation_limit` as its tool result, writes no ledger frame, charges no child count or tokens, and the parent's run completes; mixed: client sessions and children together reach 64, after which `session.create` refuses `activation_ceiling_reached` and a `task` call `helper_activation_limit`; release: a permit whose call is refused by a later failure or whose child creation activates nothing is returned and the next call succeeds; a child creation held at Core and answered `commit_unknown` keeps its charge in `activations_used` until the operation resolves; one-way: a child that completes, fails or is stopped through its parent keeps its activation counted; `daemon.status` reports children in `activations_used`; the attached conversation shows the refusal in the transcript |
+| `apps/loopex_composition/test/delegation_activation_permit_test.exs` | Unit, fake permit module | The refusal is decided after `ledger_capacity` and the job-index write and before the reserve commit, and the job's index entry it leaves is removed by the next coverage publication; every earlier refusal, `helper_index_unavailable` included, is returned without calling `acquire`; an owner with no bound pair never refuses and leaves the order as accepted; each acquired permit is settled exactly once on every path, with Core's disposition for `{:ok, _}`, `commit_unknown` with each disposition and other errors; a failure injected after Core's answer (the child ledger append, the prompt) leaves the settlement already made and makes no second one; a repeated identical settle reuses its `permit_id` and changes nothing; 4,097 calls refused `helper_activation_limit` leave the owner's `jobs` unchanged, so `router_registration_capacity` is not reached, and the same `job_id` launched again after a refusal is not answered `effect_unresolved`; after `helper_index_unavailable`, `jobs` is unchanged and a relaunch is not `effect_unresolved`; recovery calls `account` with the permit and never `acquire`; an `unknown` permit is released on conclusive absence and converted on recovery; `{permit_id, session_id}` pairs recovered before `bind_activation_permit/2` are returned by it |
 | `apps/loopex_daemon/test/helper_activation_registry_test.exs` | Real `ConnectionRegistry` process, no fake | `acquire` up to the ceiling and `activation_ceiling_reached` at 64 with clients and permits mixed; a repeated `acquire` answers `held` or the settlement and charges once; `{:activated, nil}`, which `resolve_activation/4` refuses, counts one anonymous activation; `{:commit_unknown, :activated}` counts one anonymous activation and a later `account` with the session converts it without a second count; `{:commit_unknown, :no_activation}` stays in `activations_used` until a `:no_activation` settle releases it or `account` converts it; identical settles are idempotent and a contradicting one is `helper_permit_conflict`; `account` past 64 is admitted and then refuses every new client activation and `acquire`; a `{:helper, _}` origin is refused by `reserve_activation/3`, a connection origin by the helper operations, and a client create whose command identity equals a `permit_id` neither joins nor conflicts; `daemon.status`'s `activations_used` equals `activations_counted/1` at every step; the shared sum, both directions: with 60 client activations and 4 permits `held` (then the same with `unknown`), a client `session.create` reservation through `reserve_activation_binding/3` refuses `activation_ceiling_reached`, and with 60 client activations plus 3 held permits it is admitted as the 64th and the next `acquire` refuses `activation_ceiling_reached`; releasing one held permit with `:no_activation` readmits exactly one client reservation |
 | `apps/loopex_composition/test/delegation_create_parent_detailed_test.exs` | Unit, real runtime | `bind_parent` failing, refused and fencing after Core activated the parent: the error carries `disposition: :activated` and the session; a failure before Core carries `:no_activation` and `nil` |
 | `apps/loopex_daemon/test/helper_parent_activation_test.exs` | Socket, real registry | The same post-create binding failure through `session.create`: the admission is refused, `activations_used` rises by one, the session is not in the index, and the next creation still succeeds below the ceiling |
