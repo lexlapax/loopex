@@ -8261,3 +8261,33 @@ Proposed and M8 remains Open.
    explicitly.
 6. **Route loss in chat and `ask` (D38).** `sign_in_route_lost`, exit 1.
 7. **Start and status contracts (D39).** Accepted as ADR 0037 lists them.
+
+<a id="disposition-m8-holistic2-2026-10-14"></a>
+### M8 internal holistic review round 2 answered — 2026-10-14
+
+A second internal holistic review round at `c69e4185` confirmed most round-1
+fixes closed and found further findings in ADRs 0037, 0038, 0071, 0072 and
+0073 and the plan pair. The maintainer decided D40 to D47 on 2026-10-14; the
+other items were fixed without a new decision. All five prerequisite ADRs
+remain Proposed and M8 remains Open.
+
+1. **Vision amendment (D40).** D37's widened audience replaces all seven
+   identical ADR 0039 copies at acceptance, the six vision sections and
+   `AGENTS.md`, with one common text.
+2. **Stopping during a refresh (D41)**, **the wire reason for 123 (D42)**,
+   **a deferred route shipping disabled with Gemini's `adc` source as its own
+   lane (D43)**, **a `stopping` service state (D44)**, **adopt rebinding an
+   alias-bound ledger (D45)**, **a runner killed between lanes (D46)** and
+   **the succession record on every later campaign (D47)**.
+3. **Row notes.** D12, D16, D32, D33 and D34 carry notes of what later
+   decisions changed. The holistic disposition's item 1 extends the
+   [review 6 disposition](#disposition-m8-readiness6-2026-10-14)'s item 8.
+4. **Choices made in the fixes without a maintainer decision, listed for
+   acceptance:** every opener receiving the physical root; `home_unavailable`
+   as daemon status 111 and its refusal by existing commands; the spawned
+   service ignoring `SIGTSTP`, `SIGTTIN` and `SIGTTOU` and `LOOPEX_ESCRIPT`
+   unset; the daemon's stop-order steps and the stop bound's growth; the
+   5,000 ms keyring bound; a login that changes store or source signing the
+   route out first; `TZ` reserved among credential names; the `m7-adopt-lock`
+   lane; the release runner's archive reuse after a resume; a repeated
+   pre-start stop appending nothing; script lanes' pass lines.
