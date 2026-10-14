@@ -52,9 +52,9 @@ M7 baseline and selected its `0.5.0` label and two hosts; the
 [scope record](../process/agent-context-map.md#disposition-m8-scope-2026-10-13)
 lists the decisions. Later that day the maintainer accepted proposals P1, P2
 and P4 to P8, added service-hosted helpers and provider sign-in as outcome 8,
-and settled the remaining design choices; the
+and made the first design decisions, which the
 [detail record](../process/agent-context-map.md#disposition-m8-detail-2026-10-13)
-lists them. Open `M8` carries no implementation authority.
+lists; later dispositions in the context map record the rest. Open `M8` carries no implementation authority.
 No partially accepted subset authorizes dependent implementation.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the

@@ -451,7 +451,8 @@ operator's separate act and no documented step performs it.
 Concept: [Observable consequences](0038-installed-distribution-and-release-artifact.md#concept-adr-0038-consequences).
 
 `scripts/check-release.sh` gains the lane `installed-artifact`, selectable
-with `--only installed-artifact`. It runs `build.sh` for the candidate into the
+with `--only installed-artifact` once `store backup`, `store restore` and
+`auth`, which its steps 5 and 6 run, have landed. It runs `build.sh` for the candidate into the
 retained-output directory, then `smoke.sh`. On a `Darwin arm64` host it
 proves `darwin-arm64`; on a `Linux x86_64` host with Docker it proves
 `linux-x86_64`. The closure matrix, as the M8 plan's decision D18 fixes it
@@ -459,10 +460,10 @@ in its revision of 2026-10-13, runs the full release check once on the
 `Linux x86_64` host `serenity`, with the M8 attempts index whose writer is
 pinned there; that run proves `linux-x86_64` with this lane and also runs
 the `secret_service`, `cross_uid` and attended
-`real-sign-in-*` lanes. The `Darwin arm64` host runs this lane with
-`--only installed-artifact`, together with `--only macos_keychain` and the
-attended outcome-6 record, `--only m8-operator`, on the same commit, and
-each is recorded in the same M8 index as a required closure lane. Every one
+`real-sign-in-*` lanes. The `Darwin arm64` host runs this lane,
+`macos_keychain` and the attended outcome-6 record `m8-operator` in one
+indexed invocation, `--only macos_keychain --only installed-artifact --only
+m8-operator`, on the same commit, and each is recorded in the same M8 index as a required closure lane. Every one
 of them is required: a lane that reports evidence unavailable, such as a
 Linux host without Docker for this lane, blocks closure and is never a pass.
 Both hosts' complete outputs are retained.
@@ -515,12 +516,14 @@ macOS user account whose shell profile loads no mise or Homebrew.
    choices over ADR 0049's schema, validate, inspect origins and run the
    diagnostic command. No file credential or unaccepted provider-selection
    grammar is assumed.
-4. **Converse through the service.** `loopex run` through the home's socket
-   with no daemon running starts the service on demand under ADR 0037 and
-   completes one real provider session. Detach, attach as observer with
-   `attach --observe`, take control, and stop the service with ADR 0037's stop
-   command. Start again on demand; list and resume the session; complete it.
-   The status and diagnostic commands report readiness without resolving a
+4. **Converse through the service.** With no service running, `loopex run
+   --service PROMPT` starts it on demand under ADR 0037 and begins one real
+   provider session. Detach, observe it with `loopex attach --service
+   SESSION --observe`, take control with `loopex attach --service SESSION
+   --take-over`, and stop the service with `loopex service stop`. `loopex
+   resume --service SESSION` starts it again on demand and completes the
+   session, and `loopex sessions --service` lists it. `loopex service
+   status` and `loopex doctor` report readiness without resolving a
    credential. Every step uses the installed command.
 5. **Backup, restore and refusal.** Stop the service, take a backup with
    `loopex store backup`, restore it into an empty root with
@@ -580,9 +583,11 @@ refusal, which the lane's own step 5 proves, and step 6, whose removal runs
 asserts that no Loopex item remains in that account's keychains, by the
 same read-only query. The record names the operator, the
 archive digest, both providers and each session identifier. The release
-runner's `m8-operator` lane hands the account the verified archive and
-retains the record's transcript, checking that it names that archive's
-digest.
+runner's `m8-operator` lane hands the account the verified archive, asks
+the operator for a verdict, `pass`, `fail` or `withheld` for a transcript
+that shows a credential, and retains the record's transcript, passing only
+on `pass` with a transcript that names that archive's digest, as the M8
+plan's release-check item 5 states.
 
 **Evidence retained** outside the repository, each with its SHA-256 on the
 closure evidence page: the archive, its `.sha256` file and manifest copy,

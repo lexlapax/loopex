@@ -25,7 +25,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0013 | Run-deadline commitment at first request staging | Accepted (partially superseded by 0017; M7 maintenance staging and absolute deadline ceiling amended by 0043 and 0046) | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
 | 0014 | Stream closure at owner loss | Accepted (partially superseded by 0018) | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
 | 0015 | Artifact object and use identity | Accepted (partially superseded by 0028) | [Decision](0015-artifact-object-and-use-identity.md#concept) | [Technical depth](0015-artifact-object-and-use-identity-technical.md#technical-depth) |
-| 0016 | Configured cancellation observation | Accepted (M7 genesis, recovery lookup and prepared-owner abandonment amended by 0044, 0046 and 0049; physical restore transition superseded by 0051) | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
+| 0016 | Configured cancellation observation | Accepted (M7 genesis, recovery lookup and prepared-owner abandonment amended by 0044, 0046 and 0049; physical restore transition superseded by 0051; migration of an alias-bound ledger generation narrowly amended by Proposed 0072 on its acceptance, M8 D45 and D48) | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
 | 0017 | Durable context and record admission budgets | Accepted (partially superseded by 0025; M7 context, receipt, refusal, genesis and deadline bounds amended by 0041–0044 and 0046) | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
 | 0018 | Provider attempt authority and recovery | Accepted (partially superseded by 0021 and 0027; M7 maintenance and closed Model/reply contracts extended by 0043 and 0044; Model callback boundary, settlement categories and terminal precedence amended by Proposed 0073 on its acceptance, M8) | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
 | 0019 | Host-owned provider protection | Accepted (partially superseded by 0029 and 0034; scoped to the durable profile by 0039; sole durable credential source amended by 0048; private-protocol kinds and the host-held access token amended by Proposed 0073 on its acceptance, M8) | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
@@ -41,7 +41,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0029 | Bounded provider failure diagnostics | Accepted (public failure vocabulary amended by Proposed 0073 on its acceptance, M8) | [Decision](0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
 | 0030 | Observability: tracing and telemetry | Accepted (tracing guarantees reused unchanged by 0049) | [Decision](0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
 | 0031 | Daemon store selection for `0.2.0` | Accepted | [Decision](0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
-| 0032 | Daemon attachment residency and replay | Accepted (served generations and schema-digest inputs superseded by 0044; activation ceiling amended by Proposed 0071 on its acceptance, M8) | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
+| 0032 | Daemon attachment residency and replay | Accepted (served generations and schema-digest inputs superseded by 0044; activation ceiling amended by Proposed 0071 on its acceptance, M8; closed `daemon.stopping` reasons amended by Proposed 0073 on its acceptance, M8 D42) | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
 | 0033 | Collaboration: controller lease and takeover | Accepted | [Decision](0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
 | 0034 | Provider credential handoff over the bootstrap channel | Accepted (scoped to the durable profile by 0039; single-provider restriction amended by 0048; custody rotation and the custody-refusal row amended by Proposed 0073 on its acceptance, M8) | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
 | 0035 | Typed decision models as policy inputs | Proposed | [Decision](0035-typed-decision-models-as-policy-inputs.md#concept) | [Technical depth](0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth) |
@@ -72,7 +72,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0060 | Restore full-mode helper | Proposed | [Decision](0060-restore-full-mode-helper.md#concept) | [Technical depth](0060-restore-full-mode-helper-technical.md#technical-depth) |
 | 0061 | Creation cancellation admission envelope | Accepted | [Decision](0061-creation-cancellation-admission-envelope.md#concept) | [Technical depth](0061-creation-cancellation-admission-envelope-technical.md#technical-depth) |
 | 0063 | Runtime creation startup status | Accepted | [Decision](0063-runtime-creation-startup-status.md#concept) | [Technical depth](0063-runtime-creation-startup-status-technical.md#technical-depth) |
-| 0065 | Private attempts IO prerequisite | Accepted (succession's maintainer authorization omitted for M8 only by M8 D30 and D47) | [Decision](0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
+| 0065 | Private attempts IO prerequisite | Accepted (no-replacement-on-lost-acknowledgement clause amended for M8 only by M8 D30, and its refuse-until-resolved rule for a torn index by M8 D49; ADR 0057's authorization step omitted, M8 D47) | [Decision](0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
 | 0066 | Owned artifact transfer opening | Accepted | [Decision](0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
 | 0067 | Tool-result event projections | Accepted | [Decision](0067-tool-result-event-projections.md#concept) | [Technical depth](0067-tool-result-event-projections-technical.md#technical-depth) |
 | 0068 | CLI-owned output | Accepted | [Decision](0068-cli-owned-output.md#concept) | [Technical depth](0068-cli-owned-output-technical.md#technical-depth) |
@@ -263,7 +263,10 @@ is added; and its latest-backup-only restriction, which `--discard-later-work`
 relaxes for a lost source. M8 changes `restore/2` to leave the disposable
 helper job index out of its audit index, as adopt and backup do, while still
 copying it (D29); no ADR 0051 sentence governs that, and it narrowly amends
-ADR 0056's complete helper-namespace audit (D35). Credential separation is
+ADR 0056's complete helper-namespace audit (D35). It also narrowly amends ADR
+0016's migration rule: `store adopt` may rebind an executor ledger bound
+through an alias path to a fresh-epoch generation bound to the physical path,
+carrying its open authority unchanged (D45, D48). Credential separation is
 ADR 0037's path rule, applied before the transition is called (D27). 0072
 also states the format-number rule (D28): any durable change needs a new
 number, held in the fast check by a retained format-1 root and the M7 root
@@ -279,8 +282,8 @@ registration for Loopex. Tokens are host-held in the operating system's
 keyring or an owner-only file outside the state root, and Loopex uses only its
 own client identities, except that its `adc` source presents the client of
 gcloud's Application Default Credentials file. On acceptance it amends named
-clauses of accepted ADRs 0018, 0019, 0021, 0029, 0034, 0039, 0043, 0048 and
-0049, including ADR 0019's closed private-protocol kinds, ADR 0034's
+clauses of accepted ADRs 0018, 0019, 0021, 0029, 0032, 0034, 0039, 0043, 0048 and
+0049, including ADR 0032's closed `daemon.stopping` reasons (D42), ADR 0019's closed private-protocol kinds, ADR 0034's
 custody-refusal row and `:expired` reason, ADR 0039's pre-call refusal, `ask`
 status-1 diagnostics and, by D37, its host-VM
 credential audience, whose one common exception text replaces at acceptance the seven copies ADR 0039 requires in the vision pair and `AGENTS.md` (D40), ADR 0048's ephemeral clause, ADR 0049's closed terminal schema and durable chat's `env`-only credential, the new public failure reason `provider_sign_in_required` in ADR
