@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file (since withdrawn with the starter's pending file, which the service record replaced), stated on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), superseding D19, D21 and every mount and walk-identity rule, recorded on 2026-10-14; the maintainer's decision that a service that cannot write its service record refuses the start with daemon status 125 (D31), recorded on 2026-10-14; the maintainer's acceptance of the start and status contracts (D39) and the fixes of the second holistic internal review, recorded on 2026-10-14; the maintainer's `stopping` state (D44) and the fixes of the third internal review, recorded on 2026-10-14; D52, D53 and the third review's remaining fixes, recorded on 2026-10-14; `ask`'s use of the selected file's `providers` (D54), recorded the same day
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file (since withdrawn with the starter's pending file, which the service record replaced), stated on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), superseding D19, D21 and every mount and walk-identity rule, recorded on 2026-10-14; the maintainer's decision that a service that cannot write its service record refuses the start with daemon status 125 (D31), recorded on 2026-10-14; the maintainer's acceptance of the start and status contracts (D39) and the fixes of the second holistic internal review, recorded on 2026-10-14; the maintainer's `stopping` state (D44) and the fixes of the third internal review, recorded on 2026-10-14; D52, D53 and the third review's remaining fixes, recorded on 2026-10-14; `ask`'s use of the selected file's `providers` (D54), recorded the same day; D57, D58 and the fourth internal review's fixes, recorded on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected and `loopex ask` accepts it (D54)
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -37,8 +37,10 @@ They are recorded here as decided, not proposed.
    inspection says which file was selected and why. The maintainer decided
    on 2026-10-14 (D54) that `loopex ask`, durable and ephemeral, also
    selects a file this way, accepting `--config`, and takes only its
-   `providers`, so a signed-in route works in `ask` as in chat; with no file
-   it keeps its environment routes, and its other flags are unchanged. `LOOPEX_HOME` keeps its
+   `providers`, so a signed-in route works in `ask` as in chat. The file's
+   providers apply to the providers they name; every other provider keeps
+   `ask`'s environment route, as with no file (D57). Its other flags are
+   unchanged. `LOOPEX_HOME` keeps its
    ADR 0049 meaning: it names the state root, not the home.
 2. **The home holds configuration, not state.** `loopex init` writes the
    configuration with a state root of `state` beside it, so the store-owned
@@ -75,7 +77,10 @@ They are recorded here as decided, not proposed.
    conversation, `run` and `resume` start it on demand; `attach` and
    `sessions` never do. `--daemon SOCKET` keeps its M7 meaning and never starts
    anything. Without either flag every command is the foreground or offline
-   command it is today, whether or not a home exists.
+   command it is today, whether or not a home exists. Only chat, `ask` and
+   the service open sign-in routes: foreground `run`, `resume` and `skill`
+   given an `oauth` binding for the selected route refuse
+   `sign_in_unavailable` and suggest `loopex chat` or `--service` (D58).
 6. **Starting on demand.** The starting command checks that every configured
    credential reference is present, without reading a value, and refuses by
    name before anything starts when one is absent. A configured sign-in route
@@ -202,8 +207,9 @@ leaving files out of a backup, and it does so by comparing paths:
   this record does. `loopex daemon` exits with ADR 0071's existing `111`,
   `configuration_invalid`, so this refusal adds no exit status. A command that
   cannot read a usable `HOME` cannot check the rule, so it refuses
-  `home_unavailable` before touching a root. An ephemeral `ask`, which never
-  selects a root, is unaffected.
+  `home_unavailable` before touching a root. An ephemeral `ask` selects no
+  root, so only the marked-ancestor rule applies to it; without a usable
+  `HOME` it is not refused and opens no sign-in route.
 - No file is excluded from ADR 0051's complete manifest, the ADC file
   included. A backup of a permitted root contains every file of that root,
   and none of them is a token unless the operator mounted or copied

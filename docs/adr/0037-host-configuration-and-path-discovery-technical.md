@@ -35,18 +35,24 @@ present it selects none and runs as delivered rather than refusing
 `configuration_not_found`. `Ask.prepare/2` (`ask.ex` :65-80) selects and
 loads the file after its argument, workspace and prompt checks, with ADR
 0049's unchanged reader validating the whole file, and keeps only its
-`providers`. No other member is used: `--state-root` alone still makes
-`ask` durable and names its root, the file's `paths.state_root` is neither
+`providers`. Those apply to the providers they name; every other provider
+keeps `ask`'s delivered environment route, durable `ask`'s
+`LOOPEX_PROVIDER_API_KEY` single-credential binding and ephemeral `ask`'s
+per-provider environment and local reference routes (D57). No other
+member is used: `--state-root` alone still makes `ask` durable and names
+its root, the file's `paths.state_root` is neither
 opened nor checked, and an ephemeral `ask`'s root stays a fresh temporary
 directory. Its sign-in context therefore holds durable `ask`'s root, or no
-root for ephemeral `ask`, and the marked-ancestor rule applies as on every
-row. Without a usable `HOME`, an ephemeral `ask` discovers no file and has
+root for ephemeral `ask`, whose check is then the marked-ancestor rule
+alone. Without a usable `HOME`, an ephemeral `ask` discovers no file and has
 no sign-in context; with `--config` it still reads the file, and an `oauth`
 binding there refuses `provider_sign_in_required` (ADR 0073). A file that
 cannot be selected, read or validated ends `ask` with status 1 before any
-session, reported as `loopex.ask/1`'s fixed `command_failed`; a disabled
-route reports `sign_in_unavailable` (D52). ADR 0073 states how each `ask`
-host opens the file's bindings.
+session, reported as `loopex.ask/1`'s fixed `command_failed`, as are
+`home_unavailable` and `auth_root_overlap`, which its closed diagnostic
+list (`ask_result.ex` :19-55) does not hold; a disabled route reports
+`sign_in_unavailable` (D52). ADR 0073 states how each `ask` host merges the
+file's bindings with its environment routes.
 
 State-root precedence is ADR 0049's, unchanged: `--state-root` flag >
 `LOOPEX_HOME` > the file's `paths.state_root` (relative to the file's
@@ -234,11 +240,14 @@ and 6), because the Local executor ledger binds
 `Path.expand/1` of the path it receives (`ledger.ex` :159-162) and ADR 0072's
 backup, adopt and restore derive physical placements; a root selected through
 a symbolic-link ancestor therefore opens, backs up and restores as its
-physical path. `loopex daemon` without `--config` canonicalizes an explicit
+physical path. `loopex daemon`, with or without `--config`, canonicalizes an explicit
 `--socket` the same way, to `E` joined with `S` (D53), so a socket spelled
 through the same symbolic link as the root still lies inside the physical
 root's `daemon` directory, which `Paths.startup/2` checks lexically
-(`paths.ex` :62-75). `LoopexDaemon.Paths.startup/2` (`paths.ex` :37-49) then
+(`paths.ex` :62-75). A socket that cannot be canonicalized (more than 40
+link expansions, an unreadable component, a non-UTF-8 target or a `..` in
+its missing suffix) refuses the delivered `invalid_socket_path` (89), not
+`auth_root_overlap`. `LoopexDaemon.Paths.startup/2` (`paths.ex` :37-49) then
 measures the socket under that physical path, so a root that fit the socket
 limit through a shorter alias under M7 (on macOS `/tmp` is `/private/tmp`,
 8 bytes longer) can now refuse `socket_path_too_long` (87).
@@ -313,8 +322,9 @@ link is gone nothing distinguishes it from any other file the operator
 placed there. ADR 0072's backup copy refuses the same entries.
 
 <a id="technical-0037-where-it-runs"></a>
-**Where it runs.** Every row builds the sign-in context, so every row runs
-the whole of `Separation.check/1`, the marked-ancestor rule included. The
+**Where it runs.** Every row builds the sign-in context, ephemeral `ask`
+only with a usable `HOME`, and runs the whole of `Separation.check/1` on
+it, the marked-ancestor rule included. The
 check runs after selection and before the first write, lock, socket or
 process of the command:
 
@@ -327,7 +337,7 @@ process of the command:
 | `store adopt`, `store backup`, `store restore` | `store adopt` and `store backup`: the selected root, and `BACKUP`; `store restore`, which selects no configuration: exactly `BACKUP` and `DESTINATION`. Each in the context `LoopexCli.Home` builds when the command starts, before the first read of any of them; `--resume` then requires those paths to equal the retained plan's (ADR 0072). Backup's staging directory is a new, empty child of `BACKUP`'s parent and holds no protected directory; it could lie inside one only if `BACKUP` did, which this check refuses. For `store restore --source available`, and for a `--resume` whose retained plan has `source_status` `available`, `StoreAdmin.restore/3` appends the source the capture names and calls `Separation.check/1` again immediately after its check 1 decodes `BACKUP/capture`, before it reads `BACKUP/manifest`, walks `BACKUP/state` or reads any path of the source. A lost source is required absent and is never walked or written, so it is not checked | The root's origin; `/arguments/backup`; `/arguments/destination`; `/capture/source_state_root` |
 | `auth login`, `auth logout` and every other ADR 0073 command that writes `A` | The state root its own selection names, when a file is selected, else no root; the marked-ancestor rule always | The root's origin, or `/auth` for a marked ancestor |
 | A process that starts an ADR 0073 refresher (foreground chat, durable and ephemeral `ask`, daemon) | Covered by its row above, which builds the sign-in context. The refresher receives that context at start, writes only `A`, and re-runs `Separation.check/1` on it before every exchange and every write | The failing root's pointer; the refresher exchanges and writes nothing |
-| Ephemeral `ask` | Nothing: its root is a fresh temporary directory, never selected, and a selected file's `paths.state_root` is not used ([`ask`](#technical-0037-ask)) | — |
+| Ephemeral `ask` | No root; with a usable `HOME` it builds a context with no root, so only the marked-ancestor rule runs. Its root is a fresh temporary directory, never selected, and a selected file's `paths.state_root` is not used ([`ask`](#technical-0037-ask)) | `/auth` |
 
 `doctor` reports a violation as `configuration: "auth_root_overlap
 <pointer>"` and exits `1`; it writes nothing.
@@ -335,7 +345,7 @@ process of the command:
 **HOME unusable.** When `HOME` fails `LoopexCli.Home`'s rules, `A` and `G` cannot be
 computed and separation cannot be shown. Every row above then refuses
 `home_unavailable` before any write, including commands given only
-`--config` and `--state-root`; `loopex daemon` exits 111 with class
+`--config` and `--state-root`; `loopex daemon` exits 111 with subclass
 `home_unavailable`. Ephemeral `ask` is the exception. Without
 `HOME`, no sign-in directory exists that the invocation could write. The
 refusal still applies to roots, because another invocation with `HOME` set
@@ -345,10 +355,12 @@ could later create `A` or `G` inside the selected root.
 the hint `the credential directory <P> and the state root must not contain each
 other; select a different state root`, where `<P>` is the protected directory
 that overlapped, and exits `1`, as every refusal in this
-record does; `loopex auth` exits 76 from its own status table in
+record does; `ask` reports it as `command_failed` ([`ask`](#technical-0037-ask)); `loopex auth` exits 76 from its own status table in
 [ADR 0073](0073-provider-oauth-sign-in-technical.md#technical-depth). `loopex daemon` exits [ADR 0071](0071-daemon-attached-conversation-technical.md#technical-adr-0071-decision)'s
-`111`, `configuration_invalid`, with class `auth_root_overlap` and the
-pointer, or class `home_unavailable`, on its diagnostic line. Neither
+`111`, `configuration_invalid`, with the diagnostic line `loopex daemon
+refused to start: configuration_invalid auth_root_overlap <pointer>` or
+`… configuration_invalid home_unavailable`, ADR 0071's one form for every
+111. Neither
 refusal assigns a new daemon status; the record's one daemon status is 125, `service_record_write_failed`
 ([service record](#technical-0037-service-record)). The M8 set is every
 integer from 65 through 125 except 114, which ADR 0071 retires.
@@ -368,6 +380,7 @@ loopex doctor [--config FILE]
 loopex service start [--config FILE]
 loopex service stop [--config FILE]
 loopex service status [--config FILE]
+loopex ask [--config FILE] [delivered ask options] [PROMPT]   providers only (D54, D57)
 
 loopex chat    --service [--config FILE] ...        ADR 0071
 loopex run     --service [--config FILE] [--steer TEXT | --follow-up TEXT] PROMPT
@@ -458,10 +471,10 @@ All waits yield to the command's signal route exactly as `LoopexCli.Live`'s
 | --- | --- | --- |
 | `select` | `Home.select`, `ConfigFile.load`, `ConfigSelection.compose` with no overrides; derive root and socket | `probe`; a load or selection refusal ends the command with its class and pointer, among them ADR 0073's `sign_in_unavailable` for a disabled sign-in route (D52) |
 | `probe` | `DaemonClient.connect(socket, timeout: 1_000)` | answers: `readiness`; else `Placement.live_owner(root)`: `:none`: `precheck`; an error: refuse its class, `placement_unverifiable` or `placement_lock_failed`, at once; a live holder, classified as below: a service: `wait` without spawning (that service is still starting or is stopping, so this command waits for it); not a service: refuse `root_held` at once with its PID, because no wait is known to end |
-| `precheck` | For each `providers.*.credential.env`, test presence and nonemptiness of the variable without retaining, printing, hashing or comparing the value; for each `providers.*.credential.oauth` route, read only ADR 0073's non-secret sign-in metadata and its [generation floor](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-generation-floor). The precheck sees only those two files; an inconsistent pair, an unavailable or unsafe store and an `adc` file failure are found by the spawned daemon, and the starter refuses with the class its exit status maps to (ADR 0073) | all present: `spawn`; an absent reference: refuse `provider_credential_absent` naming the first absent pointer (for example `/providers/anthropic/credential/env`); an `oauth` route whose metadata is absent, not `signed_in`, or at a generation at or below the floor's (a logout cut after its floor write): refuse `provider_sign_in_required` naming the route (D22; `loopex daemon` itself exits 120 for it). Either refusal creates no process, lock, log or socket |
+| `precheck` | For each `providers.*.credential.env`, test presence and nonemptiness of the variable without retaining, printing, hashing or comparing the value; for each `providers.*.credential.oauth` route, read only ADR 0073's non-secret sign-in metadata and its [generation floor](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-generation-floor). The precheck sees only those two files; an inconsistent pair, an unavailable or unsafe store, an `adc` file failure and a startup refresh answered `invalid_grant` (D51) are found by the spawned daemon, and the starter refuses with the class its exit status maps to (ADR 0073) | all present: `spawn`; an absent reference: refuse `provider_credential_absent` naming the first absent pointer (for example `/providers/anthropic/credential/env`); an `oauth` route whose metadata is absent, not `signed_in`, or at a generation at or below the floor's (a logout cut after its floor write): refuse `provider_sign_in_required` naming the route (D22; `loopex daemon` itself exits 120 for it). Either refusal creates no process, lock, log or socket |
 | `spawn` | Create `log/` (`0700`) when absent, prune stale exit and service-record files, rotate the log, then start the detached service as below | `wait` |
 | `wait` | Every 250 ms until the deadline: connect; else, for a command that spawned, read this start's `log/start-<16 hex>.exit`; then, for a command whose own service has exited 76 and for a command that entered from `probe`, read `Placement.live_owner(root)` and classify the holder | answers: `readiness`; a `live_owner` error: refuse its class at once; an own exit status other than 76: refuse with its `LoopexDaemon.ExitStatus` class, or, for `0` (the service stopped, for example by a concurrent `service stop`), `service_stopped`, and for any status without a class (`1`, or `128`+n after a signal), `service_exited` naming the number and the log; own service still running (no exit status yet): stay in `wait`, classifying nothing, because this command's own start is still in progress; a service holder: stay in `wait`; a holder that is not a service: refuse `root_held` at once with its PID; no live holder: the holder this command waited for has exited, so return to `probe` under the same deadline; deadline: refuse `service_not_ready`, naming the live holder's PID and its state, `starting` or `stopping`, or `starting` when no holder is live |
-| `readiness` | `daemon.readiness` | `serving`: done; `closed`: refuse `service_closed` with the session, its code and `loopex store restore`; `classifying` or `unavailable`: poll every 1,000 ms until the same deadline, then refuse `service_not_serving` with the last answer; a `daemon_stopping` refusal (`owner.ex` :2322-2327, a stop's transport cut after its stopping mark) is no answer: classify the holder as `probe` does |
+| `readiness` | `daemon.readiness` | `serving`: done; `closed`: refuse `service_closed` with the session, its code and `loopex store restore`; `classifying` or `unavailable`: poll every 1,000 ms until the same deadline, then refuse `service_not_serving` with the last answer; a `daemon_stopping` refusal (the admission relay refuses every permit request after a stop's transport cut, which follows its stopping mark, `admission_relay.ex` :21-23) is no answer: classify the holder as `probe` does |
 
 The 75,000 ms bound is the delivered startup gate (`@owner_start_gate_ms`
 5,000) plus one ADR 0046 classification slice (60,000), the startup arbiter's
@@ -707,9 +720,11 @@ later read saw a later write.
 
 While a pass is incomplete without a named session, the service runs
 a further 60,000 ms `Helper.classify/2` slice from a linked task one second
-after the last one ends, as ADR 0046 requires of a resident host. The loop
-starts only after ADR 0071's startup step 5 has bound the activation permit,
-so no slice delays that bind or recovers a child uncounted, and it stops as
+after the last one ends, as ADR 0046 requires of a resident host. Once the
+permit seam lands (M8 plan step 6, W2), the loop starts only after ADR
+0071's startup step 5 has bound the activation permit, so no slice delays
+that bind or recovers a child uncounted; before it (plan step 4, W1) the
+loop starts after composition and no permit exists. It stops as
 ADR 0071's [stop order](0071-daemon-attached-conversation-technical.md#technical-adr-0071-stop-order)
 states. The task is a tracked component, but the delivered exit
 classifiers (`classify_exit/3`, `service.ex` :1784-1788, and
@@ -821,7 +836,7 @@ standard error and exit `1`: `home_unavailable`, `configuration_not_found`,
 `configuration_sync_unconfirmed`, ADR 0049's existing load and validation
 classes, `service_and_daemon`, `config_requires_service`,
 `service_not_running`, `provider_credential_absent`,
-`provider_sign_in_required` (ADR 0073's class, from the start precheck, with its `loopex auth login <provider>` hint), `sign_in_unavailable` (ADR 0073's class for a disabled sign-in route, at configuration resolution, D52),
+`provider_sign_in_required` (ADR 0073's class, from the start precheck, with its `loopex auth login <provider>` hint), `sign_in_unavailable` (ADR 0073's class for a disabled sign-in route, at configuration resolution, D52, and from foreground `run`, `resume` and `skill` for an `oauth` binding of the selected route, with the hint `use loopex chat, or --service`, D58),
 `service_command_unavailable`, `service_not_ready`, `service_closed`,
 `service_not_serving`, `service_stopped`, `service_exited`, `placement_unverifiable`, `placement_lock_failed`, `root_held`, `stop_unconfirmed`, `auth_root_overlap`, and a daemon start refusal under its
 `LoopexDaemon.ExitStatus` class name, among them `service_record_write_failed`
@@ -836,6 +851,7 @@ for a service that exited 125.
 | Separation comparison | `LoopexComposition.SignIn.Separation.check/1` (new), its only public function, called by `LoopexCli.Home`, by ADR 0072's `StoreAdmin.restore/3` for an available restore source, and, on the context it was given, by ADR 0073's store and refresher. It has one implementing owner, M8's W4, and lands before `LoopexCli.Home` |
 | `init`, `config set`, `config unset`, lock and atomic write | `LoopexCli.ConfigWriter` (new); candidate validation by `ConfigInspection.validate_document/2` and `ConfigFile.resolve_document/2` (both new) |
 | Optional `--config`, selection line | `LoopexCli.ConfigOptions`, `LoopexCli.ConfigInspection` |
+| `ask`'s `--config`, file selection and `providers` (D54, D57) | `LoopexCli.AskOptions` (the `config` flag), `LoopexCli.Ask.prepare/2` |
 | On-demand machine, spawn, wait, holder classification, exit-file and service-record pruning | `LoopexCli.ServiceStart` (new); `LoopexCli.Service` calls its prune after `service stop` |
 | Service record write and removal | `LoopexCli.Daemon`; the stopping mark, `LoopexDaemon.Service` |
 | `service`, `paths`, `doctor` | `LoopexCli.Service` (new); dispatch in `LoopexCli` |
@@ -854,8 +870,10 @@ for a service that exited 125.
   sets `HOME` to its temporary root beside `LOOPEX_HOME` and fails before any
   test if either escapes it.
 - **ADR 0049, narrowly amended.** `--config` becomes optional on `chat`,
-  `config validate` and `config show` when a home is selected; schema,
-  precedence, origins and the single `LOOPEX_HOME` alias are reused unchanged.
+  `config validate` and `config show` when a home is selected, and `loopex
+  ask` accepts it and uses only `providers`, for the providers they name
+  (D54, D57); schema, precedence, origins and the single `LOOPEX_HOME`
+  alias are reused unchanged.
 - **ADR 0046, reused.** Its resident-host slicing rule is implemented as
   stated; nothing about classification changes.
 - **ADR 0044, applied.** It owns the `loopex.experimental/4` contract
@@ -898,7 +916,7 @@ Every case uses a temporary `HOME` and `LOOPEX_HOME`. Test files are in
 | `live_service_test.exs` | Real daemon | `run` and `resume --service` start on demand; `attach` and `sessions --service` refuse `service_not_running`; `--daemon` never starts |
 | `apps/loopex_daemon/test/readiness_method_test.exs` | Socket | Each of the four states from helper and runtime seams; the `closed` session and code; project-resource values; schema vectors and the updated digest |
 | `auth_separation_test.exs` | Unit and real filesystem | For each origin (`--state-root`, `LOOPEX_HOME`, the file's `paths.state_root`): the root equal to `A`, containing it, and contained by it each refuse `auth_root_overlap` with that origin's pointer, before any file, lock, log, socket or process; `/x/state` beside `/x/stateful` and the default `<home>/state` beside `<home>/auth` pass; a root selected under one `HOME` and used under another whose `.loopex/auth` lies inside it refuses; a symbolic-link root resolving to an ancestor of `A`, a symbolic-link `HOME` and a symbolic-link `auth` each refuse; a link loop and 41 chained links refuse; **missing-tail aliases**, on real directories on both hosts: with `data` and a symbolic link `alias` to it, `HOME` under `alias` with `.loopex/auth` absent and a root `data/.loopex/auth/state` absent refuse, as do the reverse containment and an equal pair, while `alias/.loopex/auth` beside an absent `data/.loopex/state` passes; a `..` in a missing suffix refuses; **missing-component rule**: an ASCII case variant (`Auth` against `auth`) and any non-ASCII missing component at the same position refuse on both hosts, and `/x/state` beside `/x/stateful` passes; an existing case variant on a case-insensitive `darwin-arm64` volume refuses through identity; the `Separation.check/1` context grammar (shape, a missing or sixth member, relative or non-UTF-8 path, 17 roots, a `secret_service_bus` that is empty, non-UTF-8, 4,097 bytes or not a string) refuses, and contexts differing only in a valid `secret_service_bus` or `nil` give the same answer on every pair above; `Home.sign_in_context/1` sets `secret_service_bus` from `DBUS_SESSION_BUS_ADDRESS`, to `nil` when it is unset, empty, over 4,096 bytes or not UTF-8, and never refuses for it; an absent or relative `HOME` refuses `home_unavailable` on every row, and an ephemeral `ask` still runs; `config set /paths/state_root` to an overlapping path leaves the earlier bytes; `auth login` refuses when an ancestor of `A` holds a `loopex-root-format` marker; `store adopt`, `store backup` and `store restore` refuse an overlapping root, `BACKUP` and `DESTINATION` before reading or writing any of them; **available source**: a valid backup whose capture names a source root equal to, containing or inside `A` or `G`, restored with `--source available`, and resumed with `--resume` from a retained `available` plan, refuses `auth_root_overlap /capture/source_state_root` after the capture is read and before `BACKUP/manifest`, `BACKUP/state` or the source is read, with nothing written, while the same capture with `--source lost` and the source absent is not refused by separation; a backup of a separated root holds every file of the root and no file of `A`; **ADC directory**, on real directories with a temporary `HOME` and a credential-shaped canary `application_default_credentials.json` (random bytes in the file's grammar, never a real credential) under `<HOME>/.config/gcloud`: for each origin, a state root equal to `<HOME>/.config/gcloud`, containing it (`<HOME>/.config`) and contained by it (`<HOME>/.config/gcloud/state`) refuses `auth_root_overlap` with that origin's pointer, both when `gcloud` exists and when it is absent, before any file, lock, log, socket or process; `store backup` of such a root refuses before `BACKUP` or its staging directory exists, so no copy of the canary is written; `store restore` with `DESTINATION` an empty `<HOME>/.config/gcloud`, or a path under it, refuses before any write and leaves the directory as found, so no restored file lands in or overwrites it; `store adopt` of such a root refuses with the canary's bytes unchanged; the complete manifest of a separated root is unchanged and holds no exclusion. No case creates a mount: under D27 mounts are outside the guarantee, and the walk's refusal of symbolic links and hard-linked files is ADR 0051's delivered behaviour, proved by `restore_io_test.exs`'s existing symlink and hard-link manifest cases; **physical root**: a root selected through a symbolic-link ancestor, by each origin, reaches `Placement.acquire/2`, composition and every `store` command as its physical path, and a `run` started through the alias then backed up and restored serves |
-| `daemon_configuration_test.exs` (ADR 0071, extended) | Real daemon | `loopex daemon`, with and without `--config`, exits 111 with class `auth_root_overlap` and each origin's pointer, with class `home_unavailable` for an absent or relative `HOME`, and, with `--config`, with class `sign_in_unavailable` for a disabled sign-in route (D52), leaving no lock, log entry or socket; without `--config`, a root and an explicit `--socket` both given through a symbolic-link ancestor serve (D53) |
+| `daemon_configuration_test.exs` (ADR 0071, extended) | Real daemon | `loopex daemon`, with and without `--config`, exits 111 with class `auth_root_overlap` and each origin's pointer, with class `home_unavailable` for an absent or relative `HOME`, and, with `--config`, with class `sign_in_unavailable` for a disabled sign-in route (D52), leaving no lock, log entry or socket, each printing `loopex daemon refused to start: configuration_invalid <class>` with its pointer; with and without `--config`, a root and an explicit `--socket` both given through a symbolic-link ancestor serve (D53), a socket whose physical path exceeds the limit while its alias fits refuses `socket_path_too_long` (87) before any lock, and a `--socket` through a link loop or with `..` in its missing suffix refuses `invalid_socket_path` (89) |
 | `apps/loopex_daemon/test/readiness_slice_test.exs` | Socket, real helper owner | A gated store adapter holds a classification slice open: `daemon.readiness` asked concurrently and repeatedly answers within 1,000 ms each (measured), as `classifying` with the previous slice's counts, `"0"` and `"0"` before the first completes; the row's `sequence` advances at slice start and end; a parent creation held in the owner does not delay readiness; releasing the gate gives `serving`; a slice loop whose further slice completes the pass ends and the service keeps serving, and the slice task killed while serving fails the service `runtime_lost`; killing the owner gives `unavailable` with `unexpected`; no readiness path calls the owner |
 | `service_status_test.exs` | Real daemon | The status object has exactly its eight keys in order for `stopped`, `held`, `starting` (a service held at a startup pause after taking the lock), `stopping` (a service held in its drain after writing its stopping mark, exit `3`), `classifying`, `serving`, `closed` and `unavailable`; `stopped` is never printed beside a readiness answer, including when a service stops between the `live_owner` read and the connection; `readiness` is the verbatim result or `null`; `activations_used` and `activation_limit` equal `daemon.status`'s and include a helper child after one runs; a service started from another file keeps its own `readiness.configuration_file`; exit statuses 0, 3 and 1, including a socket that answers readiness and not status |
 | `clients/node` contract lane (extended) | Independent client | `daemon.readiness` decoded from the schema by the Node client, and the recomputed ADR 0044 manifest digest matched by its independent preimage |
