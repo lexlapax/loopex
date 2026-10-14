@@ -4,7 +4,7 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
@@ -221,9 +221,9 @@ what it will back up, then copies the whole root with ADR 0051's owned copy
 and checks the copy against the source twice. It audits the copy exactly as
 restore will, so a backup that restore would refuse is never published. The
 helper job index, a disposable cache the service rebuilds, is copied like
-every other file and left in place in the source; the audit does not decode
-it, as adopt's does not, and the restore command's `restore/3` admits it the
-same way. Backup writes nothing into the source but the removal of stray
+every other file and left in place in the source. The audit never indexes
+or decodes it, in every mode: adopt's, backup's and ADR 0051's own restore
+(D29). Backup writes nothing into the source but the removal of stray
 marker temporaries.
 
 The copy takes every file of the root, under ADR 0051's complete manifest,
@@ -329,7 +329,8 @@ Technical depth: [Compatibility mechanics and alternatives](0072-store-readiness
 
 The private Store ports, session and command identity, public event schemas,
 the daemon's placement rules and ADR 0051's records and outcomes do not
-change. ADR 0051's plan gains one alternative attestation form, used only
+change, except that `restore/2` now commits a root holding a helper job
+index that it refused before (D29). ADR 0051's plan gains one alternative attestation form, used only
 with `--discard-later-work`; a plan in the existing form is unchanged. The marker, the backup layout and its records are experimental
 current-format contracts, each with its own version. Before 1.0 only the
 current version of each is read. A backup is a directory holding the complete
@@ -362,18 +363,21 @@ exactly two of its clauses, and the ADR index records both:
    complete idle backup, an empty destination, exclusion of every other copy,
    fresh ledger generations, and never redispatching an uncertain effect.
 
-**The job index behind `restore/3`.** ADR 0051's text does not name the
-disposable helper job index, so this is not an amendment of an ADR 0051
-sentence. The delivered audit refuses that index, and this record's backups
-keep it, so the restore command calls a new entry point, `restore/3`, beside
-the accepted `restore/2`, which stays and behaves exactly as accepted.
-`restore/3`'s only option leaves the job index out of the audit while the
-transition copies it as part of the complete backup; nothing else about the
-transition, its walks or its outcomes changes. An earlier version of this
-record also used `restore/3` to pass the walks a credential-directory guard;
-the maintainer's D27 removed that guard and the third amendment it needed,
-because separation is a path rule the command applies before it calls the
-transition.
+**The job index in restore's audit (D29).** The maintainer decided on
+2026-10-14 that the delivered `restore/2` always leaves the disposable helper
+job index out of its audit index. Its bytes are still copied and stay in
+every manifest, as backup already keeps them, so a current root that holds a
+job index restores through `restore/2`, which today refuses it as
+`invalid_current_history`. The restore command calls `restore/2`; no other
+entry point or option exists. This is not an amendment of an ADR 0051
+sentence: ADR 0051 requires a complete unexcluded manifest and audits Store,
+Local, receipt, artifact and host-ledger history, and none of its sentences
+names the job index, a derived cache that is none of those, or says what the
+audit's index holds. ADR 0051's manifests, copy, comparisons, walks, phases
+and result grammar are unchanged. Earlier versions of this record added a
+`restore/3` beside `restore/2`, first to pass the walks a credential-directory
+guard, which the maintainer's D27 removed with the third amendment it needed,
+and then to carry a job-index option, which D29 replaces.
 
 <a id="concept-adr-0072-open"></a>
 ### Open for the Maintainer

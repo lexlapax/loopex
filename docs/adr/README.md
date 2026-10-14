@@ -260,9 +260,9 @@ proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
 `store adopt`, `store backup` and `store restore`, and on acceptance amends
 exactly two clauses of accepted ADR 0051: its statement that no backup CLI
 is added; and its latest-backup-only restriction, which `--discard-later-work`
-relaxes for a lost source. Behind a new `restore/3` beside the unchanged
-`restore/2`, the delivered audit leaves the disposable helper job index out
-of its index, which no ADR 0051 sentence names. Credential separation is
+relaxes for a lost source. The delivered `restore/2` leaves the
+disposable helper job index out of its audit index, as adopt and backup do,
+while still copying it, which no ADR 0051 sentence governs (D29). Credential separation is
 ADR 0037's path rule, applied before the transition is called (D27). 0072 also ties the marker's format number to a pinned
 inventory of every durable shape, so any format change advances it. ADR
 0051's other decisions, ADR 0070 and the pre-1.0 rule settle the rest.

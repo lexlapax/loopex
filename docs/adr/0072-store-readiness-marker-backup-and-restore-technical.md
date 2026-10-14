@@ -45,9 +45,8 @@ the CLI and the daemon.
 | Capture, attestation and continuation record codec | `LoopexComposition.StoreAdmin.Codec` | `loopex_composition` | New |
 | Read-only inventory and audit of a live root path; adopt's manifest without the placement lock's entries; whole-tree backup copy | Three operations added to `LoopexComposition.Restore.IO`: `{:root_inventory, root, manifest, workspace_ref, mode}`, `{:adopt_manifest, root, max_total}` and `{:backup_copy, root, staging_state, manifest}` | `loopex_composition` | Existing guardian, new operations |
 | Adopt's hold of the root's placement lock | The extracted placement lock primitive on `STATE_ROOT/placement.lock`, called by `StoreAdmin.adopt/2`; never `Placement.acquire/2` | `loopex_composition` | Existing primitive, new caller |
-| Session-identifying failure of the audit | `LoopexComposition.Restore.Audit` and `Restore.IO.audit_store_bytes/1` return the failing session identifier privately; the public results of `restore/2` and `restore/3` are ADR 0051's | `loopex_composition` | Existing, changed |
-| The disposable job index left out of the audit index in `:adopt` and `:backup` mode and through `restore/3` | `LoopexComposition.Restore.Audit`'s helper-namespace rule and `Restore.Workflow`'s baseline shape check, given an `:omit_job_index` audit option that only `root_inventory` in those two modes and `restore/3` set | `loopex_composition` | Existing, changed |
-| Restore entry point that leaves the job index out of the audit | `LoopexComposition.Restore.restore/3`, beside the accepted `restore/2`, whose third argument is a keyword list admitting only `omit_job_index: true` ([job index entry point](#technical-adr-0072-restore-3)); `test_restore/3`'s options admit `:omit_job_index` beside `:probe` and `:pause_at`; `Restore.IO.run/3` admits an `:omit_job_index` option beside them and hands it to the original worker, which gives it to `Restore.Workflow`'s audit and baseline check for that transaction and every continuation it carries | `loopex_composition` | Existing, changed |
+| Session-identifying failure of the audit | `LoopexComposition.Restore.Audit` and `Restore.IO.audit_store_bytes/1` return the failing session identifier privately; the public results of `restore/2` are ADR 0051's | `loopex_composition` | Existing, changed |
+| The disposable job index left out of the audit index in every mode (D29): `:adopt`, `:backup` and ADR 0051's restore through `restore/2` | `LoopexComposition.Restore.Audit`'s helper-namespace rule and `Restore.Workflow`'s baseline shape check, which skip every entry under `delegation/*/job-index-v1/`, the directory included, unconditionally; no option, no new entry point; `restore/2`, `test_restore/3`'s options and `Restore.IO.run/3`'s options are otherwise unchanged | `loopex_composition` | Existing, changed |
 | Separation of an available restore source | `StoreAdmin.restore/3` calls ADR 0037's `LoopexComposition.SignIn.Separation.check/1` on the command's sign-in context with the captured source appended (restore check 1) | `loopex_composition` | New caller |
 | `store backup|restore|adopt` grammar, output, exit statuses | `LoopexCli.Store` (`lib/loopex_cli/store.ex`), dispatched from `LoopexCli.dispatch/2` as `"store"` | `loopex_cli` | New |
 | Marker check for read-only commands (`sessions`, `artifact`) | `LoopexCli` before `SessionCatalog.list/1` and `LoopexComposition.artifacts/1` | `loopex_cli` | Existing, changed |
@@ -439,12 +438,13 @@ releases it on every exit after step 4, success or refusal.
    `Restore.Audit.complete/4` over the live root path with a draft plan whose
    descriptors it derives (see Backup step 7) inside the same owned worker. In
    `:adopt` mode, and only there, the marker entry is removed from the index
-   given to the audit. In `:adopt` and `:backup` mode, and through
-   `restore/3`, every entry under `delegation/*/job-index-v1/`, the directory
-   included, is removed from that index by the `:omit_job_index` audit
-   option, which also exempts those entries from `Restore.Workflow`'s
-   baseline shape check: the job index is a disposable cache, is not decoded
-   and is left on disk. Manifests are never filtered by it. The
+   given to the audit. The audit never indexes the job index, in every
+   mode (D29): every entry under `delegation/*/job-index-v1/`, the directory
+   included, is left out of the index in `:adopt` and `:backup` mode and in
+   ADR 0051's own restore through `restore/2`, and is exempt from
+   `Restore.Workflow`'s baseline shape check. The job index is a disposable
+   cache, is not decoded and is left on disk. Manifests are never filtered
+   by it. The
    audit decodes every Store frame (`Log.decode_bytes/1`, requiring a complete
    tail), replays the Store (`State.replay/1`), recovers every session in
    sorted order (`SessionState.recover/3`), and validates every Local
@@ -554,10 +554,10 @@ their own (D27); mounts are outside the guarantee, under ADR 0037's
 **The job index stays.** ADR 0046's disposable `delegation/*/job-index-v1`
 cache is neither deleted from the source nor left out of the copy: it is in
 manifests A, B and C and in `state/` byte for byte, like every other file.
-Only the audit's index omits it, in `:backup` mode as in adopt's `:adopt`
-mode (adopt step 9), because the audit cannot decode a cache that grants
-nothing. A restore through `restore/3` copies it into the destination under
-the same complete manifest and omits it from its audit the same way. A
+Only the audit's index omits it, in every mode (adopt step 9, D29), because
+the audit cannot decode a cache that grants nothing. A restore through
+`restore/2` copies it into the destination under the same complete manifest
+and omits it from its audit the same way. A
 service started on the restored root validates each entry at startup under
 ADR 0046's classification bound and discards and rebuilds any that does not
 validate, so a stale or damaged index costs a rescan, never a refusal or a
@@ -653,7 +653,7 @@ same bytes have distinct cuts.
    bit fails here exactly as it fails restore today; Proposed ADR 0060 would
    lift both.
 10. `Restore.IO.run({:root_inventory, STAGING/state, C, workspace_ref,
-    :backup}, limits)` audits the copy as `restore/3` will, with the job
+    :backup}, limits)` audits the copy as `restore/2` will, with the job
     index omitted from the audit's index only; its descriptors must equal
     step 7's. Any failure refuses with the inventory code.
 11. Build the capture record and the plan ADR 0051 would receive for a
@@ -804,11 +804,11 @@ that later work was deliberately discarded; they stay beside the backup.
    `backup_write_failed` and leaves no destination change.
 2. Create `DESTINATION` at `0700` if absent and `fsync` its parent. ADR 0051's
    copy then sets the root's exact backed-up mode.
-3. Call `LoopexComposition.Restore.restore(plan, invocation,
-   omit_job_index: true)` once, the [job index entry point](#technical-adr-0072-restore-3).
-   Through it the transition's audit omits the job index, which the backup
-   keeps, from its index, and its copy and manifests carry it like any file
-   (the backup section's [job index rule](#technical-adr-0072-backup)). ADR
+3. Call `LoopexComposition.Restore.restore(plan, invocation)` once. Its
+   audit omits the job index, which the backup keeps, from its index, and
+   its copy and manifests carry it like any file (the backup section's
+   [job index rule](#technical-adr-0072-backup) and the
+   [job index audit rule](#technical-adr-0072-job-index-audit), D29). ADR
    0051's walks, phases and outcomes are otherwise exactly as accepted.
 
    A `commit_unknown` observation alone does not say which phase stopped,
@@ -856,11 +856,10 @@ probes every earlier invoker recorded in `attestation` and each
 refuses `previous_restore_running`. It writes `continuation-N`
 (`loopex_store_restore_continuation_v1`: `tx_id`, `n`, `previous_restore`, the
 observed earlier invokers and their status `gone`, `alive` or
-`unverifiable`, and its own invoker), then calls `restore/3` with the same plan
-bytes, an invocation whose `prior_admin_authority` is `"joined"` for
+`unverifiable`, and its own invoker), then calls `restore/2` with the same plan
+bytes and an invocation whose `prior_admin_authority` is `"joined"` for
 `--previous-restore stopped` or `"host_rebooted"` for `rebooted`, and whose
-`prior_admin_evidence_sha256` is that record's SHA-256, and the same
-`omit_job_index: true` option as step 3. ADR 0051 resolves the original
+`prior_admin_evidence_sha256` is that record's SHA-256. ADR 0051 resolves the original
 transaction; a changed plan file answers `restore_conflict`. Before calling,
 the command prints `Restore.lookup/3`'s answer for the destination. Check 1,
 with its source separation check, runs before the continuation record is
@@ -966,7 +965,7 @@ Concept: [Observable consequences](0072-store-readiness-marker-backup-and-restor
 
 Fault cuts use seams that already exist or mirror existing ones: a private
 `:before_publish` hook in `RootFormat`, as `Loopex.SessionDirectory` has;
-`Restore.test_restore/3`, whose `:omit_job_index` option admits what `restore/3`'s options admit, and `Restore.IO`'s probe gates for restore and the new
+`Restore.test_restore/3` and `Restore.IO`'s probe gates for restore and the new
 IO operations; process kill through the existing fixture helpers. Every
 "unchanged" assertion compares a complete independent recursive `File.lstat/1`
 walk of the root (path, kind, mode, size, SHA-256, `nlink`), not `Restore.IO`'s
@@ -986,7 +985,7 @@ own manifest.
 | `apps/loopex_composition/test/store_backup_test.exs` | Backup of a closed root with sessions, receipts, artifacts, resources, a helper namespace and earlier restore lineage: `state/` equals an independent walk of the source; capture fields equal an independent derivation; refusals for held, stale, writer-marker, helper-marker, claim, unmarked, existing, nested and symlinked targets, a changed workspace and 65,537 entries; a source write during the copy gives `source_changed` and no `BACKUP`; kill during copy, before rename and after rename leave no `BACKUP` or a complete one; an independent walk shows the source unchanged apart from removed marker temporaries, with a populated helper job index still in place, present in manifests A, B and C and copied into `state/` byte for byte, and absent only from the audit's index; a capture record carrying any member beyond the listed ones refuses `backup_invalid`; the separation refusals are ADR 0037's `auth_separation_test.exs` cases |
 | `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; a backup of a root with helper history and its job index restores with the index copied byte for byte, and a service started on it with one job-index entry corrupted in the backup discards that entry, rescans its session and serves, never refusing; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; kill at each ADR 0051 phase, then `--resume` reaching committed with the same plan bytes; a `--resume` whose `DESTINATION` argument resolves to another directory than the plan's `destination_state_root` refuses `destination_path_invalid`, and one whose `BACKUP/state` differs from the plan's `backup_state_root` (a copied backup) refuses `backup_invalid`, each before the continuation record with nothing written; a first run under one `HOME` cut after intent, then `--resume` under a `HOME` whose `.loopex/auth` contains the plan's destination, refuses `auth_root_overlap /arguments/destination` with nothing written; `previous_restore_running`; an edited plan file gives `restore_conflict`. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged. After every `commit_unknown` and `cleanup_unconfirmed` the command prints `Restore.lookup/3`'s answer, and at `claim_release` the committed-with-cleanup-pending line, exit 2. The separation refusals, the available source's included, are ADR 0037's `auth_separation_test.exs` cases |
 | `apps/loopex_executor_local/test/restore_codec_test.exs` (extended) | The discard attestation form round-trips exactly; a form carrying both `discard_later_work` and `latest_cut`, or `discard_later_work` `false`, is refused; the latest form's bytes are unchanged |
-| `apps/loopex_composition/test/restore_workflow_test.exs` (extended) | A plan with the discard form and `source_status` `available` refuses `invalid_plan` before any claim; with `lost` it commits and its receipt equals a latest-form restore's apart from the plan digest. **Job index**: a backup whose `state/` holds `delegation/<runtime>/job-index-v1/` entries commits through `restore/3` with `omit_job_index: true`, the destination holding those entries byte for byte, while `restore/2` on the same backup refuses `invalid_current_history` exactly as delivered; a member under `delegation/` that is neither the job index nor an admitted helper shape still refuses through `restore/3`; `restore/3` with `[]` commits a clean backup as `restore/2` does; malformed options (another key, `omit_job_index: false`, a repeated key, a map, a non-list) each return `not_committed` `invalid_plan` at phase `claim` with claim `none` and an independent walk of the backup and destination unchanged |
+| `apps/loopex_composition/test/restore_workflow_test.exs` (extended) | A plan with the discard form and `source_status` `available` refuses `invalid_plan` before any claim; with `lost` it commits and its receipt equals a latest-form restore's apart from the plan digest. **Job index** (D29): a backup whose `state/` holds `delegation/<runtime>/job-index-v1/` job and `coverage/` entries commits through `restore/2`, the destination holding those entries byte for byte and every manifest the transition records listing them, where the delivered `restore/2` refused it `invalid_current_history`; a resumed transaction of such a backup, cut after intent and re-presented, commits the same way; a member under `delegation/` that is neither the job index nor an admitted helper shape, such as `delegation/<runtime>/job-index-v2/entry` or a writer marker, still refuses `invalid_current_history` with nothing published |
 | `apps/loopex_cli/test/store_command_test.exs` | Grammar, defaults, exit statuses 0, 1 and 2, exact output lines including both statement forms, the printed ADR 0037 writer command parsed by ADR 0037's own parser to `/paths/state_root` = destination, the `LOOPEX_HOME` precedence note, and the configuration file byte-identical after restore |
 | `apps/loopex_composition/test/delegation_readiness_code_test.exs` | Classification keeps `%{session_id, code}` for each of the three codes and names no session for runtime-page failures |
 | `apps/loopex_daemon/test/readiness_closed_root_test.exs` | A root on which the service did further work after a backup, then had one session history made unreadable: readiness `closed` with that session and `invalid_history`; the root moved aside and the earlier backup restored with `--source lost --discard-later-work`; the service on the restored root reports `serving`; an on-demand start reports `project_resources` `unadmitted`. A second case with no activity after the backup restores without the flag |
@@ -1259,38 +1258,40 @@ same workspace identity, a complete unexcluded backup, an empty destination,
 exclusion of every other copy, fresh ledger generations, the lineage and its
 64-restore limit, the refusal order and the outcomes.
 
-<a id="technical-adr-0072-restore-3"></a>
-**The job index entry point, not an amendment.** ADR 0051's text names no job
-index, so the following changes delivered code behind a new entry point and
-no ADR 0051 sentence:
+<a id="technical-adr-0072-job-index-audit"></a>
+**The job index in restore's audit, not an amendment (D29).** ADR 0051's text
+names no job index and says nothing of what the audit's index holds. Its
+nearest sentences are the manifest rule ("Preserve every baseline kind, mode,
+relative path and file byte/hash without exclusions"), which this change keeps,
+the audit's scope ("Audit complete current Store/Local/receipt/artifact/
+host-ledger history"; "every shipped host-ledger grammar must validate"), of
+which a derived cache is no part, and "Do not ... remove unknowns", which
+concerns writes and is kept because nothing is removed. So the following
+changes delivered code and no ADR 0051 sentence:
 
-- `LoopexComposition.Restore.restore(plan, invocation, options)` is added.
-  `restore/2` stays exactly `restore_validated(plan, invocation, [])` as
-  delivered, with behavior and results exactly as accepted.
-- `options` is a keyword list whose only admitted member is
-  `omit_job_index: true`, given at most once; `[]` behaves exactly as
-  `restore/2`. Any other value, key, repetition or non-list returns ADR
-  0051's invalid-input refusal, `{:not_committed, %{"code" =>
-  "invalid_plan", "phase" => "claim", "cleanup" => "joined", "claim" =>
-  "none"}}` with the plan's `tx_id` when it is valid, before any IO, and
-  nothing is written. The option is outside the plan and invocation maps
-  and is never encoded, journaled, digested or retained. `test_restore/3`'s
-  options admit `:omit_job_index` beside `:probe` and `:pause_at`, validated
-  the same way.
-- When the option is given, the facade passes it as `Restore.IO.run({:restore_driver, plan,
-  invocation}, limits, omit_job_index: true)`. The guardian hands it to the
-  original worker it spawns, which gives it to `Restore.Workflow` for every
-  continuation path that worker carries from the retained state of the same
-  transaction. With it, ADR 0051's audit leaves entries under
-  `delegation/*/job-index-v1/` out of its index and exempts them from
-  `Restore.Workflow`'s baseline shape check; they are copied, manifested and
-  compared like every other entry. `restore/2` passes no such option and
-  keeps refusing them `invalid_current_history`, as delivered. No phase,
-  record or outcome is added.
-- An earlier text of this record made `restore/3`'s third argument a
-  credential-directory guard that every manifest walk applied. The
-  maintainer's D27 removed it with ADR 0037's walk rules; separation is the
-  path check `StoreAdmin` makes before it calls the transition.
+- Delivered `restore/2` refuses a job index in two places today, both
+  `invalid_current_history`: `Restore.Workflow`'s private
+  `driver_supported_baseline!/2`, whose `helper_shape?/1` admits under
+  `delegation/` only runtime directories, digest-named objects and
+  `bindings`/`runs` logs, so `job-index-v1` fails it before the audit, both
+  on the staged baseline and on the retained baselines of a continuation;
+  and `Restore.Audit`'s private `helper_namespace!/4`, whose catch-all
+  `["delegation" | _]` clause refuses any other member.
+- Both skip every entry whose path is `delegation/<runtime>/job-index-v1` or
+  lies under it, unconditionally, so the audit never indexes the job index
+  in any mode: adopt's and backup's `root_inventory` and ADR 0051's own
+  restore through `restore/2`. The entries are still copied, listed in every
+  manifest and compared byte for byte; a member under `delegation/` that is
+  neither the job index nor an admitted helper shape still refuses.
+- `restore/2` keeps its signature, plan, invocation and result grammar.
+  There is no `restore/3`, no audit option and no new `Restore.IO.run/3`
+  option; `test_restore/3`'s options stay `:probe` and `:pause_at`. No
+  phase, record or outcome is added. The one changed result is that a
+  current root holding a job index, which `restore/2` refused, now commits.
+- Earlier texts of this record added `restore/3`, first with a
+  credential-directory guard every manifest walk applied, which the
+  maintainer's D27 removed with ADR 0037's walk rules, and then with an
+  `omit_job_index` option, which D29 replaces with the unconditional rule.
 
 <a id="technical-adr-0072-open"></a>
 ### Resolved Choice
