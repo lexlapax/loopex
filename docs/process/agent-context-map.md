@@ -8388,3 +8388,22 @@ and M8 remains Open.
    file for `run`, `resume` or `skill`, which never select one (their
    `--config` requires `--service`); it holds for a binding reached through
    composition's `:provider_bindings` (`loopex_cli.ex:1795-1803`).
+
+<a id="disposition-m8-holistic5-2026-10-14"></a>
+### M8 internal holistic review round 5 answered — 2026-10-14
+
+A fifth internal holistic review round at `eeba4ca7` found one P1, the
+resource-pack ledger's receipts under D55's identity rewrite, and further P2s
+chiefly in sign-in's host integration and release-evidence succession. The
+maintainer kept the full scope, declining the offered cuts, and decided D59
+to D62 on 2026-10-14, accepting notes on D47, D52, D53 and D58. The other
+items were fixed without a new decision. All five prerequisite ADRs remain
+Proposed and M8 remains Open.
+
+1. **Resource-pack receipts (D59)**, **durable `ask`'s bindings (D60)**,
+   **`AGENTS.md`'s credential sentence (D61)** and **the Direct-mode
+   amendment of ADR 0034 (D62)**.
+2. **Accepted notes.** `auth`'s exit 65 and `auth logout`'s exemption (D52);
+   `--socket` canonicalized with or without `--config` (D53); D58 for an
+   `oauth` binding however it arrives; the anchor line and standing
+   authorization for successions (D47).
