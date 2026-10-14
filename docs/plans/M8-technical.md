@@ -54,7 +54,7 @@ integrator owns it, and the second change lands at rejoin.
 
 | Workstream | Owns | Rejoins at |
 | --- | --- | --- |
-| W1 Integration | `apps/loopex_cli`: `Home`, `ConfigWriter`, `ConfigOptions`, `ConfigInspection`, `ConfigFile`, `ServiceStart`, `Service`, `Live`, `Daemon`, `HostOptions`, `Chat`, `ChatDriver`, `ChatProjection`, `ChatControl`, `AttachedChat`, `DaemonSession`, `DaemonClient` and the `LoopexCli` dispatch table. `apps/loopex_daemon`: `Command`, `ExitStatus`, `Service`, `ServiceReadiness`, `Request`, `SocketConnection`, `WireRecords`, `Owner`, `ConnectionRegistry`. `apps/loopex_protocol/priv/schema` and `priv/vectors`, `clients/node`. `LoopexComposition.Placement`'s lock primitive extraction. `LoopexComposition.Delegation.host/5` (new at step 4: `host/4`'s arguments plus an options keyword that admits no member until W2 adds `activation_permit`; its handle carries the readiness table) and `LoopexComposition.Delegation.Helper`'s readiness ETS table with its single writer (ADR 0037), with the classification code that keeps the failing session and code (ADR 0072's readiness code). The `scripts/check-release.sh` runner and `scripts/lib/release-lane.sh` changes of the [release-check list](#technical-plan-release-check), and the verification guide pair's matching text. `VERSION` at the candidate | The first installed workflow |
+| W1 Integration | `apps/loopex_cli`: `Home`, `ConfigWriter`, `ConfigOptions`, `ConfigInspection`, `ConfigFile`, `ServiceStart`, `Service`, `Live`, `Daemon`, `HostOptions`, `Chat`, `ChatDriver`, `ChatProjection`, `ChatControl`, `AttachedChat`, `DaemonSession`, `DaemonClient` and the `LoopexCli` dispatch table. `apps/loopex_daemon`: `Command`, `ExitStatus`, `Service`, `ServiceReadiness`, `Request`, `SocketConnection`, `WireRecords`, `Owner`, `ConnectionRegistry`. `apps/loopex_protocol/priv/schema` and `priv/vectors`, `clients/node`. `LoopexComposition.Placement`'s lock primitive extraction. `LoopexComposition.Delegation.host/5` (new at step 4: `host/4`'s arguments plus an options keyword that admits no member until W2 adds `activation_permit`; its handle carries the readiness table) and `LoopexComposition.Delegation.Helper`'s readiness ETS table with its single writer (ADR 0037), with the classification code that keeps the failing session and code (ADR 0072's readiness code). The `scripts/check-release.sh` runner, `scripts/lib/release-lane.sh`, `Mix.Tasks.Loopex.M7Matrix` and `M7Evidence.CaseRunner` changes of the [release-check list](#technical-plan-release-check), with their tests, and the verification guide pair's matching text. `VERSION` at the candidate | The first installed workflow |
 | W2 Daemon helpers (W1's integrator, after the attached conversation) | `LoopexCli.ChatConfiguration`'s split into `helper_roles/1`, `helper_catalog/3` and `helper_parent_genesis/3`; `LoopexCli.HostOptions.helpers/1`; `LoopexComposition.Delegation.create_parent_detailed/7`, the `activation_permit` member of `host/5`'s options (W1 lands `host/5` itself) and `Helper.create_parent/2`; `Loopex.Runtime.create_session_with_genesis_detailed/4`; helper hosting and activation counting in `LoopexDaemon.Service`, `Owner`, `ConnectionRegistry` (its one counted sum, `activations_counted/1`, used by client admission, the helper permit and the status report) and `SocketConnection.create_task/4` | After the first installed workflow, before the installed demonstration |
 | W3 Packaging | The umbrella `mix.exs` `releases/0` and `installed_layout/1`; `scripts/release/` (`toolchain.env`, `build.sh`, `assemble.sh`, `write-manifest.sh`, `assert-linkage.sh`, `smoke.sh`, `linux/Dockerfile`, `linux/Dockerfile.smoke`); `apps/loopex_cli/bin/loopex` and `bin/loopex-verify`; `apps/loopex_llm_reqllm/lib/mix/tasks/loopex.provider.build.ex`'s `--relocatable`; `LoopexCli.ProviderLaunch.options/0`; the `loopex version` module; the `installed-artifact` lane in `scripts/check-release.sh` | The first installed workflow, with a locally built archive |
 | W4 Backup and restore | `LoopexComposition.RootFormat`, `StoreAdmin`, `StoreAdmin.Codec`; the marker step in `Placement.acquire/2` and `LoopexComposition.compose/1`; `Restore.IO`'s `root_inventory` and `backup_copy` operations; `Restore.restore/3` and `Restore.IO.run/3`'s `:credential_guard` option; ADR 0037's `LoopexComposition.SignIn.Separation`, all of it: `check/1`, `mount_table/1`, `location/2`, `identities/1`, `mount_class/1`, `overlay_backing/1` and `mount_list/1`, landing at step 3 before W1's `LoopexCli.Home`; `Restore.Audit`'s session-identifying failure and, with `Restore.Workflow`'s baseline check, the omission of the disposable helper job index from the audit index in backup mode and through `restore/3`; `RootFormat`'s format inventory and `root_format_inventory_test.exs`; the retained M7-built root fixture under `apps/loopex_composition/test/fixtures/m7_root/` (D24); `Restore.Workflow`'s discard-form validation; `Loopex.Executor.Local.RestoreCodec`'s discard form; `LoopexCli.Store` and the marker checks for `sessions` and `artifact`; the `bind_mount` lane (D18) and the `m7-adopt` lane (D26) in `scripts/check-release.sh` | The marker first, before W1's daemon and CLI changes; adopt, backup and restore after the first installed workflow, before the installed demonstration |
@@ -277,25 +277,64 @@ outside the repository.
 
 Concept: [Verification](M8.md#concept-plan-verification).
 
-W1 makes these changes to `scripts/check-release.sh` and
-`scripts/lib/release-lane.sh`, with the verification guide pair's matching
-text, before the first M8 lane is recorded. Line numbers are those of
-`4c05628f`.
+W1 makes these changes to `scripts/check-release.sh`,
+`scripts/lib/release-lane.sh`, the release recorder
+`Mix.Tasks.Loopex.M7Matrix`
+(`apps/loopex_cli/lib/mix/tasks/loopex.m7_matrix.ex`) and the trusted
+wrapper's `Mix.Tasks.Loopex.M7Evidence.CaseRunner`, with the verification
+guide pair's matching text, before the first M8 lane is recorded. They
+reuse the delivered writer `M7Evidence.AttemptWriter` and event codec
+`M7Evidence.AttemptEvents` unchanged: no new event, member, mechanical
+result or verdict, and no import of results written elsewhere.
+Line numbers are those of `4c05628f`, unchanged at `7b4293a6`; `matrix.ex`
+below is `loopex.m7_matrix.ex`.
 
-1. **M8 attempts index.** The full matrix and every indexed M8 lane take
-   `--attempts-index FILE` naming a retained M8 index created for M8, whose
-   header pins writer `maintainer-serenity`, host `serenity`, the concept
-   file `docs/plans/M8.md` (`:255` passes `docs/plans/M7.md` today) and the
-   release label. M8 runs never write the M7 index, which stays the record of
-   M7's runs. The full matrix refuses before staging on any host other than
-   the index's pinned host, so the `PASS (closure-incomplete: cross_uid not
-   run)` branch (`:471-472`) is removed: a full run off `serenity` never
-   starts. The delivered M7 lanes (`m7-rollback`, `m7-provider`,
-   `m7-operator`) stay in the full matrix as delivered-product lanes and are
-   recorded in the M8 index.
-2. **Release version.** `release_version` (`:110`, checked at `:329`) is read
-   from the checkout's `VERSION` before staging. It must equal the label the
-   M8 index pins, `0.5.0`, and the extraction's `VERSION` must equal it.
+1. **M8 campaign and its committed anchor.** The full matrix and every
+   indexed M8 lane take `--attempts-index FILE` naming one M8 index, campaign
+   `m8-closure-1`. Like every index, it starts with the delivered genesis
+   (campaign and codec version 1) and writer designation (writer
+   `maintainer-serenity`, host `serenity`, ownership epoch 1)
+   (`attempt_events.ex:47-48`); it has no other header, and neither the
+   concept file nor the release label is an index member. It is created once
+   on `serenity`, from a clean checkout of the M8 branch, by
+   `mix loopex.m7_matrix --create --campaign m8-closure-1 --attempts-index
+   FILE --writer maintainer-serenity --host serenity --markers DIR`.
+   `--create` takes its campaign from `--campaign` instead of the delivered
+   `campaign/0`, which reads the M7 fixture manifest (`matrix.ex:269-274`);
+   it takes no `--case` and admits no lane, writes the two records through
+   `AttemptWriter.create/4`, and prints `index-head: m8-closure-1 2 SHA256`
+   with the designation record's digest. The next commit appends that line to
+   `docs/plans/M8.md`'s Progress and Evidence section, below its table, as
+   the M7 plan places its heads. Until that commit is checked out, every
+   admission refuses `committed_attempt_head_unavailable`
+   (`attempt_heads.ex:81-82`). From then on the M7 plan's
+   [head-recording rule](M7-technical.md#technical-plan-evidence) applies
+   unchanged with `docs/plans/M8.md` as the Concept file: the commit after
+   an indexed lane ends or a matrix stops appends its head, and a completed
+   closure matrix's final head goes only into the evidence scaffold's
+   Pending slots.
+   The recorder's `--concept` (`:255`) names `docs/plans/M8.md`, and
+   `CaseRunner`, which reads `docs/plans/M7.md` today (`case_runner.ex:120`),
+   gains `--concept FILE`, which the runner passes for the M7 conversation
+   lanes (`:452-454`), so they admit against M8's heads. M8 runs never write
+   the M7 index, which stays the record of M7's runs. The delivered M7 lanes
+   (`m7-rollback`, `m7-provider`, `m7-operator`) stay in the full matrix as
+   delivered-product lanes recorded in the M8 index.
+
+   The recorder also gains `--checkout DIR`. Before it opens the index it
+   refuses when `--host` differs from its own host name up to the first dot
+   (`:inet.gethostname/0`), or when DIR is not a clean Git checkout whose
+   `HEAD` is `--candidate`, the check `CaseRunner` makes of its own root
+   (`case_runner.ex:206-213`). The runner passes its own clean checkout.
+   With the delivered owner check, which refuses any writer or host other
+   than the designated one (`attempt_writer.ex:627-637`), a full matrix
+   started anywhere but `serenity` refuses before staging, because the
+   recorder starts before the fresh-source extraction (`:268`). The `PASS
+   (closure-incomplete: cross_uid not run)` branch (`:471-472`) is removed.
+2. **Release version.** `release_version` (`:110`) becomes `0.5.0`, the
+   `VERSION` the candidate carries. The runner refuses before staging when
+   the checkout's `VERSION` differs, and the extraction check (`:329`) is
+   unchanged. The index pins no version.
 3. **Lane registration.** `--only` (`release-lane.sh:20`) admits
    `installed-artifact`, `bind_mount`, `secret_service`, `macos_keychain`,
    `real-sign-in-openai`, `real-sign-in-gemini`, `real-sign-in-anthropic`,
@@ -313,25 +352,56 @@ text, before the first M8 lane is recorded. Line numbers are those of
    `.tool-versions` names; runs its chat under `with_m7_credentials`, since
    the M7 build has no credential-free chat provider; and runs the
    candidate's adopt, `doctor` and offline `sessions` under
-   `without_credential`. Each tagged lane must execute its stated case count. A
-   lane that executes none, or whose host refuses its namespace, session bus
-   or Docker, reports evidence unavailable, which the index records as such
-   and the runner never prints as a pass.
-4. **macOS lanes in the same index.** The three macOS lanes run on the same
-   candidate commit with `--only` and `--attempts-index` naming the same M8
-   index. Because the index's writer is pinned to `serenity`, a macOS run
-   retains its complete redacted output and a lane result (candidate commit,
-   host `Darwin arm64`, lane, executed case count, result), and the
-   `serenity` writer records each as a required closure lane by importing
-   them. The import refuses a result for another commit, another host, a
-   short case count, or a lane other than `macos_keychain`,
-   `installed-artifact` for `darwin-arm64` and `m8-operator`. The final lines
-   (`:469-474`) become: a full run prints `PASS (serenity matrix; closure
-   also needs the three macOS lanes in the M8 index)`; an indexed macOS lane
-   prints `PASS (closure lane LANE; import it into the M8 index)`; an
-   unindexed selection keeps `PASS (selection-only: not full closure
-   evidence)`. Closure is the `serenity` full matrix's PASS and an imported
-   PASS of each macOS lane, all for one commit.
+   `without_credential`. Each tagged lane must execute its stated case count.
+   A lane that executes none, or whose host refuses its namespace, session
+   bus or Docker, is evidence unavailable, recorded as item 7 states and
+   never printed as a pass.
+4. **macOS lanes in the same index, through the `serenity` writer.** The
+   index has one writer and nothing is imported. The three macOS lanes run in
+   one invocation on the candidate commit: `--only macos_keychain --only
+   installed-artifact --only m8-operator`, with `--attempts-index`,
+   `--writer`, `--host` and `--markers` naming the `serenity` index, writer
+   and marker directory, and four new options: `--writer-ssh DEST`,
+   `--writer-checkout DIR`, `--writer-retain DIR` and `--join-matrix ID`. An
+   indexed macOS run selects exactly those three lanes and needs all four
+   options, which refuse with any other selection; `--attempts-index` with a
+   selection is admitted only for that set, `m7-provider` or `m7-rollback`
+   (replacing `release-lane.sh:70-73`). The runner starts the recorder on
+   `serenity` as its coprocess (`release_matrix_start`,
+   `release-lane.sh:97-112`) through `ssh -T DEST` under
+   `without_credential`, each argument quoted for the remote shell. It runs
+   `mix loopex.m7_matrix` in `--writer-checkout`, a clean checkout of the
+   candidate on `serenity`, with `--checkout` that directory, `--concept`
+   its `docs/plans/M8.md` and `--run-root` the `--writer-retain` directory.
+   The line protocol is the delivered one, so every `started` reply follows
+   the synced append on `serenity`, and no macOS lane runs before its reply.
+   Both hosts are the maintainer's, the trust the M7 single-writer procedure
+   already assumes; the connection carries no provider value.
+
+   The recorder admits lane `macos-closure` through a new `--lane ID`
+   option, whose default stays the delivered `release-matrix`
+   (`matrix.ex:79`). Its three ordered cases are `macos_keychain`,
+   `installed-artifact` and `m8-operator`, each pinned to the digest of its
+   label, `Darwin arm64` and the runner script's digest (`:252`, `:264`). A
+   new `--join` mode tries `:continue` and, when the lane has no history,
+   `:join` on the matrix `--join-matrix` names, which is the ID the
+   `serenity` run printed (`:267`). It follows `CaseRunner`'s `:auto`
+   (`case_runner.ex:359-379`) but never falls back to `:new`. The delivered
+   join rule refuses a matrix with no record on this candidate
+   (`attempt_events.ex:285-293`), and the matrix-failure rule refuses a join
+   after any consumed failure in the matrix (`attempt_events.ex:268-274`).
+   After each lane the runner copies its retained log over the same
+   destination into `--writer-retain`, named by the attempt ID of its
+   `started` reply and created exclusively, then finishes the case with that
+   path and the log's local SHA-256 (item 7).
+
+   The final lines (`:469-474`) become: a full run prints `PASS (serenity
+   matrix ID; closure also needs macos-closure joined to it)`; an indexed
+   macOS run prints `PASS (macos-closure joined to matrix ID)`; an unindexed
+   selection keeps `PASS (selection-only: not full closure evidence)`.
+   Closure is read from the index: on one candidate and matrix, every case of
+   the `release-matrix` lane, of the M7 conversation lanes and of
+   `macos-closure` completed `pass`.
 5. **Attended lanes.** `m8-operator` and the three `real-sign-in-*` lanes are
    attended. Like the delivered attended rows (`:372-374`), they keep the
    invoking terminal as standard input and read any manifest on another
@@ -367,6 +437,102 @@ text, before the first M8 lane is recorded. Line numbers are those of
    environment step. The wrapper self-check (`:163-198`) gains an
    `installed=` probe that requires exactly those two names and no
    `LOOPEX_PROVIDER_API_KEY`.
+7. **Lane results.** The recorder's `finish` (`matrix.ex:147-159`) becomes
+   `finish KEY pass|fail|unavailable LOG SHA256`, and every result uses the
+   codec's existing values (`attempt_events.ex:61-62`). When LOG is a
+   readable file on the writer's host whose SHA-256 is SHA256, the case is
+   recorded `completed` with evidence the invocation record and LOG, and
+   mechanical result `pass`, `assertion_failed` for `fail` as delivered, or
+   `evidence_incomplete_post_dispatch` for `unavailable`. Otherwise, whatever
+   result was sent, it is recorded `completed` with
+   `evidence_incomplete_post_dispatch` and the invocation record alone, which
+   the codec admits (`attempt_events.ex:772-777`), and the reply is
+   `finished KEY unavailable`; no pass is recorded without its log's bytes.
+   `lane` (`release-lane.sh:312-330`) sends `unavailable` when the lane's
+   redactor and tee succeeded and its summary counted no executed case, and
+   `fail` for every other non-pass. Each new lane's host probe (namespace,
+   session bus or Docker) runs before its `start`; a refusal retains a
+   refusal log and sends the delivered `stop KEY LOG`, which records that
+   case and every later case of the lane `not_dispatched` with
+   `evidence_incomplete_pre_dispatch`
+   (`matrix.ex:161-186`). Once the host is fixed, the lane continues on the
+   same commit, with `--resume-matrix` on `serenity` or the same
+   `--join-matrix` on macOS, without dispatching a completed case again. The
+   runner prints evidence unavailable and exits 2 for an unavailable or
+   stopped case, and exits 1 for a failure.
+
+   Interruptions, replays and duplicates keep the delivered barriers:
+
+   - An unsynced `start` is never acknowledged, so its lane never runs.
+   - A runner killed, or an SSH connection lost, after a `started` reply
+     ends the recorder's standard input once no process holds it; the
+     recorder closes the writer at end of input (`matrix.ex:67`,
+     `:123-124`), or the lock goes with its VM. Until then the recorder
+     keeps the lock and every other invocation refuses. The
+     case stays `started` without completion, a consumed attempt, as for a
+     killed M7 lane: continuation refuses `consumed_lane_failure`, and the
+     case runs on a later candidate only under the delivered authorization
+     rule (`attempt_events.ex:377-399`).
+   - A failed or interrupted log copy still leads to `finish`, which records
+     the case unavailable. A partial copy keeps its exclusive name, and no
+     later attempt reuses it.
+   - While a lost connection holds the `serenity` lock, every other
+     invocation on either host refuses `attempt_writer_contention`
+     (`attempt_writer.ex:215-221`), so two recorders never write.
+   - A second `finish` of a completed case, with the same or another result,
+     refuses `invalid_attempt_append`, because the case history admits no
+     transition from `completed` to `completed` (`attempt_events.ex:566`,
+     `attempt_writer.ex:557-566`), and nothing is appended.
+   - An invocation of a lane that ended with every case passing answers
+     `plan ended` and runs nothing (`matrix.ex:104`); one that ended in a
+     failure refuses.
+   - A writer checkout at another commit refuses before the index opens, and
+     a join for a candidate the matrix never ran refuses
+     `matrix_join_unavailable`. A case pin whose digest differs from its
+     recorded history refuses `attempt_selection_pin_mismatch`
+     (`attempt_events.ex:259-260`). A macOS lane selected on Linux refuses
+     before staging (item 3), and a writer `--host` other than the writer's
+     own host name refuses before the index opens (item 1).
+8. **Proof.** In the fast check, with real index files, the real writer
+   lock and real Git checkouts in temporary directories:
+
+   - `apps/loopex_cli/test/m7_matrix_test.exs` (extended). Creation prints
+     the designation's head line, and admission refuses
+     `committed_attempt_head_unavailable` until the concept carries it. A
+     wrong `--host`, or a dirty writer checkout or one at another commit,
+     refuses before the index opens; a writer or host other than the
+     designated one refuses `not_current_attempt_writer`. A `--join` lane
+     for a candidate with no matrix record refuses `matrix_join_unavailable`
+     and creates no lane; a join after a consumed matrix failure refuses; a
+     changed case digest refuses `attempt_selection_pin_mismatch`.
+     `unavailable` records `evidence_incomplete_post_dispatch` with its log.
+     A `pass` whose log is missing, truncated or of another digest records
+     `evidence_incomplete_post_dispatch` without it. A second `finish` of a
+     completed case, pass after pass or fail after pass, refuses and leaves
+     the index byte-identical; an ended lane answers `plan ended`; a second
+     recorder on the index refuses `attempt_writer_contention`. A recorder
+     in a separate OS process that is killed after its `started` reply, and
+     one whose standard input closes there, each leave the case `started`
+     and the lock free, and continuation refuses `consumed_lane_failure`.
+   - `apps/loopex_cli/test/m7_matrix_runner_test.exs` (new). The runner's
+     own `lane` and recorder helpers from `scripts/lib/release-lane.sh`, in
+     a disposable tree as `scripts/test/check-release-test.sh` builds one,
+     drive a real recorder in a separate OS process against a real index,
+     with only the SSH transport replaced by that local process and a
+     separate writer directory. No lane command runs before its `started`
+     record is in the index; a copied log is recorded with the digest the
+     runner sent; a failed copy records the case unavailable; a lane that
+     counts no case records `unavailable` and prints evidence unavailable,
+     never PASS; and a host-probe refusal records `not_dispatched` for that
+     case and the later ones, which continue on the same commit.
+   - `apps/loopex_cli/test/m7_case_runner_test.exs` (extended). `--concept`
+     admits against the named file's heads and refuses when that file has
+     none for the index's campaign.
+   - `scripts/test/check-release-test.sh` (extended). The macOS selection
+     rules, the four new options' refusals, `--attempts-index` refused with
+     any other selection, and the final lines.
+
+   The closure run itself proves the SSH transport.
 
 <a id="technical-plan-open"></a>
 ### Open for the Maintainer
