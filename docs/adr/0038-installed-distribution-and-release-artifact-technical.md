@@ -442,8 +442,10 @@ exits 44 for each of `chatgpt`, `vertex` and `claude`, and on Linux
 none, `<home-digest>` being the first 16 hexadecimal characters of the
 SHA-256 of the home's canonical path (ADR 0073).
 
-**Never touched.** No install, upgrade or uninstall step reads or writes a
-state root, any workspace or any backup. The only home write is uninstall's
+**Never touched.** No install, upgrade or uninstall step other than the
+service's own `service stop` and start reads or writes a state root, any
+workspace or any backup. Besides the service's own files in `log/` beside
+its configuration file (ADR 0037), the only home write is uninstall's
 `auth logout`, which removes sign-in tokens and metadata under ADR 0073 and
 leaves the configuration, the log and every root. Deleting the home is the
 operator's separate act and no documented step performs it.
@@ -462,13 +464,15 @@ proves `darwin-arm64`; on a `Linux x86_64` host with Docker it proves
 in its revision of 2026-10-13, runs the full release check once on the
 `Linux x86_64` host `serenity`, with the M8 attempts index whose writer is
 pinned there; that run proves `linux-x86_64` with this lane and also runs
-the `secret_service`, `cross_uid` and attended
-`real-sign-in-*` lanes. The `Darwin arm64` host runs this lane,
+the `secret_service`, `cross_uid`, `m7-adopt`, `m7-adopt-lock` and attended
+`real-sign-in-*` lanes, less any lane deferred before the candidate under the
+plan's D36 and D43. The `Darwin arm64` host runs this lane,
 `macos_keychain` and the attended outcome-6 record `m8-operator` in one
 indexed invocation, `--only macos_keychain --only installed-artifact --only
-m8-operator`, on the same commit, and each is recorded in the same M8 index as a required closure lane. Every one
-of them is required: a lane that reports evidence unavailable, such as a
-Linux host without Docker for this lane, blocks closure and is never a pass.
+m8-operator`, on the same commit, and each is recorded in the same M8 index
+as a required closure lane. Every required one of them must pass: a lane
+that reports evidence unavailable, such as a Linux host without Docker for
+this lane, blocks closure and is never a pass.
 Both hosts' complete outputs are retained.
 
 **Clean host.** On macOS the lane runs as the invoking user under

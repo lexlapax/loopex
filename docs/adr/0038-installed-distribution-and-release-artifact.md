@@ -16,7 +16,10 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   the fast-check refusal proofs named and the `auth` crash-dump case added
   (D37), then the NIF library modes, the fast-check seams, the attended
   record's restore step and the Linux lane's removal query corrected, and
-  the uninstall keychain query limited to the operator's own home
+  the uninstall keychain query limited to the operator's own home; the
+  untouched-paths statement narrowed to what the service's own stop and
+  start touch, and the closure matrix completed with `m7-adopt`,
+  `m7-adopt-lock` and D36's deferral, on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
@@ -116,10 +119,12 @@ minimal runtime distribution carries no compiler.
    the install directory while the service is stopped. Uninstall is signing
    out of every provider with `loopex auth logout`, so no token outlives the
    program that can remove it, and then deleting the directory. The release
-   never writes into its install directory, and no install, upgrade or
-   uninstall step touches a state root, a workspace or a backup; the only
-   home write is that logout. A release opens only roots in its own current format
-   and refuses any other root before writing to it, under ADR 0072. Before 1.0
+   never writes into its install directory. No install, upgrade or uninstall
+   step other than the service's own `service stop` and start reads or
+   writes a state root, a workspace or a backup; besides the service's own
+   files in `log/` beside its configuration file, the only home write is
+   that logout. A release opens only roots in its own current format and
+   refuses any other root before writing to it, under ADR 0072. Before 1.0
    there is no upgrade of an older root and no switching back to an earlier
    release over a root this release wrote. Recovery is a backup restored under
    the build whose format the root is in, with ADR 0072's commands.
