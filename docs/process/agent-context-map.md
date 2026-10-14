@@ -8439,3 +8439,21 @@ new decision. All five prerequisite ADRs remain Proposed and M8 remains Open.
 3. **Amendments recorded as consequences of earlier decisions:** ADR 0048's
    exclusion set and startup resolution for durable `ask` (D60), and ADR
    0039's in-process provider and route tables for `chatgpt:` and `vertex:`.
+4. **Choices made in the fixes without a maintainer decision, listed for
+   acceptance:** the readiness reason `{:unavailable, :runtime_unavailable}`;
+   the `LOOPEX_TEST_HOOKS` test seams and `ServiceStart.command/1`; the
+   probe exclusion set of the CLI's placement probes; the residual that
+   `ConfigWriter`'s and ADR 0073's refresh-lock probes take no file-bound
+   exclusion set before the file is read; restore `--resume` passing `none`
+   when lookup answers absent; adopt's step 11 checking every alias-bound
+   ledger before any rebind; `load_parent/2` and `RetainedObjects` keeping
+   the cause, an IO or runtime error becoming unavailable;
+   `invalid_matrix_arguments` for a bad `--campaign`;
+   `attempt_predecessor_required`; the `macos_keychain` count 4 and
+   `secret_service` count 3; the browser prerequisite as the operator's
+   confirmation; one-invocation custody started empty and filled by
+   `rotate/3`; exchange processes spawned with no secret and running their
+   body in `try`; `CredentialCache` taking the whole merged map; `Edges`'
+   `sign_in_routes` shape rule; `Preflight` building no default for a
+   `:sign_in` route and ephemeral `ask`'s presence check; and in-host
+   `open/4` skipping the environment step.
