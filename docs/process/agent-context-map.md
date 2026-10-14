@@ -8207,3 +8207,33 @@ Proposed and M8 remains Open.
    read-only audit checks the uncatalogued helper child.
 8. **Delivered defect.** `Placement`'s owner probe runs under `TZ=UTC0`;
    W1 owns the fix.
+
+<a id="disposition-m8-readiness7-2026-10-14"></a>
+### M8 readiness review 7 answered — 2026-10-14
+
+External readiness review 7 at `6442ed05` found N23 to N25 (P2) and N26 and
+N27 (P3), and listed choices for acceptance. The maintainer decided D30, D31
+and D32 on 2026-10-14; the other items were fixed without a new decision.
+All five prerequisite ADRs remain Proposed and M8 remains Open.
+
+1. **Evidence succession (D30).** A consumed failure or an unknown started
+   case ends the M8 campaign and the next candidate starts a fresh one. This
+   amends, for M8 only, the succession obligation of accepted ADRs 0057 and
+   0065; the ended index is retained and its unresolved cases are listed,
+   never counted (N24). Pre-start refusal logs reach the `serenity` writer
+   under their own names (N25).
+2. **Service record (D31).** A record that cannot be written refuses the
+   start with daemon status 125, `service_record_write_failed`, replacing the
+   unrecorded-start fallback of the
+   [review 6 disposition](#disposition-m8-readiness6-2026-10-14) item 4.
+3. **Sign-in failure contracts (D32).** `sign_in_lock_failed` (73) and the
+   fail-stop of foreground chat and `ask` on an unexpected `SignIn.Route`
+   exit are accepted as written. A running route's poll also observes the
+   generation floor, so a logout cut after its floor write clears custody
+   (N23).
+4. **Format residual.** Under D28 the retained fixture and five named
+   limits are deliberately incomplete; shapes no fixture reaches, writer-only
+   changes and unlisted limits are review obligations, as ADR 0072 states.
+   The fixture is produced after `store backup` exists (N26).
+5. **Compatibility row.** The embedded API row names D29's changed
+   `restore/2` and no `restore/3` (N27).
