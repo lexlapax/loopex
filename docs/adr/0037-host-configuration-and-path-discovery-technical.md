@@ -294,9 +294,11 @@ identity, and any mount inside the walked tree.
   pointer `/auth`, because separation cannot be shown.
 - **Location rule**, for the walked root, on both hosts. The walk reads the
   mount table at its start on Linux and reads it again immediately before
-  its final manifest; a table whose bytes differ refuses
-  `auth_root_overlap`, because a mount made during the walk cannot be
-  ruled out. It computes the location of the
+  its final manifest. The second read refuses `auth_root_overlap` when a
+  line was added, removed or changed whose mount point is the walked root,
+  lies strictly inside it, or is a whole-component prefix of it, because a
+  mount made there during the walk cannot be ruled out; changes to
+  unrelated mounts elsewhere on the host are ignored. It computes the location of the
   walked root's physical path, and compares it with each entry's
   `filesystem_path` under the location comparison above. This catches a
   root that is, contains or lies inside a protected directory through any
