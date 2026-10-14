@@ -36,7 +36,7 @@ Concept: [Scope and non-goals](m9-store-engine-successor.md#concept-plan-scope).
 | # | Evidence |
 | --- | --- |
 | 1 | The store conformance suite and the fault-injection suites run against the new adapter on both toolchain pairs |
-| 2 | A migration interrupted at every recorded step converges on rerun to the same root; marked format-1 fixtures at the local adapter's capacity boundary and covering the complete durable format inventory ADR 0072's `root_format_inventory_test.exs` pins have their Store records migrate with identical bytes/order and serve their sessions; an unmarked root is refused by name with the root byte-identical; host ledgers are verified unchanged in place outside the Store and remain in whole-root backup/restore |
+| 2 | A migration interrupted at every recorded step converges on rerun to the same root; marked format-1 fixtures at the local adapter's capacity boundary and covering every format-1 golden vector ADR 0072's `root_format_vectors_test.exs` pins have their Store records migrate with identical bytes/order and serve their sessions; an unmarked root is refused by name with the root byte-identical; host ledgers are verified unchanged in place outside the Store and remain in whole-root backup/restore |
 | 3 | A root driven to the engine's bound refuses by name and stays openable |
 | 4 | The migrated root's marker carries the successor format number, and the M9 build reads a format-1 root only through `store migrate`; every other entry point refuses it by name before any write. No earlier binary is run against the migrated root. The retained pre-migration backup restores under the `0.5.x` build with ADR 0072's `store restore` and serves |
 
