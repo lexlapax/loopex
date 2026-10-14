@@ -102,10 +102,15 @@ new provider protocol.
    apart, under ADR 0037's separation invariant, which refuses an overlapping
    selection before any token or root write, and whose walk check refuses a
    backup, adopt or restore whose walked root lies over either directory or
-   that meets either directory, or any mount, inside the tree it walks. The installed host checks the paths once
+   that meets either directory, or any mount, inside the tree it walks,
+   and whose walked root lies on a FUSE filesystem or under an overlay
+   whose backing directories overlap either directory (ADR 0037's D21). The installed host checks the paths once
    and hands the token store the checked paths; the store and its refreshers
    repeat that check before every token write and never look for a root
-   themselves. So backups never contain tokens. Tokens never enter
+   themselves. So backups never contain tokens, within ADR 0037's stated
+   scope: local filesystems, bind mounts and checked overlays, not a
+   network or virtual filesystem that exports the host's own credential
+   directories back to it. Tokens never enter
    journals, public events, progress, diagnostics, traces, fixtures, executor
    jobs or project resources.
 6. **An access token travels exactly like an API key.** For each provider call

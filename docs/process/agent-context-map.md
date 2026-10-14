@@ -8006,3 +8006,43 @@ pointer and the guard's lifetime in restore (ADR 0072); ADR 0073's
 amendments of accepted ADRs 0018, 0021 and 0043, the post-secret-write refresh
 claim, `Store.read/2` with the sign-in context, and the in-process raw-body
 bound. All prerequisite ADRs remain Proposed and M8 remains Open.
+
+<a id="disposition-m8-readiness5-2026-10-13"></a>
+### M8 readiness review 5 answered — 2026-10-13
+
+Readiness review 5 of the M8 planning branch at
+`73b83eb480a2de7e90dcfaa1437da40c4dcfaec8` found the plan not ready: F4 and N7
+were partly closed and N11 to N14 closed, with new findings N15 (P1) and N16
+(P3). The maintainer took one decision, recorded as D21 in the
+[M8 plan](../plans/M8.md#concept-plan-decisions) and in
+[ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept):
+
+1. **Mounts at or above a walked root (N15, D21).** An overlay mounted at a
+   walked root or above it, with gcloud's directory as a lower layer, shows
+   the ADC file through the root while every device and directory identity
+   differs, and the mount is not strictly inside the tree. Every backup,
+   adopt and restore walk now examines each mount listed at the walked root
+   or at a whole-component prefix of it. An overlay is admitted only when
+   its `lowerdir=`, `lowerdir+=`, `datadir+=`, `upperdir=` and `workdir=`
+   paths, decoded from the mount table's octal escapes and the overlay's own
+   backslash escapes, can be read and none of their filesystem locations
+   overlaps a protected directory, examined recursively at most eight levels
+   deep; an overlay whose backing directories cannot be read refuses. FUSE
+   (`fuse`, `fuse.*` and `fuseblk`) refuses, since its data source cannot be
+   established. Network and virtual filesystems are admitted: the maintainer
+   accepts as an explicit limit that one exporting the host's own credential
+   directories back to it is not detected, and the no-token backup guarantee
+   is stated for local filesystems, bind mounts, checked overlays and refused
+   FUSE. On macOS the walk reads `/sbin/mount`'s list, bounded and failing
+   closed, and refuses FUSE, FUSE-T, `nullfs` and `unionfs` at or above the
+   root. ADRs [0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept)
+   and [0073](../adr/0073-provider-oauth-sign-in.md#concept) restate the
+   guarantee with that scope, and the `bind_mount` lane gains the overlay and
+   FUSE cases.
+2. **Two mount-table reads (N16).** Fixed without a decision: ADR 0037's
+   summary now matches its rule that each walk reads the mount table at its
+   start and before its final manifest, and names the remaining window after
+   the second read as concurrent mutation the operator's exclusion statement
+   rules out.
+
+All five prerequisite ADRs remain Proposed and M8 remains Open.

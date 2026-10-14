@@ -1060,8 +1060,13 @@ ADR 0051's accepted files are not edited. The three amended clauses are:
    - With a guard, every manifest walk the transition makes applies ADR
      0037's physical walk check: it stops when the walked root's location
      overlaps an entry's `filesystem_path`, when it meets a directory with
-     an entry's `{major_device, inode}`, or at any mount inside the walked
-     tree, the mount rule needing no member of the guard. ADR 0051's closed
+     an entry's `{major_device, inode}`, at any mount inside the walked
+     tree, or under ADR 0037's
+     [mounts-above rule](0037-host-configuration-and-path-discovery-technical.md#technical-0037-mounts-above)
+     (D21) at a FUSE filesystem or at an overlay whose backing locations
+     overlap an entry's `filesystem_path` or cannot be read, at or above
+     the walked root; the mount and FUSE rules need no member of the
+     guard. ADR 0051's closed
      outcome vocabulary is unchanged, and the outcome depends on the phase.
      Before the root `committed` record is published, the stop is an
      `io_error`, reported as `not_committed` `inventory_unavailable` before
