@@ -29,8 +29,9 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   environment routes beside the file's (D57) and the refusal of a sign-in
   route by the commands that open none (D58), and after them durable
   `ask`'s opening of only the bindings it uses (D60), the `AGENTS.md`
-  sentence qualified with D40 (D61) and the Direct marker's new callers
-  (D62)
+  sentence qualified with D40 (D61), the Direct marker's new callers
+  (D62) and ephemeral `ask`'s opening of only the sign-in routes it uses
+  (D63)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -88,7 +89,10 @@ new provider protocol.
    `ask` as in chat; every other provider, and every provider without a
    file, keeps `ask`'s environment routes. Durable `ask` opens only the
    bindings its model and maintenance model use, so an unrelated binding
-   whose credential is unset does not fail it (D60). The commands that open
+   whose credential is unset does not fail it (D60). Ephemeral `ask` opens
+   only the sign-in routes its model and maintenance model use, so a
+   signed-out `oauth` binding of another provider does not refuse it (D63).
+   The commands that open
    no sign-in route, `run`, `resume` and `skill` without `--service`, refuse
    an `oauth` binding of their model's route by name, `sign_in_unavailable`,
    pointing to `loopex chat`, `loopex ask` or `--service`, however the

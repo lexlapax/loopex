@@ -1154,8 +1154,11 @@ only its identifier (`Helper.classify_sessions/4` returns `[row.session_id]`,
 and `classify_session/4` collapses every error to `:failed`). It is changed so
 that `classify_session/4` returns the code: the `Runtime.effect_intents/4`
 error `invalid_history`, `history_unavailable` or `session_absent`, and
-`invalid_history` when the retained parent capture cannot be loaded. The
-owner stores it as ADR 0037's reason member `{:closed, session_id, code}`
+`invalid_history` when the retained parent capture cannot be loaded. A
+code outside those three, `invalid_query` or `runtime_unavailable` from
+`Runtime.effect_intents/4` (`runtime.ex` :477-488), becomes ADR 0037's
+`{:unavailable, :unexpected}`. The owner stores a closed code as ADR
+0037's reason member `{:closed, session_id, code}`
 of the incomplete value and publishes it in the readiness row, which
 `ServiceReadiness` maps into the fields above without calling the owner;
 ADR 0037's readiness source names every reason's producer. `Delegation.incomplete/1` matches the
