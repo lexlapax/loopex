@@ -9,7 +9,10 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   linkage inventory, install contract and failure names detailed on 2026-10-13;
   the maintainer's ADR 0003 compiler reading recorded on 2026-10-13; the
   attended reconnect and installed-service helper case `m8.service-review`
-  added to the installed demonstration on 2026-10-13
+  added to the installed demonstration on 2026-10-13; after the holistic
+  internal review on 2026-10-13, the revised closure hosts (D18), sign-out
+  before uninstall, the retained M7 root in the refusal step (D24) and the
+  scoped install umask
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
@@ -103,10 +106,12 @@ minimal runtime distribution carries no compiler.
    lane is not supported, whatever the archive builds on.
 7. **The install and recovery contract is explicit.** Install is verify,
    extract and put `bin` on the `PATH`. Upgrade to a later build is replacing
-   the install directory while the service is stopped. Uninstall is deleting
-   the directory. The release never writes into its install directory, and no
-   install, upgrade or uninstall step touches the home, a state root, a
-   workspace or a backup. A release opens only roots in its own current format
+   the install directory while the service is stopped. Uninstall is signing
+   out of every provider with `loopex auth logout`, so no token outlives the
+   program that can remove it, and then deleting the directory. The release
+   never writes into its install directory, and no install, upgrade or
+   uninstall step touches a state root, a workspace or a backup; the only
+   home write is that logout. A release opens only roots in its own current format
    and refuses any other root before writing to it, under ADR 0072. Before 1.0
    there is no upgrade of an older root and no switching back to an earlier
    release over a root this release wrote. Recovery is a backup restored under

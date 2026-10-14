@@ -233,7 +233,9 @@ installed discovery, writers, lifecycle commands, start on demand and the
 `daemon.readiness` report; it introduces no separate role/provider schema. On
 acceptance it narrowly amends ADR 0003's ban on reading a user home, for the
 installed reference host's home discovery only, and ADR 0049's grammar so that
-`--config` is optional when a home is selected. ADR 0038 records M8's `0.5.0`
+`--config` is optional when a home is selected; it applies ADR 0044's
+`loopex.experimental/4` manifest recipe to add `daemon.readiness` to that
+generation's method inventory. ADR 0038 records M8's `0.5.0`
 label, its two hosts, their build environments and the macOS quarantine-removal
 path; on acceptance it clarifies ADR 0003's "a minimal runtime distribution
 carries no compiler" as "carries no build toolchain", so the OTP `compiler`
@@ -260,8 +262,11 @@ exactly three clauses of accepted ADR 0051: its statement that no backup CLI
 is added; its latest-backup-only restriction, which `--discard-later-work`
 relaxes for a lost source; and its manifest walks, which stop on a
 host-supplied credential directory's identity or filesystem location or on
-any mount inside the walked tree, through a new `restore/3` beside the unchanged `restore/2`. ADR 0051's other decisions, ADR 0070 and the
-pre-1.0 rule settle the rest.
+any mount inside the walked tree, through a new `restore/3` beside the unchanged `restore/2`. Behind `restore/3` the delivered audit also
+leaves the disposable helper job index out of its index, which no ADR 0051
+sentence names. 0072 also ties the marker's format number to a pinned
+inventory of every durable shape, so any format change advances it. ADR
+0051's other decisions, ADR 0070 and the pre-1.0 rule settle the rest.
 
 0073 was proposed on 2026-10-13 when the maintainer added provider sign-in to
 M8 as outcome 8. It lets a provider binding name an `oauth` credential on
@@ -279,7 +284,7 @@ schema and ADR 0043's episode failure union; adds the `oauth`
 binding form and `vertex` members to ADR 0049's schema version 1 as additive
 members; and amends one sentence of Proposed ADR 0037. M8's daemon exit statuses are 111 to 115 for 0071 (114
 retired), 116 to 119 and 124 (`root_adopting`) for 0072 and 120 to 123 for
-0073. All five M8
+0073, landing as 111 to 115, then 116 to 119, then 120 to 124. All five M8
 prerequisites remain Proposed.
 
 0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on

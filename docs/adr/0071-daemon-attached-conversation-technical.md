@@ -206,7 +206,11 @@ New `LoopexDaemon.ExitStatus` classes, after the delivered 65 to 110:
 Numbers are kept stable rather than closed up, so no text that already names
 115 changes meaning. ADR 0072's root refusals and ADR 0073's sign-in statuses
 take the statuses after 115, in that order: 116 to 119 and 120 to 123;
-ADR 0072's `root_adopting` takes 124. The
+ADR 0072's `root_adopting` takes 124. They land in three blocks so that every
+interim table is gap-free: this record's 111 to 115; then ADR 0072's 116 to
+119; then 120 to 124 together, ADR 0073's four with ADR 0072's 124. At each
+landing `command_test.exs` asserts exactly the cumulative set: 65 to 115,
+then 65 to 119, then 65 to 124, each without 114. The
 module's "every integer from 65 through 110" statement becomes, once all three
 records land, "every integer from 65 through 124 except 114, which is
 retired"; `ExitStatus.classes/0` omits 114 and `fetch/1` refuses it. ADR
@@ -370,10 +374,13 @@ permit.
 *Permit seam.* `Delegation.open/4`, whose last argument is already an options
 keyword, takes one new option, `activation_permit`, a `{module, extra_args}`
 pair or `nil`. The delivered `Delegation.host/4` is
-`host(root, runtime_id, placement, enabled)` and takes no options, so this
-record adds `Delegation.host/5` (new): `host/4`'s four arguments plus an
-options keyword whose one admitted member is `activation_permit`, passed
-through to `open/4`; `host/4` stays and delegates to `host/5` with `[]`. The
+`host(root, runtime_id, placement, enabled)` and takes no options.
+`Delegation.host/5` (new), `host/4`'s four arguments plus an options
+keyword, lands first with
+[ADR 0037's readiness](0037-host-configuration-and-path-discovery-technical.md#technical-adr-0037-decision),
+whose table its handle carries, admitting no option member; `host/4` stays
+and delegates to it with `[]`. This record adds the keyword's one admitted
+member, `activation_permit`, passed through to `open/4`. The
 helper owner calls three functions with `extra_args` prepended:
 `module.acquire(permit_id)`, `module.settle(permit_id, settlement)` and
 `module.account(permit_id, session_id)`. Composition knows only that
@@ -522,7 +529,7 @@ standard error adds `attach with: loopex chat --service`.
 | Helper creation context on each connection | `LoopexDaemon.Owner`, `LoopexDaemon.ConnectionRegistry` |
 | Creation checks and helper-parent routing | `LoopexDaemon.SocketConnection` (`create_task/4`) |
 | Detailed parent creation | `LoopexComposition.Delegation` (`create_parent_detailed/7`, new), `LoopexComposition.Delegation.Helper`; `Loopex.Runtime.create_session_with_genesis_detailed/4` (new, `@doc false`) |
-| Permit seam, refusal order and child creation through the detailed call | `LoopexComposition.Delegation` (`activation_permit` option of `open/4`; `host/5`, new, with `host/4` delegating), `LoopexComposition.Delegation.Helper` (`@order`, `bind_activation_permit/2`, new) |
+| Permit seam, refusal order and child creation through the detailed call | `LoopexComposition.Delegation` (`activation_permit` option of `open/4`, and as the member of `host/5`'s options keyword; `host/5` itself lands with ADR 0037's readiness), `LoopexComposition.Delegation.Helper` (`@order`, `bind_activation_permit/2`, new) |
 | Permit implementation and accounting | `LoopexDaemon.HelperActivation` (new); `LoopexDaemon.ConnectionRegistry` (`helper_permits` state; `acquire_helper_permit/2`, `settle_helper_permit/3`, `account_helper_activation/3`, new; the private `activations_counted/1`, new, used by `reserve_activation_binding/3`, `acquire_helper_permit/2` and `activations_used`); `LoopexDaemon.Service` (step 6) |
 | Route guard | Unchanged: `LoopexComposition.Delegation.guard/3`, `LoopexDaemon.SocketConnection.route_guard/3` |
 

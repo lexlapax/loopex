@@ -4,7 +4,7 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in three clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added; its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source; and its manifest walks, which stop on a host-supplied credential directory's identity or filesystem location or on any mount inside the walked tree, through a new `restore/3` entry point. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
@@ -117,6 +117,17 @@ check the marker without ever writing it. The foreground commands exit `1`
 with the code named. The service exits with one new status per code, so a
 service manager can tell them apart.
 
+**The number moves with the format.** Format 1 is exactly what this build
+durably writes into a root: its private session records, Store log and
+snapshot, executor and helper ledgers and their job index, artifact and
+resource records, ADR 0051's restore records, and this record's backup
+records and layout. Any change to the shape of any of them, in a `0.5.x`
+patch build as much as a later minor release, advances the number, so a build
+never opens a root in a format it does not read; it refuses it by name. A
+test pins a digest of the complete list of those shapes to the number, so a
+format change without a new number fails the fast check. This rule was set in
+fixing the holistic internal review, not by a maintainer decision.
+
 <a id="concept-adr-0072-adopt"></a>
 ### Adopting a Root the Source Build Wrote
 
@@ -166,7 +177,11 @@ statement remains required all the same: the M7 build does not read the
 marker, so once adopt releases the lock, after a refusal or kill that left
 `adopting` or after the commit, an M7 process can open the root again, and an
 embedded or other non-cooperating host may never take the lock at all. `doctor` reports an
-`adopting` root. Running adopt on a root already marked current reports that
+`adopting` root. The maintainer decided on 2026-10-13 (D24) that adoption is
+proved on a real root the M7 build wrote: the `v0.4.0` source build writes
+and stops a root holding a conversation and one helper run, and that root is
+retained as a test fixture that the adopt tests adopt and the installed lane
+refuses. Running adopt on a root already marked current reports that
 and writes nothing. A root adopt cannot read is recovered the same way as any
 unsupported root: through a backup restored under the build that wrote it.
 
@@ -178,10 +193,14 @@ Technical depth: [Backup capture, layout and verification](0072-store-readiness-
 `loopex store backup BACKUP` captures the selected root into a new directory.
 The root must be marked and closed: no live or stale placement lock, no Store
 or helper writer marker, no restore claim and no torn tail. The command says
-what it will back up, removes only the disposable helper job-index cache, then
-copies the whole root with ADR 0051's owned copy and checks the copy against
-the source twice. It audits the copy exactly as restore will, so a backup that
-restore would refuse is never published.
+what it will back up, then copies the whole root with ADR 0051's owned copy
+and checks the copy against the source twice. It audits the copy exactly as
+restore will, so a backup that restore would refuse is never published. The
+helper job index, a disposable cache the service rebuilds, is copied like
+every other file and left in place in the source; the audit does not decode
+it, as adopt's does not, and the restore command's `restore/3` admits it the
+same way. Backup writes nothing into the source but the removal of stray
+marker temporaries.
 
 The copy takes every file of the root, under ADR 0051's complete manifest,
 with no exclusion. Provider sign-in tokens and gcloud's Application Default
@@ -342,7 +361,12 @@ exactly three of its clauses, and the ADR index records all three:
    the final check of the committed destination or in a later call's claim
    cleanup, leaves the commit standing and the cleanup pending, as ADR 0051
    already leaves an interrupted cleanup, until a later call with the same
-   plan finishes it.
+   plan finishes it. `restore/3` also leaves the disposable helper job index
+   out of its audit while copying it as part of the complete backup, so a
+   backup this record's command takes, which keeps that index, restores;
+   `restore/2` keeps refusing the index as delivered. ADR 0051's text does
+   not name the index, so this changes the delivered audit behind the new
+   entry point, not an ADR 0051 sentence.
 
 <a id="concept-adr-0072-open"></a>
 ### Open for the Maintainer

@@ -8046,3 +8046,81 @@ were partly closed and N11 to N14 closed, with new findings N15 (P1) and N16
    rules out.
 
 All five prerequisite ADRs remain Proposed and M8 remains Open.
+
+<a id="disposition-m8-internal-review2-2026-10-13"></a>
+### M8 holistic internal review answered — 2026-10-13
+
+A holistic internal review of the M8 planning branch at
+`73b83eb480a2de7e90dcfaa1437da40c4dcfaec8`, in two read-only halves, found
+the plan not ready. The maintainer took four decisions in response, recorded
+in the [M8 plan](../plans/M8.md#concept-plan-decisions) and the ADRs they
+govern:
+
+1. **Closure hosts (D18, revised).** The full release check runs once at
+   closure on the Linux x86-64 host `serenity`, keeping M7's attempts-index
+   model with an M8 index whose writer is pinned there, the reason the
+   [M7 closure disposition](#disposition-m7-closure-2026-10-13) gave for
+   running T17 on `serenity`. That run includes `installed-artifact`,
+   `bind_mount`, `secret_service`, `cross_uid` and the attended real sign-in
+   lanes. macOS arm64 runs `macos_keychain`, `installed-artifact` and the
+   attended outcome-6 record with `--only` on the same commit, each recorded
+   in the same index as a required closure lane; closure is the `serenity`
+   full PASS and a PASS of each, and any required lane reporting evidence
+   unavailable blocks closure. This supersedes the earlier D18 split of a
+   macOS full run with Linux `--only` lanes. The runner changes are listed
+   for W1 in the plan's
+   [release-check changes](../plans/M8-technical.md#technical-plan-release-check)
+   ([ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept)).
+2. **Sign-in route not ready at startup (D22).** A start whose configured
+   sign-in route is not ready keeps refusing: the start on demand refuses
+   `provider_sign_in_required` before spawning, and `loopex daemon` exits
+   120 ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)).
+3. **Client identity across logout (D23).** The client ID a provider issued
+   to Loopex and the token-generation floor survive `loopex auth logout`
+   ([ADR 0073](../adr/0073-provider-oauth-sign-in.md#concept)).
+4. **Retained M7-built root (D24).** The `v0.4.0` build, commit
+   `9fe9618b0fbd89bdbcd5fc7e75ab0a5abb1ebe20`, writes and stops one root
+   with a real conversation and one helper run; W4 retains it with its
+   workspace as a repository test fixture with its producing commit, exact
+   commands and archive digest, for `store_adopt_test.exs` and the installed
+   lane's refusal step
+   ([ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept)).
+
+Taken in the fix **without a maintainer decision**, each recorded in its ADR
+as such and open to the maintainer's override:
+
+- **Format-number rule.** Any change to the shape of a durable record,
+  ledger, snapshot, restore record or backup advances
+  `loopex-root-format N`; `root_format_inventory_test.exs` pins the digest
+  of an inventory built from each durable codec's own declaration to the
+  number (ADR 0072).
+- **`model_list` companion invocation** in ADR 0073, made by that record's
+  fix.
+- **`secret_service_bus`**, a fifth sign-in context member read by
+  `LoopexCli.Home` from `DBUS_SESSION_BUS_ADDRESS` and ignored by
+  `Separation.check/1` (ADR 0037).
+- **Backup no longer deletes the job index.** Backup copies the helper job
+  index under the complete manifest and leaves it in the source; the audit
+  omits it in backup mode and behind `restore/3`, and `restore/2` refuses it
+  as delivered (ADR 0072).
+- **Retained-root adoption seam.** Because a workspace's identity binds its
+  device and inode, the extracted fixture's workspace cannot match the one
+  its M7 genesis recorded, so `store_adopt_test.exs` adopts it through a
+  `@doc false` `StoreAdmin.test_adopt/3` that supplies the recorded
+  workspace reference; product `adopt` always computes it (ADR 0072).
+
+The other findings were fixed without a decision: `Delegation.host/5` and
+the readiness table move to W1's step 4; `SignIn.Separation` has one owner,
+W4, landing before `LoopexCli.Home`, and W5 owns the rest of `SignIn.*`;
+`:credential_guard` is the option's one name; uninstall signs out of every
+provider first and the installed removal asserts no Loopex keyring item
+remains (ADR 0038); stale start exit files are pruned, and a start that finds
+a live owner it did not spawn and no answering socket refuses `root_held` at
+once (ADR 0037); exit statuses land as 111 to 115, 116 to 119, then 120 to
+124, each step asserting the cumulative set; ADR 0044 is named for the
+`/4` method inventory; the plan names ten ADR 0073 verification items, the
+two sign-in token tests, the protocol and Model-boundary changes in its
+compatibility table and each real sign-in lane's `--store file`; the macOS
+install creates its directory under a scoped `umask 022`; and the M9 draft
+follows the pre-1.0 current-contract rule. All five prerequisite ADRs remain
+Proposed and M8 remains Open.

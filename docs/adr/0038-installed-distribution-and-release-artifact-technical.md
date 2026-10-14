@@ -365,13 +365,16 @@ shasum -a 256 -c loopex-0.5.0-darwin-arm64.tar.gz.sha256
 tar -xzf loopex-0.5.0-darwin-arm64.tar.gz
 /bin/sh loopex-0.5.0-darwin-arm64/bin/loopex-verify
 xattr -dr com.apple.quarantine loopex-0.5.0-darwin-arm64
-mkdir -p "$HOME/.local/opt" && mv loopex-0.5.0-darwin-arm64 "$HOME/.local/opt/loopex"
+(umask 022; mkdir -p "$HOME/.local/opt") && mv loopex-0.5.0-darwin-arm64 "$HOME/.local/opt/loopex"
 export PATH="$HOME/.local/opt/loopex/bin:$PATH"     # and in the shell profile
 loopex version
 ```
 
 Nothing from the archive executes before the `xattr` line: the verifier is
-read by the base system's `/bin/sh`. A downloaded archive carries the
+read by the base system's `/bin/sh`. The scoped `umask 022` creates any
+missing `.local` and `.local/opt` as `0755` whatever the shell's umask, so
+the install location's parents are never group- or world-writable, which
+the location rule below requires. A downloaded archive carries the
 quarantine attribute, extraction may propagate it, and Gatekeeper refuses the
 ad hoc-signed `beam.smp` while it is present; the recursive removal clears it
 whether or not it was propagated.
@@ -404,13 +407,30 @@ build refuses the root by name under ADR 0072, the root is byte-identical;
 swap the two directories back and the previous build serves it again. No
 command upgrades a root.
 
-**Uninstall.** Stop the service, delete the install directory, and remove the
-`PATH` line. There is no uninstall command.
+**Uninstall.** There is no uninstall command. With the installed command
+still on the `PATH`:
 
-**Never touched.** No install, upgrade or uninstall step reads or writes the
-home, its configuration, any state root, any workspace or any backup.
-Deleting the home is the operator's separate act and no documented step
-performs it.
+```sh
+loopex service stop
+loopex auth status                  # lists each signed-in provider
+loopex auth logout <provider>       # once for each provider it lists
+rm -rf "$HOME/.local/opt/loopex"
+```
+
+and remove the `PATH` line. Logout runs first because only the installed
+command can remove its own sign-in tokens: it deletes each route's token from
+the keychain, the Secret Service or the owner-only file and revokes it where
+ADR 0073 says the provider allows; a keychain item left behind would outlive
+the program that can read it. After deleting the install, the operator can
+confirm that no Loopex item remains: on macOS
+`security find-generic-password -s loopex-oauth` finds none, and
+on Linux `secret-tool search application loopex-oauth` lists none.
+
+**Never touched.** No install, upgrade or uninstall step reads or writes a
+state root, any workspace or any backup. The only home write is uninstall's
+`auth logout`, which removes sign-in tokens and metadata under ADR 0073 and
+leaves the configuration, the log and every root. Deleting the home is the
+operator's separate act and no documented step performs it.
 
 <a id="technical-adr-0038-smoke"></a>
 ### Smoke Proofs
@@ -421,19 +441,29 @@ Concept: [Observable consequences](0038-installed-distribution-and-release-artif
 with `--only installed-artifact`. It runs `build.sh` for the candidate into the
 retained-output directory, then `smoke.sh`. On a `Darwin arm64` host it
 proves `darwin-arm64`; on a `Linux x86_64` host with Docker it proves
-`linux-x86_64`. The closure matrix, as the M8 plan's decision D18 fixes it,
-runs the full release check once on the `Darwin arm64` host, where this lane
-proves `darwin-arm64` beside the attended outcome-6 record and the
-`macos_keychain` lane. The `Linux x86_64` host runs this lane with
-`--only installed-artifact`, together with the `bind_mount`,
-`secret_service` and `cross_uid` lanes the plan names, each by `--only`. Every
-one of them is required: a lane that reports evidence unavailable, such as a
+`linux-x86_64`. The closure matrix, as the M8 plan's decision D18 fixes it
+in its revision of 2026-10-13, runs the full release check once on the
+`Linux x86_64` host `serenity`, with the M8 attempts index whose writer is
+pinned there; that run proves `linux-x86_64` with this lane and also runs
+the `bind_mount`, `secret_service`, `cross_uid` and attended
+`real-sign-in-*` lanes. The `Darwin arm64` host runs this lane with
+`--only installed-artifact`, together with `--only macos_keychain` and the
+attended outcome-6 record, `--only m8-operator`, on the same commit, and
+each is recorded in the same M8 index as a required closure lane. Every one
+of them is required: a lane that reports evidence unavailable, such as a
 Linux host without Docker for this lane, blocks closure and is never a pass.
 Both hosts' complete outputs are retained.
 
 **Clean host.** On macOS the lane runs as the invoking user under
-`env -i HOME=<empty temporary> LANG=C.UTF-8 PATH=/usr/bin:/bin:/usr/sbin:/sbin`
-and the provider credential variables the lane names. Before it starts it
+`HOME=<empty temporary>`, `LANG=C.UTF-8` and
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin` with every other variable unset except
+the provider credential variables the lane names, `ANTHROPIC_API_KEY` and
+`OPENAI_API_KEY`, which the release runner's `with_installed_credentials`
+wrapper exports by name and never places in argv. The lane's `init`
+configuration references exactly those names: `loopex daemon --config`
+discards `LOOPEX_PROVIDER_API_KEY` unread under ADR 0071, so the release
+credential reaches the installed service only under the name its
+configuration references. Before it starts it
 asserts that `command -v erl erlc escript elixir mix iex` finds nothing and
 that no `ERL_*`, `ELIXIR_*`, `MIX_*` or `DYLD_*` variable is set. Libraries
 that exist on the machine but that no object names cannot load, which the
@@ -442,7 +472,9 @@ linkage and loaded-image steps prove. On Linux the lane runs in a container of
 an unprivileged UID with a temporary home, network enabled for the provider,
 the host's certificate bundle bind-mounted read-only at
 `/etc/ssl/certs/ca-certificates.crt` (installing `ca-certificates` would pull
-in an OpenSSL), and the credential passed by variable name. It asserts the
+in an OpenSSL), and the same two credential variables passed by name alone,
+`docker run --env ANTHROPIC_API_KEY --env OPENAI_API_KEY`, so no value
+enters argv. It asserts the
 same absent commands, records `dpkg -l`, and finds no `beam.smp` or `erl`
 outside the install. The attended outcome-6 record on macOS uses a separate
 macOS user account whose shell profile loads no mise or Homebrew.
@@ -479,14 +511,22 @@ macOS user account whose shell profile loads no mise or Homebrew.
 5. **Backup, restore and refusal.** Stop the service, take a backup with
    `loopex store backup`, restore it into an empty root with
    `loopex store restore`, point the home at the restored root, start the
-   service and list its sessions. Point the installed command at a copy of an
-   unmarked root written by the M7 source build and prove ADR 0072's named
-   refusal and a byte-identical root.
+   service and list its sessions. Extract ADR 0072's
+   [retained M7 root](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-m7-fixture),
+   written by the `v0.4.0` build (D24), from the fresh-source extraction
+   after checking its pinned digest, point the installed command at it, and
+   prove ADR 0072's named `root_unmarked` refusal and a byte-identical root.
 6. **Replace and remove.** Run the verifier again: it passes, proving that
    nothing wrote into the install. Stop the service, replace the install
    with a fresh verified extraction of the same archive by the upgrade
-   sequence, start it and list the same sessions. Stop it, delete the install
-   directory, and prove the home and roots are intact. A before-and-after
+   sequence, start it and list the same sessions. Remove it by the uninstall
+   sequence: stop it, run `loopex auth logout` for each provider
+   `loopex auth status` lists, delete the install directory, and prove the
+   home's configuration and roots are intact and that no Loopex keychain
+   item (macOS, `security find-generic-password -s loopex-oauth` over the
+   lane's keychains) or Secret Service item (Linux,
+   `secret-tool search application loopex-oauth` where a session bus
+   exists) remains. A before-and-after
    inventory proves that nothing was written outside the home, the workspace,
    the lane's temporary directory and the provider's transient `/tmp/lxp-*`
    namespaces, which must be gone. On Linux the inventory is `find / -xdev`
@@ -516,8 +556,13 @@ After steps 1 to 3 it runs:
    `loopex service status` reports `classifying` or `serving`, never a session
    admitted before classification completes.
 
-It then completes steps 5 and 6. The record names the operator, the archive
-digest, both providers and each session identifier.
+It then completes steps 5 and 6, whose removal runs `loopex auth logout`
+for every route the account signed in and then asserts that no Loopex item
+remains in that account's keychains. The record names the operator, the
+archive digest, both providers and each session identifier. The release
+runner's `m8-operator` lane hands the account the verified archive and
+retains the record's transcript, checking that it names that archive's
+digest.
 
 **Evidence retained** outside the repository, each with its SHA-256 on the
 closure evidence page: the archive, its `.sha256` file and manifest copy,
