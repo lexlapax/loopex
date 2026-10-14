@@ -245,12 +245,14 @@ trust choice, not project-context admission. Unsupported schemas refuse before
 startup. Configuration deletion is not a recovery procedure. `daemon.readiness`
 is a named addition to `loopex.experimental/4` with its schema, vectors and
 pinned digest updated in the same change. Before 1.0 there is no rollback to an
-earlier build; recovery restores a backup under the matching build with ADR
-0072's commands, with the configuration file kept beside it.
+earlier build; recovery restores a backup under a build that reads its
+format, with ADR 0072's commands for the current format; the M6 and M7 builds
+provide no operator restore, so a root they wrote is adopted. The
+configuration file is kept beside it.
 
 ## Open for the Maintainer
 
-None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic dispositions](../process/agent-context-map.md#disposition-m8-holistic7-2026-10-14) list for it.
+None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 7](../process/agent-context-map.md#disposition-m8-holistic7-2026-10-14) dispositions list for it.
 
 ## Governance Record
 
