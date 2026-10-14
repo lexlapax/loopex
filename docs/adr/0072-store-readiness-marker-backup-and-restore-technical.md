@@ -121,7 +121,9 @@ advances the number:
 | Backup records and marker | `LoopexComposition.StoreAdmin.Codec` (`loopex_store_backup_capture_v1`, `loopex_store_restore_attestation_v1`, `loopex_store_restore_continuation_v1` and the backup layout); `LoopexComposition.RootFormat` (both marker states) |
 
 *Format-1 fixture.* W4 produces one format-1 root once, at M8
-implementation step 3, and no check regenerates it. The producer is
+implementation step 6, once `store backup` exists to write its capture, and
+no check regenerates it; the marker and the retained M7 root's refusals land
+earlier, at step 3. The producer is
 `apps/loopex_cli/test/fixtures/root_format/produce.exs` (new), run by hand
 with `mix run` from the candidate tree and never by a check. In a temporary
 directory it drives the candidate's real runtime, Local Store, Local

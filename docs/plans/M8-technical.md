@@ -144,7 +144,7 @@ in separate worktrees.
 2. **Foundation (W1).** Extract the placement lock primitive; add the
    `ExitStatus` 111 to 115 block once ADR 0071 is accepted.
 3. **Root marker and separation (W4)** under ADRs 0072 and 0037:
-   `RootFormat` with its format-1 fixture test, `Placement.acquire/2` and
+   `RootFormat`, `Placement.acquire/2` and
    `compose/1` admission, the read-only checks, daemon statuses 116 to 119,
    every existing fixture that opens a root brought to a marked root, and the
    whole of `SignIn.Separation`, which W1's `Home` calls at step 4. The
@@ -163,7 +163,9 @@ in separate worktrees.
 6. **Exit statuses 120 to 124 (W1)**, then **daemon helpers (W2)** under
    ADR 0071 decision 10 and its activation counting, adding the
    `activation_permit` member to `host/5`. **Adopt, backup and restore
-   (W4)**, after status 124. **Sign-in rejoin (W5)**: the public reason in
+   (W4)**, after status 124, then the retained format-1 fixture, its
+   producer and `root_format_fixture_test.exs`, which need `store backup`
+   to produce the fixture's capture. **Sign-in rejoin (W5)**: the public reason in
    Core and the protocol, the start-on-demand precheck, the daemon's use of
    statuses 120 to 123 and the hints.
 7. **Failure matrices.** Process races, fault cuts, restart and signal cases
@@ -613,7 +615,7 @@ Concept: [Rollout](M8.md#concept-plan-rollout).
 | Backup layout and its records | New experimental current-format contracts under ADR 0072: `loopex_store_backup_capture_v1`, `loopex_store_restore_attestation_v1` and `loopex_store_restore_continuation_v1` |
 | Restore transition | Accepted ADR 0051 with ADR 0072's two clause amendments: the commands are its operator front end, and the discard attestation form admits an older backup for a lost source. The delivered `restore/2` always leaves the disposable helper job index out of its audit index, as adopt and backup do, while copying it under the complete manifest, so a root holding one commits where it was refused `invalid_current_history` (D29); there is no `restore/3`. ADR 0051's walks and result grammar are unchanged. A latest-form plan's bytes are unchanged |
 | Daemon protocol | `loopex.experimental/4` gains `daemon.readiness` in its ADR 0044 manifest's `methods` inventory, and the `provider_sign_in_required` reason, each with schema, vectors and pinned digests updated in place |
-| Foreground protocol and embedded API | `loopex.experimental/3` gains the `provider_sign_in_required` reason. Under ADR 0073: the `chat_terminal_outcome` definition gains its `failed_reasons` list; `LoopexProtocol.Session.CompactResult` admits the category; `session-snapshot.v3.json`, `standalone-compact-result.v1.json` and `standalone-compact-completion.v1.json` each gain it in `failure.simple.categories`, with vectors; and ADR 0018's Model callback result union widens by `{:error, {:not_dispatched, "provider_sign_in_required"}}`, which every Model adapter's caller must accept. The embedded API is otherwise unchanged except an undocumented `Loopex.Runtime.create_session_with_genesis_detailed/4` and ADR 0072's `LoopexComposition.Restore.restore/3` beside the unchanged `restore/2` |
+| Foreground protocol and embedded API | `loopex.experimental/3` gains the `provider_sign_in_required` reason. Under ADR 0073: the `chat_terminal_outcome` definition gains its `failed_reasons` list; `LoopexProtocol.Session.CompactResult` admits the category; `session-snapshot.v3.json`, `standalone-compact-result.v1.json` and `standalone-compact-completion.v1.json` each gain it in `failure.simple.categories`, with vectors; and ADR 0018's Model callback result union widens by `{:error, {:not_dispatched, "provider_sign_in_required"}}`, which every Model adapter's caller must accept. The embedded API is otherwise unchanged except an undocumented `Loopex.Runtime.create_session_with_genesis_detailed/4` and D29's changed `LoopexComposition.Restore.restore/2`, which now commits a root holding the disposable helper job index it used to refuse; no `restore/3` is added |
 | Configuration | ADR 0049's schema version 1 and resolver; discovery and writers by ADR 0037, the daemon's reader by ADR 0071, the `oauth` form and `vertex` members by ADR 0073 |
 | Credentials | Environment references unchanged; sign-in tokens in the operating system's keyring or an owner-only file under `<home>/auth/`, and gcloud's Application Default Credentials directory, separate by resolved path from every state root, backup, restore destination and available restore source under [ADR 0037's path-separation rule](../adr/0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation), checked before any store command reads or writes those paths, so no backup's complete copy contains them. Separation is that path rule only (D27): no mount table is read, and a mount of any kind that makes credential storage reachable inside a walked tree, or a credential file copied into a root, is outside the guarantee under ADR 0037's [operator limit](../adr/0037-host-configuration-and-path-discovery-technical.md#technical-0037-operator-limit): do not mount credential storage into or over a Loopex state root, backup or restore destination. The `adc` source reads gcloud's own file under ADR 0073's stated exception to its decision 3 (D20) |
 | Existing commands | The foreground `chat` keeps its grammar and exit semantics. `run`, `resume`, `attach` and `sessions` keep theirs; with `--service`, `run` and `resume` start the service on demand |
