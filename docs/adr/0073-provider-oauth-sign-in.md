@@ -130,7 +130,13 @@ new provider protocol.
    one minute. A provider reply granting a token that lives under ten seconds
    is refused as a failed sign-in. A lock serializes
    refreshes across every Loopex process that shares the home, and no
-   process exchanges a refresh token without holding it. A provider
+   process exchanges a refresh token without holding it. A result that
+   arrives after a wait without that lock, such as a model list, a token
+   save that is being retried, a re-login a running service is taking up,
+   or a token from gcloud's file, is used only if, rechecked under the
+   lock, the stored sign-in is still the one it was obtained for, or for a
+   re-login still a signed-in, newer one of the same account and client;
+   otherwise it is dropped and changes nothing. A provider
    that rejects the refresh token leaves the route unusable. Its calls are
    then refused before dispatch, by name: sign-in required. Nothing falls back
    to another route or to an API key. The maintainer decided on 2026-10-13
@@ -188,7 +194,13 @@ new provider protocol.
     cannot be fetched or is malformed or too large, `loopex auth login
     openai` fails by name and keeps nothing, so a signed-in `chatgpt:`
     route always has a list. A refresh whose listing fails keeps the
-    previous list and says so in a diagnostic. A `chatgpt:` model is
+    previous list and says so in a diagnostic. A list belongs to the
+    sign-in that fetched it: a login records its list together with its
+    own token, and a refresh records its list only if, when the list
+    arrives, the route still holds that same account's same sign-in. A list
+    that arrives after a sign-out, another account's sign-in or a newer
+    sign-in is discarded and never brings back or overwrites anything. A
+    `chatgpt:` model is
     admitted, when the configuration is composed and when a session switches
     model, only if the recorded list names it. An unlisted model is refused
     before any call with the route-unavailable refusal an unconfigured
