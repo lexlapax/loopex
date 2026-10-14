@@ -8237,3 +8237,27 @@ All five prerequisite ADRs remain Proposed and M8 remains Open.
    The fixture is produced after `store backup` exists (N26).
 5. **Compatibility row.** The embedded API row names D29's changed
    `restore/2` and no `restore/3` (N27).
+
+<a id="disposition-m8-holistic-2026-10-14"></a>
+### M8 internal holistic review answered — 2026-10-14
+
+An internal holistic review of the whole M8 scope at `b651798c`, after
+review 7's fixes, found findings across ADRs 0037, 0038, 0071, 0072 and 0073
+and the plan pair. The maintainer decided D33 to D39 on 2026-10-14; the other
+items were fixed without a new decision. All five prerequisite ADRs remain
+Proposed and M8 remains Open.
+
+1. **Lock record (D33).** The planned `TZ=UTC0` probe alone would have let a
+   `v0.4.0` process and M8 each read the other's live lock as dead on a host
+   not set to UTC. A versioned v2 lock record keeps D17's exclusion.
+2. **M7 adoption lane (D34).** The M7 write runs before the case is recorded,
+   so model variance stops the case instead of ending the campaign under D30.
+3. **Job index and ADR 0056 (D35).** D29 amends accepted ADR 0056's audit
+   completeness requirement for the derived job index.
+4. **Sign-in deferral (D36).** Decided before the candidate, by leaving the
+   lane out of its pinned case list.
+5. **Credential audience (D37).** Refresh tokens and the code exchange in the
+   ephemeral `ask` and `auth` VMs widen ADR 0039's audience, accepted
+   explicitly.
+6. **Route loss in chat and `ask` (D38).** `sign_in_route_lost`, exit 1.
+7. **Start and status contracts (D39).** Accepted as ADR 0037 lists them.
