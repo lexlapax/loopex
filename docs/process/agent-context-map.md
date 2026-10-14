@@ -8326,3 +8326,20 @@ remain Proposed and M8 remains Open.
    ADR 0032's closed `daemon.stopping` reasons.
 4. **D22.** Its precheck covers what the metadata and floor show; other
    not-ready states refuse after the spawn with the daemon's class.
+5. **`ask` configuration (D54).** `ask` takes `providers` from the selected
+   configuration file, so a sign-in route is reachable from it.
+6. **Choices made in the fixes without a maintainer decision, listed for
+   acceptance:** a sign-in route that does not stop cleanly ending an
+   orderly stop as `sign_in_route_lost`; the classifiers ignoring the slice
+   task's normal exit; an undecodable restore attestation refusing
+   `backup_invalid`; the `m7-adopt` lane requiring `service.state`
+   `stopped`, its script `scripts/m7-adopt-lane.sh` and its `HOME` under the
+   lane's tree; hand removal named as the remedy for a stale lock; the
+   recorder printing an ended lane's skip lines; a torn tail named by a
+   `torn-tail` line; the `m8-operator` verdict words `pass`, `fail` and
+   `withheld`; sign-in custody opened by the host through
+   `CredentialHost.open/3` and `close/1` with a route keeper, which changes
+   the ADR 0048 and 0039 amendment wording; route loss in chat and `ask` as
+   a backstop-style halt; stores 121 and 122 in `ask` mapped to
+   `composition_unavailable`; the compiled `@disabled_sources` list for D43;
+   the model list held in a protected ETS table.
