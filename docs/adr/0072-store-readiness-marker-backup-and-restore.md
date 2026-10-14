@@ -4,10 +4,10 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck; the maintainer's D33 to D35 (time-zone-independent lock and writer-marker records, the `m7-adopt` prerequisites, the ADR 0056 amendment) and an internal review's fixes recorded on 2026-10-14
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
-- **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
+- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendments](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It narrowly amends accepted [ADR 0056](0056-host-helper-ledger-recipe.md#concept) in one clause: the helper job index is left out of ADR 0051's audit (D35). It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
+- **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0056](0056-host-helper-ledger-recipe.md#concept) for the helper ledgers the audit decodes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the physical root path every opener receives, the configuration writer, `doctor` and the readiness report
 - **Prerequisite for:** M8 outcomes 3 and 7, accepted before any marker, adopt, backup or restore command code is written
 
 <a id="concept-adr-0072-decision"></a>
@@ -45,10 +45,11 @@ decided, not proposed:
    before the placement lock, the Store writer marker or any torn-tail repair.
 3. **`store adopt`.** A one-time command marks an existing root that the M7
    source build wrote, or any unmarked current-format root. It changes no
-   record and writes nothing but the marker and the root's own placement
-   lock. Adoption has two phases, decided by the maintainer on 2026-10-13. The
-   operator first states `--old-writer stopped`: no process of the build that
-   wrote the root is running. Adopt then takes the root's placement lock, the
+   record and writes nothing but the marker, the removal of stray marker
+   temporaries and the root's own placement lock. Adoption has two phases,
+   decided by the maintainer on 2026-10-13. The operator first states
+   `--old-writer stopped`: no process of the build that wrote the root is
+   running. Adopt then takes the root's placement lock, the
    same exclusion the service and every root-opening command take, and holds
    it for its whole run. Under the lock it publishes an `adopting` marker,
    which every entry point of this build refuses, so no new start can write
@@ -177,48 +178,59 @@ Adoption then has two phases.
 2. **Audit, then commit.** Adopt records the root's complete manifest and
    reads the whole root with the same decoders and audit ADR 0051's restore
    uses: every Store frame, every session's replay, every receipt and ledger,
-   artifact, resource record and helper log. It then records the manifest
-   again. Only when everything decoded and the second manifest equals the
-   first does it replace the `adopting` marker with the current one in one
-   atomic rename, still holding the lock. That rename is the commit. Adopt
+   artifact, resource record and helper log, and the session catalogue
+   through the host's own reader. It then records the manifest again. Only
+   when everything decoded and the second manifest equals the first does it
+   replace the `adopting` marker with the current one in one atomic rename,
+   still holding the lock. That rename is the commit. Adopt
    then releases the lock and checks nothing more.
 
 A root marked `adopting` is never used. Adopt stops at the first record it
 cannot decode and names it; it refuses a root that is held, that stopped
 uncleanly or that has only the retired catalogue before publishing anything.
+It refuses the same way, as `root_path_mismatch`, a root whose executor
+ledger was bound under another path, such as a symbolic-link alias: this
+build opens every root by its physical path, as ADR 0037 hands it to every
+opener, and could never open that ledger.
 Every failure after the fence, and an adopt killed before the rename, leaves
 `adopting`: `root_changed` when the root changed during the audit, and the
 decode refusal when a record cannot be read. An adopt killed after the rename
 leaves a committed current root. Running adopt again redoes the full audit
 from the start and never trusts an earlier run. The delivered M7 daemon and
-CLI hosts take this same placement lock on the same file, so while adopt holds
-it they are refused like any other start. The `--old-writer stopped`
-statement remains required all the same: the M7 build does not read the
-marker, so once adopt releases the lock, after a refusal or kill that left
-`adopting` or after the commit, an M7 process can open the root again, and an
-embedded or other non-cooperating host may never take the lock at all. `doctor` reports an
-`adopting` root. The maintainer decided on 2026-10-13 (D24) that adoption is
-proved on a real root the M7 build wrote: the `v0.4.0` source build writes
-and stops a root holding a conversation and one helper run, and that root is
-retained as a test fixture that the adopt tests audit and mark and the
-installed lane refuses. Because that fixture is moved into a new place, its
-workspace no longer matches the one the M7 build recorded, so the fixture
-test proves the audit and the marker with the workspace check bypassed. The
-maintainer decided on 2026-10-14 (D26) that the product path is proved as
-well: the full release check builds the `v0.4.0` release, lets it write and
-stop a root on a live workspace with a conversation and a helper run, then
-runs the candidate's own `loopex store adopt --old-writer stopped` on that
-root and opens it with the candidate, which finds the root current and lists
-the conversation. The M7 build never listed the helper's child session in its
+CLI hosts take this same placement lock on the same file. This build writes
+its lock record as `loopex-placement-v2`, whose process identity no longer
+depends on the time zone (D33); an M7 process reads it as unreadable and, by
+its delivered liveness-only rule, refuses while adopt's process lives. The
+`--old-writer stopped` statement remains required all the same: the M7 build
+does not read the marker, so once adopt releases the lock, after a refusal or
+kill that left `adopting` or after the commit, an M7 process can open the
+root again, and an embedded or other non-cooperating host may never take the
+lock at all. `doctor` reports an `adopting` root. The maintainer decided on
+2026-10-13 (D24) that adoption is proved on a real root the M7 build wrote:
+the `v0.4.0` source build writes and stops a root holding a conversation and
+one helper run, and that root is retained as a test fixture that the adopt
+tests audit and mark and the installed lane refuses. Because that fixture is
+moved into a new place, neither its workspace nor its executor ledger's
+directory matches what the M7 build recorded, so the fixture test supplies
+the workspace reference and ledger placement recorded at production and
+proves the audit and the marker, not the product path. The maintainer
+decided on 2026-10-14 (D26) that the product path is proved as well: the full
+release check builds the `v0.4.0` release, lets it write and stop a root on a
+live workspace with a conversation and a helper run, then runs the
+candidate's own `loopex store adopt --old-writer stopped` on that root and
+opens it with the candidate, which finds the root current and lists the
+conversation. The M7 build never listed the helper's child session in its
 session catalogue and adopt adds nothing but the marker, so the child's
 journal and terminal record are checked by a read-only audit over the
-delivered decoders, and every record the M7 build wrote stays byte-identical.
-A real provider need not do what the review asks: when the M7 run did not
-leave exactly one helper run whose child was prompted, the lane reports its
-evidence unavailable before adopting, never a failure of the candidate.
-Running adopt on a root already marked current reports that
-and writes nothing. A root adopt cannot read is recovered the same way as any
-unsupported root: through a backup restored under the build that wrote it.
+delivered decoders, and every record the M7 build wrote stays
+byte-identical. Building the release, the M7 write and a check of the run's
+shape are host prerequisites (D34): a real provider need not do what the
+review asks, and when the run did not leave exactly one helper run whose
+child was prompted, or the build or write fails, the case stops before it
+starts, is recorded not dispatched and runs again on the same candidate; it
+is never a failure of the candidate. Running adopt on a root already marked
+current reports that and writes nothing. A root adopt cannot read stays with
+the build that wrote it; this build never opens it.
 
 <a id="concept-adr-0072-backup"></a>
 ### Backup
@@ -233,9 +245,9 @@ and checks the copy against the source twice. It audits the copy exactly as
 restore will, so a backup that restore would refuse is never published. The
 helper job index, a disposable cache the service rebuilds, is copied like
 every other file and left in place in the source. The audit never indexes
-or decodes it, in every mode: adopt's, backup's and ADR 0051's own restore
-(D29). Backup writes nothing into the source but the removal of stray
-marker temporaries.
+or decodes it, in every mode: adopt's, backup's and, as M8 changes it, ADR
+0051's own restore (D29). Backup writes nothing into the source but the
+removal of stray marker temporaries.
 
 The copy takes every file of the root, under ADR 0051's complete manifest,
 with no exclusion. Provider sign-in tokens and gcloud's Application Default
@@ -288,10 +300,10 @@ attestation and in the plan, and restores the backup exactly as for a latest
 backup. Without the flag nothing changes: the operator states the backup is
 the latest state, as before.
 
-After a committed restore it prints the new root and the ADR 0037 command that
-selects it, and changes no configuration. After an uncertain result it prints
-the transaction and the exact command that re-presents it, which reuses the
-retained plan byte for byte. The command adds no copy, audit or transition of
+After a committed restore it prints the new root's physical path and the ADR
+0037 command that selects it, and changes no configuration. After an
+uncertain result it prints the transaction and the exact command that
+re-presents it, which reuses the retained plan byte for byte. The command adds no copy, audit or transition of
 its own.
 
 <a id="concept-adr-0072-readiness"></a>
@@ -340,10 +352,14 @@ Technical depth: [Compatibility mechanics and alternatives](0072-store-readiness
 
 The private Store ports, session and command identity, public event schemas,
 the daemon's placement rules and ADR 0051's records and outcomes do not
-change, except that `restore/2` now commits a root holding a helper job
-index that it refused before (D29). ADR 0051's plan gains one alternative attestation form, used only
-with `--discard-later-work`; a plan in the existing form is unchanged. The marker, the backup layout and its records are experimental
-current-format contracts, each with its own version. Before 1.0 only the
+change, except that M8 changes `restore/2` to commit a root holding a helper
+job index that it refused before (D29). ADR 0051's plan gains one
+alternative attestation form, used only with `--discard-later-work`; a plan
+in the existing form is unchanged. The placement lock record and the Store
+writer marker take new versions whose process identity no longer depends on
+the time zone; an M7 process reads either as unreadable and never reclaims it
+while its holder lives (D33). The marker, the backup layout and its records
+are experimental current-format contracts, each with its own version. Before 1.0 only the
 current version of each is read. A backup is a directory holding the complete
 copy, ADR 0051's manifest and this record's capture record; there is no
 archive. The store engine and its migration are M9's work under ADR 0036,
@@ -355,40 +371,39 @@ writer. A root that already carries a marker stays readable by the build that
 wrote it; no other build is promised to read it.
 
 <a id="concept-adr-0072-amendment"></a>
-### Amendment of ADR 0051
+### Amendments of ADRs 0051 and 0056
 
-Technical depth: [ADR 0051 amendment text](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-amendment).
+Technical depth: [Amendment text](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-amendment).
 
-ADR 0051 stays byte-for-byte as accepted. On acceptance this record amends
-exactly two of its clauses, and the ADR index records both:
+ADRs 0051 and 0056 stay byte-for-byte as accepted. On acceptance this record
+amends exactly two clauses of ADR 0051 and one of ADR 0056, and the ADR index
+records all three:
 
 1. **Backup CLI.** ADR 0051 says no backup CLI is added. This record adds
    `store backup`, `store restore` and `store adopt` as host commands in front
    of ADR 0051's transition.
 2. **Latest backup only.** ADR 0051 places arbitrary historical snapshot
-   rewind outside its decision, and its plan requires the host to attest that
-   the backup is the latest cut with no activity after it. The maintainer
-   decided on 2026-10-13 to admit an older backup when the host instead
-   attests that later work is deliberately discarded, for a lost source only.
-   Everything else ADR 0051 decides stays: the same machine and workspace, a
-   complete idle backup, an empty destination, exclusion of every other copy,
-   fresh ledger generations, and never redispatching an uncertain effect.
-
-**The job index in restore's audit (D29).** The maintainer decided on
-2026-10-14 that the delivered `restore/2` always leaves the disposable helper
-job index out of its audit index. Its bytes are still copied and stay in
-every manifest, as backup already keeps them, so a current root that holds a
-job index restores through `restore/2`, which today refuses it as
-`invalid_current_history`. The restore command calls `restore/2`; no other
-entry point or option exists. This is not an amendment of an ADR 0051
-sentence: ADR 0051 requires a complete unexcluded manifest and audits Store,
-Local, receipt, artifact and host-ledger history, and none of its sentences
-names the job index, a derived cache that is none of those, or says what the
-audit's index holds. ADR 0051's manifests, copy, comparisons, walks, phases
-and result grammar are unchanged. Earlier versions of this record added a
-`restore/3` beside `restore/2`, first to pass the walks a credential-directory
-guard, which the maintainer's D27 removed with the third amendment it needed,
-and then to carry a job-index option, which D29 replaces.
+   rewind outside its decision, and its supersession, purpose, attestation and
+   audit sentences require the backup to be the latest cut with no activity
+   after it. The maintainer decided on 2026-10-13 to admit an older backup
+   when the host instead attests that later work is deliberately discarded,
+   for a lost source only. Everything else ADR 0051 decides stays: the same
+   machine and workspace, a complete idle backup, an empty destination,
+   exclusion of every other copy, fresh ledger generations, and never
+   redispatching an uncertain effect.
+3. **The job index in restore's audit (D29, D35).** ADR 0056 requires ADR
+   0051's offline audit to enumerate the complete helper namespace, which
+   holds the disposable job index, and lets corrupt helper state prevent
+   restore completion. The maintainer decided on 2026-10-14 that M8 changes
+   `restore/2` to leave the job index out of its audit index (D29), and that
+   this narrowly amends ADR 0056 (D35): the job index is not audited, and a
+   corrupt entry is discarded and rescanned at startup, as the delivered
+   helper already does. Its bytes are still copied and stay in every
+   manifest, so a current root that holds a job index restores through
+   `restore/2`, which today refuses it as `invalid_current_history`. No ADR
+   0051 sentence names the job index or what the audit's index holds, so this
+   amends no ADR 0051 clause; its manifests, copy, comparisons, walks, phases
+   and result grammar are unchanged. There is no `restore/3`.
 
 <a id="concept-adr-0072-open"></a>
 ### Open for the Maintainer
