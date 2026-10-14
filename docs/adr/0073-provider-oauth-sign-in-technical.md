@@ -2038,10 +2038,14 @@ compiled Google client for `real-sign-in-gemini`; `gcloud` for
 dynamic client registration with OpenAI, which the lane performs (D64,
 D65): an attended `auth login openai` followed by `auth logout openai`,
 in the lane's own temporary `HOME`, so the generation floor keeps the
-issued `oaiapp_...` client. A missing prerequisite, an authorize error for
-`dynamic_agent_client`, or a callback that returns no issued client is a
-pre-start stop, recorded `not_dispatched` with the evidence unavailable
-and resumable on the same commit, never a failed case. The
+issued `oaiapp_...` client.
+A missing prerequisite, or any failure of the OpenAI prerequisite, an
+authorize error for `dynamic_agent_client`, a callback that returns no
+issued client and a transport error included, is a pre-start stop:
+`not_dispatched`, evidence unavailable, resumable on the same commit,
+never a consumed failure. A prerequisite killed between its login and
+its logout leaves that temporary home's tokens unrevoked; the operator
+revokes them at OpenAI, a stated lane residual. The
 prerequisite's output is retained with the case and redacted as step
 (1)'s: the lane reads the file store's record after its login, and its
 logout revokes those tokens. Each runs in a temporary `HOME` with

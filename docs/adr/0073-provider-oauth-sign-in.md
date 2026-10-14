@@ -545,10 +545,13 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
    The maintainer decided on 2026-10-14 (D64, refined by D65) that the
    `real-sign-in-openai` lane performs this registration before its case
    starts, by an attended sign-in and sign-out in the lane's own temporary
-   home, which keeps the issued client. OpenAI refusing the registration,
-   or a sign-in that returns no issued client, stops the lane with the
-   evidence unavailable, resumable on the same commit, and is not a failed
-   case. The case's first sign-in then uses that issued client.
+   home, which keeps the issued client. Any failure of this prerequisite,
+   OpenAI refusing the registration or a sign-in that returns no issued
+   client included, stops the lane with the evidence unavailable, resumable
+   on the same commit, and is not a failed case. A prerequisite interrupted
+   between its sign-in and sign-out leaves that home's tokens unrevoked, for
+   the operator to revoke at OpenAI. The case's first sign-in then uses that
+   issued client.
 2. **Google client.** Create Loopex's Google OAuth desktop client in a Google
    Cloud project the maintainer owns, and decide when to pass verification for
    the `cloud-platform` scope. Until the app is verified, users see an

@@ -60,7 +60,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0048 | Host provider routing and credential bindings | Accepted (credential forms, the binding plane's closed member set, which gains the optional `sign_in_routes` member with `model_options` unchanged, ephemeral clause, live rotation and durable `ask`'s resolution of only the bindings its models use, an unused binding's unset value not failing it and every merged name staying in the exclusion set (D60), amended by Proposed 0073 on its acceptance, M8) | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
 | 0049 | Explicit host configuration | Accepted (policy terminal public-event encoding amended by 0052; immutable creation selections amended by 0055; `--config` requirement and `ask`'s `--config` (M8 D54, D57), status record, schema members, durable chat's credential form and failed-terminal reason amended by Proposed 0037, 0071 and 0073 on their acceptance, M8) | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
 | 0050 | Model-port configuration preparation | Accepted (initial-creation invocation and custody amended by 0055) | [Decision](0050-host-configuration-preparation.md#concept) | [Technical depth](0050-host-configuration-preparation-technical.md#technical-depth) |
-| 0051 | Current-format physical restore | Accepted (backup-CLI and latest-backup clauses amended by Proposed 0072 on its acceptance, M8) | [Decision](0051-current-format-physical-restore.md#concept) | [Technical depth](0051-current-format-physical-restore-technical.md#technical-depth) |
+| 0051 | Current-format physical restore | Accepted (backup-CLI, latest-backup and stranded owner-less claim clauses amended by Proposed 0072 on its acceptance, M8, the last by D68) | [Decision](0051-current-format-physical-restore.md#concept) | [Technical depth](0051-current-format-physical-restore-technical.md#technical-depth) |
 | 0052 | Policy interaction public events | Accepted | [Decision](0052-policy-interaction-public-events.md#concept) | [Technical depth](0052-policy-interaction-public-events-technical.md#technical-depth) |
 | 0053 | Current configure request | Accepted | [Decision](0053-current-configure-request.md#concept) | [Technical depth](0053-current-configure-request-technical.md#technical-depth) |
 | 0054 | Compaction activity progress | Accepted | [Decision](0054-compaction-activity-progress.md#concept) | [Technical depth](0054-compaction-activity-progress-technical.md#technical-depth) |
@@ -259,9 +259,11 @@ engine experiment; 0036 keeps the engine selection, migration and capacity
 refusal for the M9 draft. The maintainer accepted that split, the M8 plan's
 proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
 `store adopt`, `store backup` and `store restore`, and on acceptance amends
-exactly two clauses of accepted ADR 0051: its statement that no backup CLI
-is added; and its latest-backup-only restriction, which `--discard-later-work`
-relaxes for a lost source. M8 changes `restore/2` to leave the disposable
+exactly three clauses of accepted ADR 0051: its statement that no backup CLI
+is added; its latest-backup-only restriction, which `--discard-later-work`
+relaxes for a lost source; and its rule that an owner-less claim is
+stranded, which `store restore --abandon` relaxes for a claim directory
+holding nothing or only `owner.tmp` (D68). M8 changes `restore/2` to leave the disposable
 helper job index out of its audit index, as adopt and backup do, while still
 copying it (D29); no ADR 0051 sentence governs that, and it narrowly amends
 ADR 0056's complete helper-namespace audit (D35). It also narrowly amends ADR
