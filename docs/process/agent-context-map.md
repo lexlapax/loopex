@@ -8290,4 +8290,17 @@ remain Proposed and M8 remains Open.
    5,000 ms keyring bound; a login that changes store or source signing the
    route out first; `TZ` reserved among credential names; the `m7-adopt-lock`
    lane; the release runner's archive reuse after a resume; a repeated
-   pre-start stop appending nothing; script lanes' pass lines.
+   pre-start stop appending nothing; script lanes' pass lines; a stopping
+   mark that cannot be written leaving the stop to proceed; one 75,000 ms
+   deadline per starter across returns to `probe`; a crashed classification
+   slice failing the service as `runtime_lost`; `Helper.quiesce/1` waiting on
+   the shared teardown deadline; adopt's rebinding with a fresh ledger epoch
+   and `ledger_path_mismatch` for a ledger bound through neither path,
+   including in backup; the lock primitive removing dead contenders' guard
+   claims; `WriterLock.holder_status/1`; `CredentialCustody.resolve/1`
+   answering `:expired` for custody holding no value past a finite deadline,
+   which amends ADR 0034's reason row; `read/2` reading only the backend the
+   metadata names; keyring children killed by process group; the Google
+   project check's failure line with login exit 0; `sign_in_route_lost` as a
+   new `loopex.ask/1` status-1 code; the time-zone precondition as a
+   pre-start prerequisite of `m7-adopt-lock`.
