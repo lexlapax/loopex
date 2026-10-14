@@ -37,7 +37,7 @@ Technical depth: [Evidence](m9-store-engine-successor-technical.md#technical-pla
 | # | Outcome |
 | --- | --- |
 | 1 | **The engine adapter.** One store application behind the unchanged private store port, passing the store conformance suite and the process and store fault-injection suites |
-| 2 | **Explicit migration.** `loopex store migrate`: offline, idempotent and resumable when interrupted, marker-first and remove-last, from a marked current-format local root, one the `0.5.x` build created or `store adopt` marked, to the new engine. An unmarked root, such as one the M7 source build wrote, is refused by name until it is adopted |
+| 2 | **Explicit migration.** `loopex store migrate`: offline, idempotent and resumable when interrupted, marker-first and remove-last, from a marked current-format local root, one the `0.5.x` build created or `store adopt` marked, to the new engine. An unmarked root, such as one the M7 source build wrote, is refused by name until the `0.5.x` build's `store adopt` marks it |
 | 3 | **Definite capacity refusal.** A named, survivable refusal at the engine's documented bound, never a silent stop |
 | 4 | **Recovery, not cross-version rollback.** Under the [pre-1.0 current-contract rule](../process/agent-context-map.md#disposition-pre1-current-contract-2026-10-02) there is no proof that an earlier release opens or refuses the migrated root. The migrated root carries a new `loopex-root-format` number under ADR 0072's format-number rule, and the way back is moving the migrated root aside and restoring the pre-migration backup under the build that wrote it, which gives up any work done after the backup |
 
