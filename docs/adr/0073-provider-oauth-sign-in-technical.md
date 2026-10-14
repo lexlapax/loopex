@@ -170,8 +170,8 @@ stored.
 - `subject_digest` is the SHA-256 of the issuer, a NUL and the subject.
 - `account_label` is the provider's e-mail with the local part masked after
   its first character. It appears only in `auth status`.
-- `state` is `signed_in`, `sign_in_required`, `sign_in_incomplete` or
-  `revocation_unconfirmed`. Only a lock holder that finds the pair
+- `state` is `signed_in`, `sign_in_required` or `sign_in_incomplete`. Only
+  a lock holder that finds the pair
   inconsistent under the [pairing rule](#technical-adr-0073-pairing) writes
   `sign_in_incomplete`.
 - `models` is required on the `chatgpt` route and absent on every other
@@ -210,7 +210,9 @@ stored.
   copied into a root, is outside this guarantee, under ADR 0037's
   [operator limit](0037-host-configuration-and-path-discovery-technical.md#technical-0037-operator-limit).
   ADR 0051's complete manifest excludes no file.
-- `auth/` is created with mode `0700`. Every credential-store file in it,
+- The store creates `auth/` with mode `0700`, and checks its mode and owner,
+  before any lock acquisition, so the lock primitive's `File.mkdir_p!`
+  (`placement.ex` :72) never creates it under the umask. Every credential-store file in it,
   `*.secret`, `*.json`, `*.floor`, `host-id` and their `*.tmp` siblings, is
   `0600`, owned by the effective user. A reader of one of those files refuses
   a symlink anywhere on its path, a different owner, or a wider mode, with
@@ -340,21 +342,64 @@ exactly that backend. There is no silent migration between backends.
 exact algorithm: an `O_EXCL` lock file, owner process incarnation, stale
 reclamation under the directory guard, and an inode-checked owner handle. The
 primitive moves into a shared private module both callers use; no second lock
-algorithm is written. The lock is held only across read, exchange, write, so
-a holder can keep it for one 30,000 ms exchange plus the write, longer than a
-waiter's bound. Acquisition waits at most 10,000 ms, polling every 100 ms,
-then fails with `sign_in_lock_busy`. No refresh token is ever exchanged
-without the lock. A `sign_in_lock_busy` at `auth login` or `auth logout`
-exits 73. A `sign_in_lock_busy` in a refresher exchanges nothing, writes
-nothing, leaves custody as it was and retries on the transient schedule of
-refresher step 5; on the next attempt it rereads the pair under the lock and
-usually adopts what the other holder wrote. In step 7 it retries at the next
-30 s poll. The lock is always needed:
+algorithm is written. No Loopex-stored refresh token is exchanged without
+the lock, because OpenAI's
+[token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference)
+rotates it on every refresh and a daemon, a foreground chat, an `ask` and
+`auth` may share one home.
 
-- OpenAI's [token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference)
-  rotates the refresh token on every refresh and tells clients to serialize
-  refreshes.
-- A daemon, a foreground chat, an `ask` and `auth` may share one home.
+- *Hold.* The lock is held across read, exchange and write, so a holder
+  keeps it for up to one 30,000 ms exchange plus the write. A logout that
+  meets such a refresh for longer than its 10,000 ms wait exits 73 having
+  changed nothing.
+- *Acquisition.* A refusal as active is retried every 100 ms; at 10,000 ms
+  the caller gives up with `sign_in_lock_busy`. The primitive's call can
+  itself outlast that (up to 2,000 guard attempts, each `ps` probe bounded
+  at 5,000 ms, `placement.ex` :287, :513), so it runs in a worker the caller
+  stops waiting for at the deadline; a late success is released at once,
+  and the worker is never killed inside the guard. `placement_unverifiable`
+  and `placement_lock_failed`, a permanent malformed guard included
+  (:344-348), are `sign_in_lock_busy` too. It exits 73 in `auth`; a
+  refresher exchanges nothing, writes nothing, leaves custody as it was and
+  retries on step 5's schedule, and step 7 at its next poll.
+- *Owner.* The primitive's owner is the operating-system process
+  (`current_owner/1` records `System.pid()`, :414-421), a lock is stale only
+  when that process is gone (:482-489), and an acquirer in the same process
+  is refused as active (:160-162). So `SignIn.Route` traps exits, takes and
+  releases the lock inside `try ... after`, runs each exchange in a
+  separate linked process, and has a 60,000 ms shutdown timeout, longer
+  than one exchange plus the write. A `SignIn.Route` that exits other than
+  by its composition's stop ends its host: the daemon's
+  `sign_in_route_lost` (123), and foreground chat and `ask` likewise.
+  Residual: a `SignIn.Route` killed while holding the lock in an embedding
+  VM that survives strands the lock until that VM exits.
+
+<a id="technical-adr-0073-fence"></a>
+**Fence.** A result obtained without the route's lock (a pending write's
+record, an ADC access token, a refresh-time or adoption-time model list,
+step 7's nomination) belongs to the *tuple* it was obtained for: the route,
+`client_id`, `subject_digest` and generation `G` of the pair it came from.
+It is published by this rule only:
+
+1. Take the lock. `sign_in_lock_busy` publishes nothing and changes
+   nothing; the producer retries as it states.
+2. `Store.read/2`, completing a `roll_forward` first and judging the
+   completed pair. A pair at or below the
+   [generation floor](#technical-adr-0073-generation-floor) is judged
+   `:absent`, because `auth logout` writes the floor before it deletes.
+3. The *same tuple*, in any `state`, publishes the result. A consistent
+   *newer* pair, at a greater generation with the same subject and client
+   and `state: signed_in`, is adopted and the result discarded: custody
+   rotates to its token, a stopped refresh schedule restarts from step 4,
+   and for `chatgpt` one `model_list` runs under this fence; an `adc` pair
+   stores no token, so its adoption takes the newer tuple and refreshes
+   again on step 5's schedule. *Anything else* discards the result, writes
+   nothing and rotates custody to `nil`: `:absent` also stops the refresh
+   schedule, `inconsistent` names `sign_in_incomplete`, another subject or
+   client `sign_in_account_changed`, and a newer pair not `signed_in`
+   stops refreshing as step 6 does.
+4. Unlock only after custody and any write are done, so the next lock
+   holder sees them.
 
 **Exchange executors.** Every token-endpoint exchange posts a fixed form to a
 compiled HTTPS endpoint, with a 30,000 ms bound. That covers code exchange,
@@ -424,78 +469,53 @@ registry and custody edges and joins their reverse cleanup.
    under a fresh `CredentialToken` in `provider_routes`, exactly like an `env`
    route. The custody and token modules are unchanged; their existing
    `rotate/3` and `:expired` result are what this record uses.
-4. It schedules the next refresh at the window's start. On each refresh it
-   takes the lock and rereads the pair. If another process already advanced
-   the generation with a later expiry, the same subject and the same client,
-   it adopts that record without contacting the provider, rotating custody
-   before it unlocks. If the pair is
-   `inconsistent`, or names another subject or client, it exchanges nothing,
-   writes nothing, rotates custody to `nil` and names `sign_in_incomplete` or
-   `sign_in_account_changed` in its diagnostic; it never writes over another
-   account's secret. Otherwise it exchanges, merges the response under
+4. It schedules the next refresh at the window's start. Each refresh first
+   calls `Separation.check(context)` on its own context; a refusal exchanges
+   nothing, writes nothing, rotates custody to `nil` and names
+   `auth_root_overlap` with the pointer, so a provider never rotates a
+   refresh token the store would refuse to keep (at start the same refusal
+   fails composition, which the daemon reports as ADR 0037's `111`). It then
+   takes the lock, rereads the pair and judges it as the
+   [fence](#technical-adr-0073-fence) does with its held tuple: a newer pair
+   is adopted without contacting the provider, and anything else exchanges
+   nothing and never writes over another account's secret. For the same
+   tuple it exchanges, merges the response under
    [the refresh-response rules](#technical-adr-0073-refresh-merge), writes,
-   rotates custody and only then unlocks, so no other process's logout or
-   login can land between the write and the rotation. The exchange runs
-   while the lock is held, so its result is published under the same lock
-   that its reread took and needs no further fence. For `chatgpt` it then
-   runs one `model_list` with the access token it just wrote, whose result
-   is published only through the
-   [listing fence](#technical-adr-0073-listing-fence).
+   rotates custody and only then unlocks; the exchange runs inside that one
+   lock hold and needs no fence. For `chatgpt` it then runs one
+   `model_list` with the access token it wrote, published through the
+   fence.
 
    *Write failure after a successful exchange.* The provider may already
    have rotated the refresh token (OpenAI does on every refresh), so the
    merged record is the only usable grant. When `write/4` fails after a
-   successful exchange (`credential_store_write_failed`,
-   `credential_store_unavailable`, `credential_store_unsafe` or
-   `auth_root_overlap`), the refresher:
-   - rotates custody to the new access token, with the deadline from this
-     exchange's `t0`;
-   - keeps the merged record, refresh token included, only in its own
-     `:sensitive`, trace-excluded process state, never in a message,
-     diagnostic or other process;
-   - releases the lock and retries only the write on step 5's schedule,
-     never exchanging again while a write is pending. The pending record is
-     fenced to the tuple it was exchanged from: the route, `client_id`,
-     `subject_digest` and generation `G` of the pair the exchange's reread
-     returned. Each retry takes the lock and rereads the pair. It writes the
-     pending record at the next generation under the write protocol only
-     when `Store.read/2` returns `{:ok, record}` whose route, `client_id`,
-     `subject_digest` and generation are exactly that tuple; a metadata
-     `state` of `sign_in_required` at `G` still matches, because that state
-     is what another process writes after presenting the stored, already
-     rotated refresh token. Any other result discards the pending record,
-     refresh token included, and never recreates or overwrites a side: a
-     consistent pair at a greater generation with the same subject and
-     client and `state: signed_in` is adopted, with custody rotated before
-     unlocking. Every other result rotates custody to `nil` before
-     unlocking: `:absent`, as after `auth logout`, also stops the refresh
-     schedule as step 7 does for a deleted metadata file; an `inconsistent`
-     pair names `sign_in_incomplete`; another subject or client names
-     `sign_in_account_changed`; a greater generation whose `state` is not
-     `signed_in` stops refreshing as step 6 does, without writing. No
-     `model_list` runs while a
-     write is pending; for `chatgpt` the listing runs once the pending write
-     succeeds, fenced to the generation that write produced;
-   - names `sign_in_store_write_pending` with the failing class in one
-     bounded host diagnostic line per attempt, `loopex: provider sign-in
-     store write pending for route <route>: <class>`, and nothing else.
+   successful exchange, with any store class or `auth_root_overlap`, the
+   refresher rotates custody to the new access token with the deadline from
+   this exchange's `t0`, keeps the merged record only in its own
+   `:sensitive`, trace-excluded process state, releases the lock, and
+   retries only the write on step 5's schedule, never exchanging again and
+   running no `model_list` while the write is pending. Each retry is
+   published through the fence with the tuple the exchange was judged on;
+   publishing writes the pending record under the write protocol and, for
+   `chatgpt`, then lists. The retry also counts as the same tuple an
+   `inconsistent` pair whose metadata names that tuple and whose record is
+   undecodable, which is what its own Secret Service write cut short leaves;
+   a record its own write left at `G + 1`, as after a failed keychain
+   read-back, is a `roll_forward`, completed and adopted as newer. Each
+   attempt writes one bounded host diagnostic line, `loopex: provider
+   sign-in store write pending for route <route>: <class>`
+   (`sign_in_store_write_pending`).
 
-   A pending record's next scheduled refresh waits for the write: if the
-   access token's deadline passes first, resolution returns `:expired`. If
-   the process stops before a write succeeds, the rotated refresh token is
-   lost with it, and the route needs `auth login` again once the provider
-   refuses the stored one; this is the residual of the threat model's
-   refresh-token reuse row. Another process that refreshes meanwhile with
-   the stored, already rotated refresh token receives `sign_in_required` and
-   may write that state; a later successful pending write at the next
-   generation restores `signed_in`.
-   Before every exchange the refresher calls `Separation.check(context)` on
-   its own context. A refusal exchanges nothing, writes nothing, rotates
-   custody to `nil` and names `auth_root_overlap` with the pointer in its
-   diagnostic, so a provider never rotates a refresh token that the store
-   would then refuse to keep. At start the same refusal fails composition,
-   which the daemon reports as ADR 0037's `111` with class
-   `auth_root_overlap`.
+   If the access token's deadline passes while the write is pending,
+   resolution returns `:expired`. If the process stops first, the rotated
+   refresh token is lost and the route needs `auth login` again; this is
+   the residual of the threat model's refresh-token reuse row. Another
+   process that refreshes meanwhile with the stored, already rotated
+   refresh token receives `sign_in_required` and may write that state at
+   `G`, which the pending write then replaces at the next generation. An
+   `auth logout` meanwhile revokes only that stored, already rotated token,
+   so it may exit 74 `revocation_unconfirmed`; the pending record is then
+   discarded unrevoked, and its grant lapses at the provider.
 5. A transient failure (`provider_unreachable`) retries with delays of 5, 15,
    30, 60, 120, then every 300 s. The custody keeps the old token until its
    `expires_at`. After that, resolution returns `:expired` and the sender
@@ -505,34 +525,14 @@ registry and custody edges and joins their reverse cleanup.
    `provider_sign_in_required`. It writes `state: sign_in_required`, writes one bounded host
    diagnostic line, `loopex: provider sign-in required for route <route>; run
    loopex auth login <provider>`, and stops refreshing.
-7. Every 30 s it reads only the metadata file, and it keeps doing so after
-   step 6 or a logout has stopped refreshing. It adopts a consistent pair
-   whose generation is greater than the one it holds, whose
-   `subject_digest` equals the one it holds, and whose `client_id` equals
-   the one it holds and, when a floor file exists, the floor's `client_id`.
-   That unlocked read only nominates the pair; the decision is taken again
-   under the lock, because a logout or another login can land between the
-   read and the lock. Under the lock one `Store.read/2` must return
-   `{:ok, record}` whose generation is still greater than the one it holds,
-   whose `subject_digest` and `client_id` still equal the ones it holds and
-   the floor's, and whose metadata still says `state: signed_in`; custody
-   then rotates to that record's token before the lock is released, the
-   refresh schedule restarts from step 4 if it had stopped, and for
-   `chatgpt` one `model_list` runs with that token under the
-   [listing fence](#technical-adr-0073-listing-fence). A locked
-   `roll_forward` result is completed first, as the recovery rule requires,
-   and the completed pair is judged. A locked reread that fails these
-   conditions adopts nothing and is classified by what it
-   found: `:absent` as a logout below, another subject or client as
-   `sign_in_account_changed`, `inconsistent` as `sign_in_incomplete`, and
-   a pair not `signed_in` as step 6, each leaving custody `nil`. This
-   is how a fresh `auth login` reaches a running service, after a logout
-   too: the [generation floor](#technical-adr-0073-generation-floor) makes the new
-   login's generation greater than anything the service held. A different
-   subject or client is refused: custody stays `nil` and the diagnostic names
-   `sign_in_account_changed`. A deleted metadata file, which is what `auth
-   logout` leaves, rotates custody to `nil` within that 30 s and stops the
-   refresh schedule.
+7. Every 30 s it reads only the metadata file, and keeps doing so after
+   step 6 or a logout stopped refreshing. When the file differs from its
+   last read, it applies the [fence](#technical-adr-0073-fence) with no
+   result of its own. This is how a fresh `auth login` of the same account
+   and client reaches a running service, after a logout too: the generation
+   floor makes the new login's generation greater than anything the service
+   held. A logout's deleted metadata leaves custody `nil` within that 30 s,
+   and a different subject or client stays refused until a restart.
 
 <a id="technical-adr-0073-custody-deadline"></a>
 **Custody deadline.** The custody's deadline keeps a safety margin, the
@@ -558,7 +558,8 @@ expires_at  = t0 + lifetime_ms - skew_ms
   a malformed reply: a login writes nothing and exits 68; a refresh writes
   nothing, leaves custody as it was, and retries on the transient schedule of
   step 5.
-- A token read from the store at start has no exchange time. Its lifetime is
+- A token read from the store, at start or by an adoption, has no exchange
+  time. Its lifetime is
   the remaining wall-clock time, `remaining_ms = access_expires_at - now`, and
   `expires_at = t0 + remaining_ms - min(60_000, div(remaining_ms, 4))` with
   `t0` read at that moment. A non-positive remainder gives a deadline already
@@ -591,78 +592,51 @@ process and the companion; no new trace selector exists.
   the durable host VM; the in-host executor in the ephemeral profile and in
   the `auth` command, under ADR 0039's stated audience. The refresher runs it
   after each successful refresh, a pending write's success included, and
-  each step 7 adoption; `auth login openai`
+  each adoption; `auth login openai`
   runs it once with the newly exchanged access token after ID-token
   verification and before `Store.write/4`, so the login's first write
   already carries the list.
 - *Validation.* The response is one JSON object whose `data` is a list; the
   kept entries are those with `visibility == "list"`. Each kept `id` matches
   `\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\z`, at most 128 bytes; at most 256 ids
-  are kept, sorted and without duplicates. More than 256 listed ids, an
+  are kept, sorted and without duplicates. No listed id, more than 256, an
   invalid id, a body over 1,048,576 bytes or a malformed body is
-  `sign_in_failed`; a transport failure,
+  `sign_in_failed`. Refusing an empty list is this record's reading of
+  D25's required list: an account that lists no model has no usable
+  `chatgpt:` route. A transport failure,
   timeout or non-2xx status is `provider_unreachable`. No raw body, header or
   error text crosses the private channel or reaches a diagnostic.
 - *Record at login* (D25). The list is part of `auth login openai`. The
   login's `Store.write/4` writes the metadata with the validated list as
   `models`. A login whose `model_list` fails writes no token record, no
   metadata and no floor change, and exits with the failure's class: 68
-  `sign_in_failed` for a malformed body, an invalid id, more than 256
-  listed ids or a body over 1,048,576 bytes, and 72 `provider_unreachable`
+  `sign_in_failed` for a malformed body, an empty list, an invalid id, more
+  than 256 listed ids or a body over 1,048,576 bytes, and 72 `provider_unreachable`
   for a transport failure, the 30,000 ms timeout or a non-2xx status. The
   exchanged grant is discarded with the `:sensitive` exchange process and is
   not revoked: the provider-side grant is left to expire or rotate, which is
   acceptable because no copy of it survives in Loopex. A rerun of the login
   repeats the whole flow. A re-login over an existing sign-in that fails
   this way leaves the earlier pair, list included, exactly as it was.
-  The login's list is bound to its own grant by construction: it was fetched
-  with the access token the login then writes, and the login's write under
-  the lock publishes that token and that list together as one new pair at
-  the next generation of the write protocol. A logout or another login that
-  lands while the login's listing is in flight is therefore superseded by
-  the login's write, as any earlier pair is; nothing of it is reused.
-- *Record at refresh.* A success is published only through the
-  [listing fence](#technical-adr-0073-listing-fence), which writes the list
-  into the metadata's `models` member under the route's lock with the
-  atomic metadata write, keeping the metadata's generation, subject, client
-  and every other member, so the pairing is unaffected. A failure changes no
-  stored state, no custody and no token,
-  keeps the previous list, which is never replaced by `null` or removed, and
-  names `sign_in_model_list_stale` in one bounded host diagnostic line,
+  The login writes its list with the token it was fetched with, as one pair
+  under the lock, so a logout or login that landed during the listing is
+  superseded like any earlier pair. A same-account login cut after its
+  record write and completed by `roll_forward` keeps the previous sign-in's
+  list, because the record carries none, until the next refresh lists.
+- *Record at refresh.* A refresh-time or adoption-time listing runs after
+  the lock is released, so a success is published through the
+  [fence](#technical-adr-0073-fence) with the tuple of the pair whose access
+  token it presented. Publishing writes the list into the metadata's
+  `models` with the atomic metadata write, keeping every other member, and
+  updates `SignIn.Route`'s in-memory list. A failure, including
+  `sign_in_lock_busy` at the fence, changes no stored state, custody or
+  token, keeps the previous list, never `null`, and names
+  `sign_in_model_list_stale` in one bounded host diagnostic line,
   `loopex: model list refresh failed for route chatgpt: <class>; keeping
-  the previous list`, where `<class>` is `sign_in_failed`,
-  `provider_unreachable` or, when the fence's lock cannot be taken,
-  `sign_in_lock_busy`. The next successful refresh or adoption retries
-  it. A refresh's own token write, a pending write and a `roll_forward`
-  carry the existing metadata's `models` unchanged; only a login and the
-  listing fence write a list.
-- <a id="technical-adr-0073-listing-fence"></a>*Listing fence.* A
-  refresh-time or adoption-time listing runs after the lock is released and
-  can take up to 30,000 ms, during which another process may sign the route
-  out, sign in another account, or write a newer generation of the same
-  account with its own list. So the refresher captures, when it starts the
-  listing, the route, `client_id`, `subject_digest` and generation `G` of
-  the pair whose access token the listing presents. When a validated list
-  returns, it takes the route's lock and rereads with `Store.read/2`. It
-  writes the list only when that returns `{:ok, record}` whose route,
-  `client_id`, `subject_digest` and generation are exactly the captured
-  tuple, the metadata still says `state: signed_in`, and its own held
-  generation is still `G`; it then updates `SignIn.Route`'s in-memory list
-  under the same condition, before unlocking. Any other result discards the
-  list: nothing is written, no metadata is recreated, the newer pair's list
-  and state are left as they are, and the in-memory list is not changed.
-  The process that wrote the newer pair runs its own listing, and a
-  same-account newer generation reaches this refresher through step 7's
-  adoption, which lists again. Two listings fenced to the same generation,
-  by two processes that both hold it, may both be written; each is that
-  account's list for that generation, and the later write stands. A
-  failed listing is never fenced, because it publishes nothing. An
-  operating-system process killed before the list returns, while waiting
-  for the lock, or before the metadata rename leaves the previous list; the
-  rename leaves either the old or the new metadata file, both naming the
-  same generation, subject and client, and the lock is reclaimed as stale.
-  In the daemon a `SignIn.Route` that exits is the fail-stop
-  `sign_in_route_lost`, so its operating-system process ends too.
+  the previous list`; the next successful refresh or adoption retries it.
+  A refresh's own token write, a pending write and a `roll_forward` carry
+  the existing `models` unchanged; only a login and the fence write a list.
+  A process killed before the metadata rename leaves the previous list.
 - *Admission.* `SignIn.Route` holds the list it last recorded or read. The
   configured model and maintenance model are checked when composition
   resolves routes (`LoopexComposition.DurableOptions`, where an unbound
@@ -693,7 +667,8 @@ process and the companion; no new trace selector exists.
   from every other list the test serves. Before the release, in another OS
   process, the test runs (a) `auth logout openai`; (b) `auth logout openai`
   then `auth login openai` for account B; (c) a refresh of A by a second
-  refresher, which writes `G + 1` and its own list. After the release, R's
+  refresher, which writes `G + 1` and its own list, served again to R's
+  listing after R adopts `G + 1`. After the release, R's
   list is never written: in (a) `auth/` holds no metadata or record and the
   floor is the one the logout wrote, in (b) and (c) the metadata and record bytes equal
   those the other process wrote, and in all three R's in-memory list,
@@ -705,7 +680,7 @@ process and the companion; no new trace selector exists.
   The fake server's answers carry no token, and the test asserts that no
   retained output and no diagnostic line contains any token the fake
   server issued. `auth_command_test.exs`: a login whose `model_list` fails, once
-  malformed and once over 256 ids (exit 68) and once timing out and once
+  malformed, once empty and once over 256 ids (exit 68) and once timing out and once
   answering 503 (exit 72), writes no record, metadata or floor, both over an
   empty `auth/` and over an existing sign-in whose pair and floor stay byte
   for byte. `sign_in_store_test.exs`: a `chatgpt` metadata file without
@@ -728,12 +703,13 @@ pool, cleanup and selected-value guard is unchanged.
 **Daemon and service.**
 
 - Composition refuses start with new exit statuses. ADR 0071 takes 111 to
-  115, retiring 114, and ADR 0072 takes 116 to 119, so these follow at 120:
+  115, retiring 114, and ADR 0072 takes 116 to 119 and 124, so these
+  follow at 120:
   - `provider_sign_in_required` (120);
   - `credential_store_unavailable` (121);
   - `credential_store_unsafe` (122).
   `sign_in_route_lost` (123) is a fail-stop when a running `SignIn.Route` edge
-  exits, like `custody_lost`.
+  exits, like `custody_lost`, as the refresh lock's owner rule requires.
 - `LoopexDaemon.ExitStatus`'s moduledoc range and the `fetch/1` and
   `classes/0` specs extend through 124. Today the moduledoc says 65 through
   110 while both specs say `65..111`
@@ -819,9 +795,10 @@ loopex auth logout <provider> [--local-only] [--config FILE]
     and stored in `<home>/auth/host-id`, mode `0600`.
   - The callback returns the issued `oaiapp_...` client ID. It is stored in
     metadata and reused for every later authorize, refresh and revocation.
-    When the route's [generation floor](#technical-adr-0073-generation-floor)
-    names an issued client, as after `auth logout`, the authorize request
-    uses that `client_id` instead of `dynamic_agent_client`. Should the
+    The authorize request uses the metadata's `client_id` when metadata
+    exists, otherwise the
+    [generation floor](#technical-adr-0073-generation-floor)'s, as after
+    `auth logout`, and `dynamic_agent_client` only when neither exists. Should the
     callback still return a different client, the login writes under it at
     a generation above the floor, and a running service refuses that pair
     as a changed client, named `sign_in_account_changed`, until restarted.
@@ -1130,26 +1107,12 @@ so the service's environment cannot redirect it.
 through the host's exchange executor. Loopex never writes gcloud's file, and
 an unchanged Google refresh token stays valid, so concurrent processes may
 refresh independently. The exchange therefore runs without the route's lock,
-and its result is published through a fence: before the exchange the
-refresher captures the metadata's `client_id`, `subject_digest`,
-`adc_digest` and generation; after it, it takes the route's lock, rereads
-the metadata, and only under the lock rotates custody or writes metadata,
-then unlocks. It publishes only when the reread metadata still names
-`backend: adc` and `state: signed_in`, and either equals the captured
-`client_id`, `subject_digest`, `adc_digest` and generation, which is the
-ordinary case below, or has a greater generation with the captured
-`subject_digest` and the `adc_digest` of the file this refresh read, which
-means another process already recorded that file: custody then rotates and
-nothing is written. A reread whose metadata is absent, as after `auth
-logout`, names another backend, subject or client, or is not `state:
-signed_in` publishes nothing: the exchanged access token is dropped, no
-metadata is recreated or overwritten, custody rotates to `nil`, and the
-case is named as step 7 names it. A greater generation recording a
-different `adc_digest` drops the token, leaves custody as it was and
-refreshes again at once from the file as it now is. A
-`sign_in_lock_busy` drops the token, leaves custody as it was and retries
-on step 5's schedule; nothing is lost, because Loopex never holds the only
-copy of an ADC grant.
+and its access token is published through the
+[fence](#technical-adr-0073-fence) with the tuple of the metadata read
+before the exchange; publishing rotates custody and handles the cases
+below. A `sign_in_lock_busy` drops the token and retries on step 5's
+schedule; nothing is lost, because Loopex never holds the only copy of an
+ADC grant.
 
 - **Unchanged grant** (`adc_digest` equals the metadata's): the subject is
   the stored one, and an absent ID token changes nothing.
@@ -1414,11 +1377,11 @@ Concept: [Observable consequences](0073-provider-oauth-sign-in.md#concept-adr-00
 | Authorization-code interception | PKCE S256, a fresh `state` and nonce, a listener bound to `127.0.0.1` before the browser opens, an exact path, and one request only | A same-user process racing the port can at most receive a code it cannot redeem without the verifier |
 | Device-code phishing | `verification_uri` shown only for allowlisted provider hosts | — |
 | Endpoint substitution | Compiled HTTPS endpoints per profile. No configuration or environment override; a test-only fake server is injected under `Mix.env() == :test` only | — |
-| Refresh-token reuse race | Cross-process lock, no exchange without it, re-read before exchange, generation adoption; a failed record write after a successful exchange keeps the new record in the refresher's `:sensitive` state and retries only the write | A crash after the provider's rotation and before the record write, or a stop while that write is still pending, loses the new token, so the route needs sign-in again; a crash after the record write is recovered by `roll_forward` |
+| Refresh-token reuse race | Cross-process lock, no exchange of a Loopex-stored refresh token without it, re-read before exchange, generation adoption; a failed record write after a successful exchange keeps the new record in the refresher's `:sensitive` state and retries only the write | A crash after the provider's rotation and before the record write, or a stop while that write is still pending, loses the new token, so the route needs sign-in again; a crash after the record write is recovered by `roll_forward` |
 | Leak into logs, traces or crash dumps | `:sensitive` custody, refresher and exchange processes; `format_status` redaction as in `CredentialCustody`; tracing exclusion; the companion executor in durable hosts; logger off and crash dumps disabled in `auth`; closed failure classes only | ADR 0039's host-VM audience in the ephemeral profile and `auth` |
 | Provider echoes a token | The existing exact-match echo guard on the access token | Split or encoded echoes, as today |
 | Forged identity token or substituted signing key | `RS256` only, keys only from the issuer's compiled JWKS URI, closed header, bounded rotation refetch | A compromise of the provider's own keys |
-| A delayed result applied to a sign-in it no longer belongs to | Every result that returns after an unlocked wait is published only under the route's lock after a reread that still names the route, client, subject and generation it was obtained for, or for step 7's adoption a newer signed-in generation of the same subject and client: the [listing fence](#technical-adr-0073-listing-fence), a pending write, step 7's adoption and the ADC exchange; a refresh exchange runs and publishes under one lock hold, and custody rotates before unlock | A token already in custody stays usable until the next 30 s poll after a logout, as the concept states |
+| A delayed result applied to a sign-in it no longer belongs to | One [fence](#technical-adr-0073-fence) publishes every result obtained without the lock (a pending write, an ADC exchange, a model listing, step 7's nomination) only for its own tuple, adopting instead a newer signed-in generation of the same subject and client; a refresh exchange runs and publishes under one lock hold, and custody rotates before unlock | A token already in custody stays usable until the next 30 s poll after a logout, as the concept states |
 | A crash between the two halves of a write | The pairing rule refuses both mismatch directions; same-account `roll_forward` under the lock | A different-account cut needs `auth login` again |
 | Impersonating another client | Only Loopex's own client identities, except the `adc` source's client read from gcloud's file under the maintainer's exception; source scan for forbidden ReqLLM options | — |
 | Runaway spend | The plan's per-app weekly cap; credit overflow only if the user allows it; the Google project's budgets | Operator-owned |
@@ -1440,10 +1403,10 @@ use temporary homes and never touch a real keyring.
 | `apps/loopex_llm_reqllm/test/sign_in_routes_test.exs` | The binding grammar's alternatives, pointers and classes. `oauth` on existing routes and `env` on sign-in routes refuse. `vertex` project and location vectors. Per-route sealed headers, including the `vertex` request's exact `x-goog-user-project` on the companion and in-process callers, and a `vertex` call with an empty token, project or region refused before ReqLLM is called. `chatgpt` model admission at composition and switch. The `chatgpt` mapping never sends rejected members and always streams with `store: false` |
 | `apps/loopex_llm_reqllm/test/sign_in_id_token_test.exs` | Against test RSA keys generated with `:public_key`: a valid RS256 token verifies and yields the subject digest; a forged signature, an altered payload, `alg` `none`, `HS256` signed with the public key as an HMAC secret, `ES256`, and `jku`, `jwk`, `x5u`, `x5c` or `crit` headers are refused; wrong issuer (both Google forms accepted), wrong or multi-member audience, and for the `adc` source an audience equal to the compiled Google desktop client or to any client other than the ADC file's `client_id`, while the file's own `client_id` verifies, expiry, `iat` in the future and nonce mismatch are refused; an unknown `kid` refetches once and verifies after rotation, a still-unknown `kid` is refused, and a second unknown `kid` within 60 s does not refetch; an over-bound or non-RSA key set, a redirect from the JWKS URI and a fetch timeout are refused, the last as `provider_unreachable`; a profile's key set never verifies another profile's token |
 | `apps/loopex_composition/test/sign_in_store_test.exs` | File backend: modes, owner, symlink refusal on `*.secret`, `*.json`, `*.floor` and `host-id`; stale `.tmp` cleanup; a refresh that creates the lock namespace under the process umask followed by a successful `Store.read/2` and `auth status`. Generation floor: its closed grammar, an invalid floor refused `credential_store_unsafe`, logout writing the maximum generation and never lowering it, and the next write's generation above it. The metadata path never reads a secret. The pairing table, every row: metadata ahead of the record; the record ahead by one for the same account (`roll_forward`) and for a different subject or client (`inconsistent`); ahead by two; each side alone; an undecodable record, including a truncated Secret Service value. Write cuts after the record and before the metadata, on the file backend and on each keyring backend through its recording fake executable, for a same-account refresh and for a login of a different account over an existing one; a failed keyring read-back exits `credential_store_write_failed` with the metadata unchanged; `roll_forward` acted on only under the lock. **Separation before backend access:** each case builds the real sign-in context map over real temporary directories, the shape `LoopexCli.Home.sign_in_context/1` returns, with no test-only option or hook in the store; `Separation.check/1` passes on it, and the filesystem is then changed so the auth directory lies inside a listed root (a symbolic link replacing an ancestor of the auth directory) or contains one (the root's path created under it). `write/4` then returns `{:error, {:auth_root_overlap, pointer}}` with that root's pointer; the file backend creates no file, temporary or directory, and the keychain and Secret Service backends' recording fake executables record no invocation. A context of the wrong shape refuses the same way |
-| `apps/loopex_composition/test/sign_in_adc_test.exs` | A gcloud-shaped `authorized_user` fixture: restart rereads the file, refreshes and keeps the subject; an absent ID token on an unchanged grant keeps the subject; a response without `refresh_token` keeps using the file's; malformed files (missing member, wrong `type`, extra member, nested value, over-bound, symlink, other owner, group-writable, another `universe_domain`) are refused; a replaced file for the same account is adopted at the next generation without restart; a replaced file for another account is `sign_in_account_changed` with custody `nil`; a replaced file whose refresh returns no ID token is refused; a deleted file is `sign_in_required`; the refresh posts the file's own `client_id`, and a replaced file's ID token whose `aud` is not that `client_id` is `sign_in_failed` with custody `nil` and metadata unchanged; the refresher, given a sign-in context whose `protected_directories` names a temporary `G` while `HOME` names another directory holding a different ADC file, reads only `<G>/application_default_credentials.json`; `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are ignored; logout leaves gcloud's file untouched. **Delayed exchange:** the fake server holds a refresher's token response until the test releases it while another OS process runs `auth logout gemini`, then an `auth login gemini --source loopex` for another account, then a replaced file already recorded at a greater generation; after the release the first publishes nothing, recreates no metadata and leaves custody `nil`, the second leaves the other account's metadata byte for byte and custody `nil`, and the third rotates custody without a write; the released token never resolves from custody after a logout |
+| `apps/loopex_composition/test/sign_in_adc_test.exs` | A gcloud-shaped `authorized_user` fixture: restart rereads the file, refreshes and keeps the subject; an absent ID token on an unchanged grant keeps the subject; a response without `refresh_token` keeps using the file's; malformed files (missing member, wrong `type`, extra member, nested value, over-bound, symlink, other owner, group-writable, another `universe_domain`) are refused; a replaced file for the same account is adopted at the next generation without restart; a replaced file for another account is `sign_in_account_changed` with custody `nil`; a replaced file whose refresh returns no ID token is refused; a deleted file is `sign_in_required`; the refresh posts the file's own `client_id`, and a replaced file's ID token whose `aud` is not that `client_id` is `sign_in_failed` with custody `nil` and metadata unchanged; the refresher, given a sign-in context whose `protected_directories` names a temporary `G` while `HOME` names another directory holding a different ADC file, reads only `<G>/application_default_credentials.json`; `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are ignored; logout leaves gcloud's file untouched. **Delayed exchange:** the fake server holds a refresher's token response until the test releases it while another OS process runs `auth logout gemini`, then an `auth login gemini --source loopex` for another account, then a replaced file already recorded at a greater generation; after the release the first publishes nothing, recreates no metadata and leaves custody `nil`, the second leaves the other account's metadata byte for byte and custody `nil`, and the third writes nothing, leaves custody as it was and refreshes again on step 5's schedule; the released token never resolves from custody after a logout |
 | `apps/loopex_composition/test/sign_in_keychain_test.exs` | Tagged `:macos_keychain`, against a temporary keychain named through the test-only `:sign_in_test_keychain` key: round trip, overwrite, delete, and a maximum-size record (262,144 base64url bytes on one `security -i` line); the secret never appears in any spawned argv, checked through an argv-recording wrapper. A source check finds the keychain key read only under `Mix.env() == :test` |
 | `apps/loopex_composition/test/sign_in_secret_service_test.exs` | Tagged `:secret_service`, under `dbus-run-session` with a throwaway keyring: round trip and availability probe with the bus passed only through the context's `secret_service_bus`; a locked collection is unavailable within 5,000 ms. Untagged, a recording fake executable proves the wrapper's argv, standard-input bytes and child `DBUS_SESSION_BUS_ADDRESS` equal to the context value while the test VM's own variable names another address; a `nil` bus is unavailable without spawning; a composition whose metadata names `secret_service` with the backend unavailable refuses `credential_store_unavailable`; `auth login --store auto` over such metadata exits 69 and writes no file |
-| `apps/loopex_composition/test/sign_in_refresh_test.exs` | Refresh at the window, including a short `expires_in`. **Custody deadline**, through the real refresher and `CredentialCustody.resolve/1`: a fresh 30 s token from the fake server resolves `{:ok, _}` as soon as custody starts and is refreshed at 15 s; with the server then unreachable it still resolves until 22,500 ms after `t0` and `:expired` after it; **delayed response**: a 10 s token whose response the fake server delays by more than 7,500 ms after the request reaches it (so verification and the write finish after `t0` + 7,500 ms) enters custody past its deadline, `CredentialCustody.resolve/1` returns `:expired` on the first call, a model call on the route refuses before dispatch with no provider request carrying that token, and the refresher's next refresh is due at once, a repeated delay following step 5's transient schedule; a token with `expires_in` 9 is `sign_in_failed`, at login with nothing written and at refresh with nothing written and custody unchanged. A refresher whose context's auth directory is moved inside a listed root after start exchanges nothing and rotates custody to `nil`; rotation persisted; `invalid_grant` → `sign_in_required` and custody `:missing`; transient retry schedule; expiry while unreachable → `:expired` refusal. Two OS processes on one home perform exactly one exchange, the other adopting. Stale lock reclaim. Account change refused; same-account re-login adopted within 30 s; logout reaches custody `nil`. **Different-account write cut:** a service running account A; `auth login` for B is killed after its record write; the service's next refresh exchanges nothing, writes nothing and rotates custody to `nil`, B's record bytes are unchanged, a new composition refuses `provider_sign_in_required`, `auth status` shows `sign_in_incomplete`, and rerunning the login repairs it. **Restart before metadata publication:** a refresh at which the fake server rotates and invalidates the old refresh token is killed after its record write; a restarted composition rolls the metadata forward and refreshes with the rotated token; the invalidated token is never presented again. Refresh-response rules: an OpenAI response without `refresh_token` fails with no write; a Google response without `refresh_token` or `id_token` keeps the prior refresh token and subject; a refresh-response ID token is never used for identity. **Write failure after exchange:** with the fake server rotating and invalidating the old refresh token and the store failing its write, custody resolves the new access token, the fake server sees no second exchange while the write is pending, each retry follows step 5's schedule and emits one `sign_in_store_write_pending` line naming the class and no token, the write succeeds once the store recovers at the next generation, and a refresher stopped before that leaves the route needing sign-in with the invalidated token never presented. **Lock busy:** a lock held by another OS process across a delayed 30,000 ms exchange makes the refresher's acquisition fail `sign_in_lock_busy` after 10,000 ms with no exchange, no write and custody unchanged, and its retry adopts the holder's record without contacting the provider. **Logout then login:** a running refresher reaches custody `nil` and stops its schedule after `auth logout`; `auth login` for the same account then writes a generation above the floor under the floor's client; the refresher adopts it within 30 s, resolves the new token and refreshes again at the next window. `chatgpt` model list refreshed after each refresh and adoption; a failed refresh-time listing keeps the previous list, never `null`, and names `sign_in_model_list_stale`; the **delayed listing** cases of [`chatgpt` model admission](#technical-adr-0073-model-admission). **Fenced publication of other delayed results**, each with the competing operation run in another OS process at the named point: a step 7 nomination followed, before the refresher takes the lock, by a logout, by a logout and a different-account login, and by a newer same-account login, adopting only the last and leaving custody `nil` in the first two; a pending write after a store failure followed by a logout, a different-account login and a newer same-account login, the pending record discarded in all three, nothing recreated, custody `nil` in the first two and the newer generation adopted in the third, and a `sign_in_required` state written at `G` by another process still followed by the pending write at `G + 1`; and a logout that waits on a refresher holding the lock across a delayed exchange, after whose deletion the refresher's next and only custody rotation is to `nil`. No retained output or diagnostic line contains a token the fake server issued |
+| `apps/loopex_composition/test/sign_in_refresh_test.exs` | Refresh at the window, including a short `expires_in`. **Custody deadline**, through the real refresher and `CredentialCustody.resolve/1`: a fresh 30 s token from the fake server resolves `{:ok, _}` as soon as custody starts and is refreshed at 15 s; with the server then unreachable it still resolves until 22,500 ms after `t0` and `:expired` after it; **delayed response**: a 10 s token whose response the fake server delays by more than 7,500 ms after the request reaches it (so verification and the write finish after `t0` + 7,500 ms) enters custody past its deadline, `CredentialCustody.resolve/1` returns `:expired` on the first call, a model call on the route refuses before dispatch with no provider request carrying that token, and the refresher's next refresh is due at once, a repeated delay following step 5's transient schedule; a token with `expires_in` 9 is `sign_in_failed`, at login with nothing written and at refresh with nothing written and custody unchanged. A refresher whose context's auth directory is moved inside a listed root after start exchanges nothing and rotates custody to `nil`; rotation persisted; `invalid_grant` → `sign_in_required` and custody `:missing`; transient retry schedule; expiry while unreachable → `:expired` refusal. Two OS processes on one home perform exactly one exchange, the other adopting. Stale lock reclaim. Account change refused; same-account re-login adopted within 30 s; logout reaches custody `nil`. **Different-account write cut:** a service running account A; `auth login` for B is killed after its record write; the service's next refresh exchanges nothing, writes nothing and rotates custody to `nil`, B's record bytes are unchanged, a new composition refuses `provider_sign_in_required`, `auth status` shows `sign_in_incomplete`, and rerunning the login repairs it. **Restart before metadata publication:** a refresh at which the fake server rotates and invalidates the old refresh token is killed after its record write; a restarted composition rolls the metadata forward and refreshes with the rotated token; the invalidated token is never presented again. Refresh-response rules: an OpenAI response without `refresh_token` fails with no write; a Google response without `refresh_token` or `id_token` keeps the prior refresh token and subject; a refresh-response ID token is never used for identity. **Write failure after exchange:** with the fake server rotating and invalidating the old refresh token and the store failing its write, custody resolves the new access token, the fake server sees no second exchange while the write is pending, each retry follows step 5's schedule and emits one `sign_in_store_write_pending` line naming the class and no token, the write succeeds once the store recovers at the next generation, and a refresher stopped before that leaves the route needing sign-in with the invalidated token never presented. **Lock busy:** a lock held by another OS process across a delayed 20,000 ms exchange makes the refresher's acquisition fail `sign_in_lock_busy` after 10,000 ms with no exchange, no write and custody unchanged, and its retry adopts the holder's record without contacting the provider. **Logout then login:** a running refresher reaches custody `nil` and stops its schedule after `auth logout`; `auth login` for the same account then writes a generation above the floor under the floor's client; the refresher adopts it within 30 s, resolves the new token and refreshes again at the next window. `chatgpt` model list refreshed after each refresh and adoption; a failed refresh-time listing keeps the previous list, never `null`, and names `sign_in_model_list_stale`; the **delayed listing** cases of [`chatgpt` model admission](#technical-adr-0073-model-admission). **Fenced publication of other delayed results**, each with the competing operation run in another OS process at the named point: a step 7 nomination followed, before the refresher takes the lock, by a logout, by a logout and a different-account login, and by a newer same-account login, adopting only the last and leaving custody `nil` in the first two; a pending write after a store failure followed by a logout, a logout killed after its floor write, a different-account login and a newer same-account login, the pending record discarded in all four, nothing recreated, custody `nil` in the first three and the newer generation adopted in the fourth; a pending write still published at the next generation over a `sign_in_required` state written at `G` by another process, over a Secret Service write of its own cut short (undecodable record, metadata at `G`), and, adopted after `roll_forward`, over its own keychain record left at `G + 1` by a failed read-back; a logout started while a refresher holds the lock across an exchange delayed 5,000 ms, after which custody holds the new token, then `nil` within 30 s, and the logout revokes the new refresh token; and the same with a 15,000 ms delay, where the logout exits 73 and deletes nothing. **Lock owner:** an exchange process that raises while `SignIn.Route` holds the lock leaves no lock, and another composition in the same VM then acquires it; an acquisition whose primitive call outlasts 10,000 ms returns `sign_in_lock_busy` and its late success is released. No retained output or diagnostic line contains a token the fake server issued |
 | `apps/loopex_cli/test/auth_command_test.exs` (separation) | `auth login` exits 76 before any token write when the auth directory or the ADC directory and a selected state root overlap in either direction, with the context built by `LoopexCli.Home` from a temporary `HOME` and the selected file; a durable composition with an `oauth` binding and no context refuses `provider_sign_in_required` |
 | `apps/loopex_composition/test/credential_plane_test.exs` (extended) | A sign-in route's custody is registered like an `env` route. Two canaries (access and refresh) never appear in journals, public events, progress, diagnostics, traces, executor job environments or resource subprocess environments. An invocation during rotation uses exactly one token |
 | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` (extended) | The `token_exchange` and `model_list` invocations: credential frame, bounds, closed failure classes, no raw body crossing, cleanup proof. The guardian's custody-phase producer of `provider_sign_in_required` and its `model_call_failed` counterparts, as [producing the reason](#technical-adr-0073-failure-reason) lists. The access-token echo guard withholds a reply containing the token |

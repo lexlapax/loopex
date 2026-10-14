@@ -128,13 +128,14 @@ new provider protocol.
    one minute. A provider reply granting a token that lives under ten seconds
    is refused as a failed sign-in. A lock serializes
    refreshes across every Loopex process that shares the home, and no
-   process exchanges a refresh token without holding it. A result that
-   arrives after a wait without that lock, such as a model list, a token
-   save that is being retried, a re-login a running service is taking up,
-   or a token from gcloud's file, is used only if, rechecked under the
-   lock, the stored sign-in is still the one it was obtained for, or for a
-   re-login still a signed-in, newer one of the same account and client;
-   otherwise it is dropped and changes nothing. A provider
+   process exchanges a Loopex-stored refresh token without holding it. A
+   result obtained without that lock, such as a model list, a token save
+   that is being retried, a re-login a running service is taking up, or a
+   token from gcloud's file, passes one recheck under the lock: it is used
+   only if the stored sign-in is still the one it was obtained for. A
+   newer sign-in of the same account and client is taken up in its place,
+   and anything else leaves the route without a token and changes nothing
+   stored. A provider
    that rejects the refresh token leaves the route unusable. Its calls are
    then refused before dispatch, by name: sign-in required. Nothing falls back
    to another route or to an API key. The maintainer decided on 2026-10-13
@@ -153,6 +154,9 @@ new provider protocol.
    explains why each provider has none today. `loopex auth status` reports
    which routes are signed in without reading a token. `loopex auth logout
    <provider>` revokes the token with the provider and removes it locally.
+   A refresh holds the lock for up to one provider exchange, so a login or
+   logout that meets one for more than ten seconds fails as busy, changes
+   nothing and can be run again.
 9. **Loopex enforces the `chatgpt:` reply ceiling itself.** A plan-billed
    request cannot carry a maximum output length. Loopex ends the reply stream
    once the configured ceiling is reached and records the reply as cut at its
@@ -189,15 +193,15 @@ new provider protocol.
     provider companion and never the durable host VM itself. It bounds the
     list and records it beside the sign-in. The maintainer decided on
     2026-10-14 (D25) that the list is part of signing in: when the list
-    cannot be fetched or is malformed or too large, `loopex auth login
-    openai` fails by name and keeps nothing, so a signed-in `chatgpt:`
-    route always has a list. A refresh whose listing fails keeps the
-    previous list and says so in a diagnostic. A list belongs to the
-    sign-in that fetched it: a login records its list together with its
-    own token, and a refresh records its list only if, when the list
-    arrives, the route still holds that same account's same sign-in. A list
-    that arrives after a sign-out, another account's sign-in or a newer
-    sign-in is discarded and never brings back or overwrites anything. A
+    cannot be fetched or is malformed, empty or too large, `loopex auth
+    login openai` fails by name and keeps nothing, so a signed-in
+    `chatgpt:` route always has a list. Refusing an empty list is this
+    record's reading of D25's required list. A refresh whose listing fails
+    keeps the previous list and says so in a diagnostic. A list belongs to
+    the sign-in that fetched it: a login records its list together with its
+    own token, and a refresh's list passes the recheck of decision 7. A
+    login cut short after its token write and completed later keeps the
+    previous list until the next refresh lists again. A
     `chatgpt:` model is
     admitted, when the configuration is composed and when a session switches
     model, only if the recorded list names it. An unlisted model is refused
@@ -208,8 +212,10 @@ new provider protocol.
 15. **Signing out keeps a floor, not a secret.** The maintainer decided on
     2026-10-13 that `auth logout` leaves, beside the home's host identity, a
     small non-secret file per route naming the highest write generation the
-    route has used and the Loopex client the provider issued. The next
-    sign-in reuses that client and writes a generation above every earlier
+    route has used and the client those generations were written under:
+    the client OpenAI issued, Loopex's Google client, or the client in
+    gcloud's file. The next sign-in reuses that client and writes a
+    generation above every earlier
     one. A service that is still running, and that the sign-out left without
     a token, therefore recognizes a later sign-in by the same account and
     client as newer than anything it held, takes it up without a restart and
