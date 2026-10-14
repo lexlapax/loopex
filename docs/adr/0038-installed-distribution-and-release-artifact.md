@@ -12,7 +12,9 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   added to the installed demonstration on 2026-10-13; after the holistic
   internal review on 2026-10-13, the revised closure hosts (D18), sign-out
   before uninstall, the retained M7 root in the refusal step (D24) and the
-  scoped install umask
+  scoped install umask; on 2026-10-14 the escript-build statement corrected,
+  the fast-check refusal proofs named and the `auth` crash-dump case added
+  (D37)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
@@ -61,9 +63,11 @@ minimal runtime distribution carries no compiler.
    the Erlang runtime system (ERTS) and the seven OTP library applications the
    escripts load. The reference CLI escript (which carries the runtime, the
    daemon and every reference application) and the provider companion escript
-   are placed beside it. The bytes the operator runs are the same escript
-   bytes the release check's real-provider lanes already exercise; only the
-   runtime underneath them is bundled. The archive carries no build tool: no
+   are placed beside it. Both are built from the candidate commit by the same
+   escript build the release check's fresh-source lane runs, the CLI with the
+   relocatable launch pair, on each platform's pinned runtime. The release
+   check's real-provider lanes exercise that extraction's own build; the
+   installed-artifact lane exercises the archive's. The archive carries no build tool: no
    Mix, Hex, `erlc`, `elixirc`, source or dependency tree. The Erlang
    `compiler` application and Elixir's own modules are present only because
    the Elixir runtime declares them and does not start without them; nothing

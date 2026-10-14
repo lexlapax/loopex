@@ -168,7 +168,7 @@ candidates only through a separate accepted decision after the proof.
 Technical depth: [Governed-extension candidate proof](roadmap-technical.md#technical-roadmap-governed-extension-runtime)
 
 <a id="concept-roadmap-isolated-hands"></a>
-#### Isolated hands — v0.5 candidate
+#### Isolated hands — version unselected
 
 Can generated and less-trusted work execute outside the brain through the same
 effect contract? Only proven local and isolated transports can support an

@@ -22,11 +22,11 @@ not before unrelated work. None leaves a value to be fixed at acceptance.
 
 | Decision | Outcomes | Accepted text it amends or clarifies | Acceptance point |
 | --- | --- | --- | --- |
-| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | 2, 4; the `--service` start for 5 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept): one home-reading exception for `LoopexCli.Home`. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): `--config` optional when a home is selected. [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept), applied: `daemon.readiness` joins the `loopex.experimental/4` manifest's `methods` inventory and result definitions, and the manifest digest is recomputed by ADR 0044's recipe and pinned. Reuses ADRs 0031, 0032 and 0046 | Before `LoopexCli.Home`, the configuration writers, `ServiceStart`, `Service`, `paths`, `doctor` or `daemon.readiness` |
+| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | 2, 4; the `--service` start for 5 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept): one home-reading exception for `LoopexCli.Home`. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): `--config` optional when a home is selected. [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept), applied: `daemon.readiness` joins the `loopex.experimental/4` manifest's `methods` inventory and result definitions, and the manifest digest is recomputed by ADR 0044's recipe and pinned. Reuses ADRs 0031, 0032 and 0046 | Before `SignIn.Separation` (step 3), `LoopexCli.Home`, the configuration writers, `ServiceStart` with its service record, status 125, `Service`, `paths`, `doctor` or `daemon.readiness` |
 | [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | 1, 6; the installed refusal and restore step of 7 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept) obligation 4: "no compiler" read as "no build toolchain". Applies [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) and ADR 0034 to the relocated companion unchanged | Before the release definition in the umbrella `mix.exs`, `scripts/release/`, the launcher's installed mode, `loopex-verify`, `--relocatable` or `loopex version` |
-| [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept) | 4 (the service's configuration reader), 5 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): nullable `trace` and `policy` in the status record. [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept): the activation ceiling, which counts helper children as decided on 2026-10-13, with any consequent [ADR 0046](../adr/0046-child-session-tool.md#concept) refusal-order clause ADR 0071 states. [ADR 0055](../adr/0055-remote-session-creation-options.md#concept): creation options on a helper-enabled service. Applies ADRs 0033, 0046, 0056 and 0069 | Before `daemon --config`, `AttachedChat`, `DaemonSession`, `ChatProjection`, the `ExitStatus` block 111 to 115, the `activation_permit` member of `Delegation.host/5`, or any helper-parent creation in the daemon |
-| [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) | 3, 7 | [ADR 0051](../adr/0051-current-format-physical-restore.md#concept), two clauses: the absence of a backup CLI, and the latest-backup-only restriction relaxed by `--discard-later-work` for a lost source. The delivered `Restore.restore/2` leaves the disposable helper job index out of its audit index (D29), which no ADR 0051 sentence governs. Takes the operator backup and restore work out of Proposed ADR 0036 | Before `RootFormat`, the marker checks in `Placement` and `compose/1`, `StoreAdmin`, `LoopexCli.Store`, the `RestoreCodec` discard form, the format-1 fixture test, the `ExitStatus` block 116 to 119, or status 124 |
-| [ADR 0073](../adr/0073-provider-oauth-sign-in.md#concept) | 8; the sign-in precheck in 4 and the sign-in hint in 5 | [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept), [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) and [ADR 0043](../adr/0043-context-compaction-checkpoint.md#concept): the clauses ADR 0073 names for the sign-in refusal and the `chatgpt:` summary ceiling. [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept): the host-held access token and the `token_exchange` invocation. [ADR 0029](../adr/0029-bounded-provider-failure-diagnostics.md#concept): the public `provider_sign_in_required` reason. [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept): custody rotation by a host refresher. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept): sign-in routes resolve from composition-owned custody. [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept): the `oauth` form, `vertex` members and same-account live rotation. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): the `oauth` binding form and `vertex` members as additive members of schema version 1. Also one sentence of Proposed ADR 0037 and this plan's credential non-goal. Its own decision 3 states the `adc` source as an explicit exception (D20) | Before any `SignIn.*` module other than ADR 0037's `SignIn.Separation`, binding-grammar change, Core category admission, schema or vector change, `loopex auth`, or the `ExitStatus` block 120 to 125, which also carries ADR 0072's 124 and ADR 0037's 125 |
+| [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept) | 4 (the service's configuration reader), 5 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): nullable `trace` and `policy` in the status record. [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept): the activation ceiling, which counts helper children as decided on 2026-10-13, with any consequent [ADR 0046](../adr/0046-child-session-tool.md#concept) refusal-order clause ADR 0071 states. [ADR 0055](../adr/0055-remote-session-creation-options.md#concept): creation options on a helper-enabled service. Applies ADRs 0033, 0046, 0056 and 0069 | Before `daemon --config`, `AttachedChat`, `DaemonSession`, `ChatProjection`, the `ExitStatus` block 111 to 115, `Helper.bind_activation_permit/2`, or any helper-parent creation in the daemon |
+| [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) | 3, 7 | [ADR 0051](../adr/0051-current-format-physical-restore.md#concept), two clauses: the absence of a backup CLI, and the latest-backup-only restriction relaxed by `--discard-later-work` for a lost source. M8's `Restore.restore/2` leaves the disposable helper job index out of its audit index (D29), which no ADR 0051 sentence governs; [ADR 0056](../adr/0056-host-helper-ledger-recipe.md#concept)'s complete helper-namespace audit is narrowly amended for it (D35). Takes the operator backup and restore work out of Proposed ADR 0036 | Before `RootFormat`, the marker checks in `Placement` and `compose/1`, `StoreAdmin`, `LoopexCli.Store`, the `RestoreCodec` discard form, the format-1 fixture test, the `ExitStatus` block 116 to 119, or status 124 |
+| [ADR 0073](../adr/0073-provider-oauth-sign-in.md#concept) | 8; the sign-in precheck in 4 and the sign-in hint in 5 | [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept), [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) and [ADR 0043](../adr/0043-context-compaction-checkpoint.md#concept): the clauses ADR 0073 names for the sign-in refusal and the `chatgpt:` summary ceiling. [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept): the host-held access token and the `token_exchange` and `model_list` invocations. [ADR 0029](../adr/0029-bounded-provider-failure-diagnostics.md#concept): the public `provider_sign_in_required` reason. [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept): custody rotation by a host refresher. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept): sign-in routes resolve from composition-owned custody, and the host-VM credential audience widens to refresh tokens, ID tokens and the code exchange in `ask` and `auth` (D37). [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept): the `oauth` form, `vertex` members and same-account live rotation. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): the `oauth` binding form and `vertex` members as additive members of schema version 1. Also one sentence of Proposed ADR 0037 and this plan's credential non-goal. Its own decision 3 states the `adc` source as an explicit exception (D20) | Before any `SignIn.*` module other than ADR 0037's `SignIn.Separation`, binding-grammar change, Core category admission, schema or vector change, `loopex auth`, or the `ExitStatus` block 120 to 125, which also carries ADR 0072's 124 and ADR 0037's 125 |
 
 Accepted decisions constrain M8 without being reopened beyond those named
 amendments: [ADR 0051](../adr/0051-current-format-physical-restore.md#concept)
@@ -34,7 +34,12 @@ owns the restore transition, its inputs, limits and outcomes;
 [ADR 0066](../adr/0066-owned-artifact-transfer-opening.md#concept) owns
 transfer accounting; and
 [ADR 0070](../adr/0070-pre-1-superseded-surface-retirement.md#concept) owns
-the retired surfaces.
+the retired surfaces. Three maintainer decisions amend accepted ADRs
+directly: D30 amends the succession obligation of ADRs
+[0057](../adr/0057-attempts-event-bodies.md#concept) and
+[0065](../adr/0065-private-attempts-io-prerequisite.md#concept) for M8 only;
+D35 amends ADR 0056's helper-namespace audit through ADR 0072; and D37
+widens ADR 0039's host-VM credential audience through ADR 0073.
 
 The store engine decision (ADR 0036) and typed policy inputs (ADR 0035) are not
 M8 prerequisites and are deliberately not linked here; the first follows from
@@ -54,11 +59,11 @@ integrator owns it, and the second change lands at rejoin.
 
 | Workstream | Owns | Rejoins at |
 | --- | --- | --- |
-| W1 Integration | `apps/loopex_cli`: `Home`, `ConfigWriter`, `ConfigOptions`, `ConfigInspection`, `ConfigFile`, `ServiceStart`, `Service`, `Live`, `Daemon`, `HostOptions`, `Chat`, `ChatDriver`, `ChatProjection`, `ChatControl`, `AttachedChat`, `DaemonSession`, `DaemonClient` and the `LoopexCli` dispatch table. `apps/loopex_daemon`: `Command`, `ExitStatus`, `Service`, `ServiceReadiness`, `Request`, `SocketConnection`, `WireRecords`, `Owner`, `ConnectionRegistry`. `apps/loopex_protocol/priv/schema` and `priv/vectors`, `clients/node`. `LoopexComposition.Placement`'s lock primitive extraction. `Placement`'s process probe runs `ps -o lstart=` with `TZ=UTC0` beside `LC_ALL=C` (`placement.ex:555-557`), fixing a delivered defect: `lstart` prints local time, so two commands under different `TZ` values read a live owner's incarnation differently, and `owner_status/2` would treat a live lock as dead and reclaim it; `placement_probe_test.exs` gains a lock taken under `TZ=America/Los_Angeles` that a probe under `TZ=UTC` finds alive and does not reclaim. `LoopexComposition.Delegation.host/5` (new at step 4: `host/4`'s arguments plus an options keyword that admits no member until W2 adds `activation_permit`; its handle carries the readiness table) and `LoopexComposition.Delegation.Helper`'s readiness ETS table with its single writer (ADR 0037), with the classification code that keeps the failing session and code (ADR 0072's readiness code). The `scripts/check-release.sh` runner, `scripts/lib/release-lane.sh`, `Mix.Tasks.Loopex.M7Matrix` and `M7Evidence.CaseRunner` changes of the [release-check list](#technical-plan-release-check), with their tests, and the verification guide pair's matching text. `VERSION` at the candidate | The first installed workflow |
-| W2 Daemon helpers (W1's integrator, after the attached conversation) | `LoopexCli.ChatConfiguration`'s split into `helper_roles/1`, `helper_catalog/3` and `helper_parent_genesis/3`; `LoopexCli.HostOptions.helpers/1`; `LoopexComposition.Delegation.create_parent_detailed/7`, the `activation_permit` member of `host/5`'s options (W1 lands `host/5` itself) and `Helper.create_parent/2`; `Loopex.Runtime.create_session_with_genesis_detailed/4`; helper hosting and activation counting in `LoopexDaemon.Service`, `Owner`, `ConnectionRegistry` (its one counted sum, `activations_counted/1`, used by client admission, the helper permit and the status report) and `SocketConnection.create_task/4` | After the first installed workflow, before the installed demonstration |
-| W3 Packaging | The umbrella `mix.exs` `releases/0` and `installed_layout/1`; `scripts/release/` (`toolchain.env`, `build.sh`, `assemble.sh`, `write-manifest.sh`, `assert-linkage.sh`, `smoke.sh`, `linux/Dockerfile`, `linux/Dockerfile.smoke`); `apps/loopex_cli/bin/loopex` and `bin/loopex-verify`; `apps/loopex_llm_reqllm/lib/mix/tasks/loopex.provider.build.ex`'s `--relocatable`; `LoopexCli.ProviderLaunch.options/0`; the `loopex version` module; the `installed-artifact` lane in `scripts/check-release.sh` | The first installed workflow, with a locally built archive |
-| W4 Backup and restore | `LoopexComposition.RootFormat`, `StoreAdmin`, `StoreAdmin.Codec`; the marker step in `Placement.acquire/2` and `LoopexComposition.compose/1`; `Restore.IO`'s `root_inventory` and `backup_copy` operations; ADR 0037's `LoopexComposition.SignIn.Separation.check/1`, landing at step 3 before W1's `LoopexCli.Home`, and `StoreAdmin.restore/3`'s check of an available source with it (D27); `Restore.Audit`'s session-identifying failure and, with `Restore.Workflow`'s baseline check, `docs/operator/runtime.md` and `docs/operator/how-a-run-works-technical.md`, whose job-index refusal statements D29 makes untrue, corrected in the change that lands it; the unconditional omission of the disposable helper job index from the audit index in every mode, `restore/2`'s included (D29); the retained format-1 root `apps/loopex_cli/test/fixtures/root_format/format-1.tar` with its producer and `apps/loopex_cli/test/root_format_fixture_test.exs`; the retained M7-built root fixture under `apps/loopex_composition/test/fixtures/m7_root/` (D24); `Restore.Workflow`'s discard-form validation; `Loopex.Executor.Local.RestoreCodec`'s discard form; `LoopexCli.Store` and the marker checks for `sessions` and `artifact`; the `m7-adopt` lane (D26) in `scripts/check-release.sh` with its read-only child audit `m7_adopt_child_audit_test.exs` and `test/support/m7_child_audit.ex` | The marker first, before W1's daemon and CLI changes; adopt, backup and restore after the first installed workflow, before the installed demonstration |
-| W5 Provider sign-in | `apps/loopex_llm_reqllm`: `Loopex.LLM.ReqLLM.SignIn.*`, the `Guards` provider table, `HostBindings`, `NativeRequest`'s per-route header seal, the `chatgpt` mapping, `drain/5`'s reply ceiling, `in_process.ex`'s sign-in resolution and the companion's `token_exchange` kind. `apps/loopex_composition`: every `LoopexComposition.SignIn.*` module except W4's `SignIn.Separation` (store, backends, refresh lock, `Route` edge), the credential plane's registration of sign-in custody, and `test/support/fake_oauth_server.ex`. `apps/loopex` (Core): the `provider_sign_in_required` admission in `SessionCoordinator`, `ProviderAttempt` and `SessionState`. `apps/loopex_protocol`: `Session.Outcome` and `Session.CompactResult`. `apps/loopex_cli`: `LoopexCli.Auth` and its sign-in hint function. The `real-sign-in-*`, `secret_service` and `macos_keychain` lanes in `scripts/check-release.sh` (D18) | After the first installed workflow and after W1's `daemon.readiness` schema change; before the installed demonstration |
+| W1 Integration | `apps/loopex_cli`: `Home` (new), `ConfigWriter` (new), `ConfigOptions`, `ConfigInspection`, `ConfigFile`, `ServiceStart` (new), `LoopexCli.Service` (new), `Live`, `Daemon`, `HostOptions` (new), `Chat`, `ChatDriver`, `ChatProjection` (new), `ChatControl`, `AttachedChat` (new), `DaemonSession` (new), `DaemonClient` and the `LoopexCli` dispatch table. `apps/loopex_daemon`: `Command`, `ExitStatus`, `Service`, `ServiceReadiness` (new), `Request`, `SocketConnection`, `WireRecords`, `Owner`, `ConnectionRegistry`. `apps/loopex_protocol/priv/schema` and `priv/vectors`, `clients/node`. `LoopexComposition.Placement`'s lock primitive extraction, which publishes a lock record by writing a temporary file and linking it, never by writing in place. At step 2, before step 4's service record, the lock record becomes `loopex-placement-v2` (D33; `placement.ex:39`): the probe runs `ps -o lstart=` with `TZ=UTC0` beside `LC_ALL=C` (`placement.ex:555-557`), so two commands under different `TZ` values agree on a live owner, and a v1 record is read by liveness only; `placement_probe_test.exs` gains a lock taken under `TZ=America/Los_Angeles` that a probe under `TZ=UTC` finds alive and does not reclaim, and D33's two cross-version cases, which need the real `v0.4.0` build, run in the release check against the build `m7-adopt` prepares. The Store writer marker's probe (`writer_lock.ex:315-318`) keeps its format: every caller that asks it to recover (`recover_stale_writer: true`) holds the placement lock first, which already excludes a live writer, and without recovery any marker refuses. `LoopexComposition.Delegation.host/5` (new at step 4: `host/4`'s arguments plus an options keyword that admits no member; its handle carries the readiness table) and `LoopexComposition.Delegation.Helper`'s readiness ETS table with its single writer (ADR 0037), with the classification code that keeps the failing session and code (ADR 0072's readiness code). The `scripts/check-release.sh` runner, `scripts/lib/release-lane.sh`, `scripts/attended-release.sh` (forwarding `--only` and the four macOS options of item 4 besides its eight M7 options, `attended-release.sh:73-80`, with `scripts/test/attended-release-test.sh`), `Mix.Tasks.Loopex.M7Matrix` and `M7Evidence.CaseRunner` changes of the [release-check list](#technical-plan-release-check), with their tests, and in the same change the text they make untrue: the verification guide pair, the milestone guide's closure-tooling step (`docs/process/milestones-technical.md:152-159`), `DEVELOPMENT.md:129-195` and `AGENTS.md:299-300`, which name the retained M7 attempts index (the `AGENTS.md` change is the maintainer's to approve). `VERSION` and `release_version` at step 8, with `DEVELOPMENT.md`'s version text. Current-state pages its own changes make untrue, each corrected in the change that lands it: `docs/operator/daemon.md:53-64` (credential only from `LOOPEX_PROVIDER_API_KEY`) with `daemon --config`, `docs/operator/daemon.md:339-356` (status table) with each `ExitStatus` block, and `docs/developer/compatibility-surfaces.md:318` (`chat` requires `--config`) with `Home` | The first installed workflow |
+| W2 Daemon helpers (W1's integrator, after the attached conversation) | `LoopexCli.ChatConfiguration`'s split into `helper_roles/1`, `helper_catalog/3` and `helper_parent_genesis/3`; `LoopexCli.HostOptions.helpers/1`; `LoopexComposition.Delegation.create_parent_detailed/7`, `Helper.bind_activation_permit/2` (W1 lands `host/5`) and `Helper.create_parent/2`; `Loopex.Runtime.create_session_with_genesis_detailed/4`; helper hosting and activation counting in `LoopexDaemon.Service`, `Owner`, `ConnectionRegistry` (its one counted sum, `activations_counted/1`, used by client admission, the helper permit and the status report) and `SocketConnection.create_task/4` | After the first installed workflow, before the installed demonstration |
+| W3 Packaging | The umbrella `mix.exs` `releases/0` and `installed_layout/1`; `scripts/release/` (`toolchain.env`, `build.sh`, `assemble.sh`, `check-layout.sh`, `write-manifest.sh`, `assert-linkage.sh`, `smoke.sh`, `linux/Dockerfile`, `linux/Dockerfile.smoke`) and the fast-check tests ADR 0038 [names](../adr/0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-failures); `apps/loopex_cli/bin/loopex`, including its crash-dump case extended from `ask` to `auth` (`bin/loopex:60-67`, D37), and `bin/loopex-verify`; `apps/loopex_llm_reqllm/lib/mix/tasks/loopex.provider.build.ex`'s `--relocatable`; `LoopexCli.ProviderLaunch.options/0`; the `loopex version` module; the `installed-artifact` lane in `scripts/check-release.sh` | The first installed workflow, with a locally built archive |
+| W4 Backup and restore | `LoopexComposition.RootFormat`, `StoreAdmin` and `StoreAdmin.Codec` (all new); the marker step in `Placement.acquire/2` and `LoopexComposition.compose/1`; `Restore.IO`'s `root_inventory`, `backup_copy` and `{:adopt_manifest, root, max_total}` operations; the `:ledger_placements` test override and the host-supplied catalogue check ADR 0072 names; `scripts/fixtures/m7-root-archive.exs`; the current-state text the store commands make untrue, corrected with them: `docs/operator/runtime.md:235-236` and `:262-265` and `docs/operator/coding-sessions.md:706-709`; ADR 0037's `LoopexComposition.SignIn.Separation.check/1`, landing at step 3 before W1's `LoopexCli.Home`, and `StoreAdmin.restore/3`'s check of an available source with it (D27); `Restore.Audit`'s session-identifying failure and, with `Restore.Workflow`'s baseline check, `docs/operator/runtime.md` and `docs/operator/how-a-run-works-technical.md`, whose job-index refusal statements D29 makes untrue, corrected in the change that lands it; the unconditional omission of the disposable helper job index from the audit index in every mode, `restore/2`'s included (D29); the retained format-1 root `apps/loopex_cli/test/fixtures/root_format/format-1.tar` with its producer and `apps/loopex_cli/test/root_format_fixture_test.exs`; the retained M7-built root fixture under `apps/loopex_composition/test/fixtures/m7_root/` (D24); `Restore.Workflow`'s discard-form validation; `Loopex.Executor.Local.RestoreCodec`'s discard form; `LoopexCli.Store` (new) and the marker checks for `sessions` and `artifact`; the `m7-adopt` lane (D26) in `scripts/check-release.sh` with its read-only child audit `m7_adopt_child_audit_test.exs` and `test/support/m7_child_audit.ex` | The marker first, before W1's daemon and CLI changes; adopt, backup and restore after the first installed workflow, before the installed demonstration |
+| W5 Provider sign-in | `apps/loopex_llm_reqllm`: `Loopex.LLM.ReqLLM.SignIn.*`, the `Loopex.LLM.ReqLLM.InProcess.Guards` provider table, `HostBindings`, `NativeRequest`'s per-route header seal, the `chatgpt` mapping, `drain/5`'s reply ceiling, `in_process.ex`'s sign-in resolution, the companion's `token_exchange` and `model_list` kinds, and `test/support/fake_oauth_server.ex`. `apps/loopex_composition`: every `LoopexComposition.SignIn.*` module except W4's `SignIn.Separation` (store, backends, refresh lock, `Route` edge), and the credential plane's registration of sign-in custody. `apps/loopex` (Core): the `provider_sign_in_required` admission in `SessionCoordinator`, `ProviderAttempt` and `SessionState`. `apps/loopex_protocol`: `Session.Outcome` and `Session.CompactResult`. The delivered closed validators of a failed reason that must admit it: `Loopex.LLM.ReqLLM.InProcess.CleanupOwner` (`in_process/cleanup_owner.ex`), `LoopexComposition.Ephemeral.SessionOwner`, `LoopexCli.AskResult`, `LoopexCli.DurableAsk.FollowReader`, and `clients/node/terminal-outcome.mjs` and `compact-result.mjs`. `apps/loopex_cli`: `LoopexCli.Auth` (new) and its sign-in hint function. The `real-sign-in-*`, `secret_service` and `macos_keychain` lanes in `scripts/check-release.sh` (D18) | After the first installed workflow and after W1's `daemon.readiness` schema change; before the installed demonstration |
 
 Shared files and their single owner:
 
@@ -90,8 +95,8 @@ Shared files and their single owner:
   and add no member. No walk calls it (D27).
 - `LoopexComposition.Delegation` and `Delegation.Helper`: W1 lands `host/5`
   and the readiness table at step 4, because `daemon.readiness` needs the
-  handle's table; W2 adds the `activation_permit` option member, the permit
-  binding and the refusal order at step 6.
+  handle's table; W2 adds `Helper.bind_activation_permit/2` and the refusal
+  order at step 6.
 - The `LoopexCli` dispatch table, `scripts/check-release.sh` lane list and
   `scripts/check.sh`: W1 wires each workstream's entry module or lane at its
   rejoin. The runner changes D18 needs are the integrator's, listed under
@@ -110,8 +115,8 @@ Constraints that hold across workstreams:
 - **One session owner.** The attached conversation is a client. It owns no
   runtime, no durable conversation state and no alternate loop.
 - **One restore.** The restore command calls the delivered
-  `LoopexComposition.Restore.restore/2`, whose audit leaves the disposable
-  job index out of its index (D29), and `lookup/3`. It adds no second copy,
+  `LoopexComposition.Restore.restore/2`, whose audit M8 changes to leave
+  the disposable job index out of its index (D29), and `lookup/3`. It adds no second copy,
   audit, transition or entry point.
 - **One lock algorithm.** The configuration-writer lock (ADR 0037), the
   sign-in refresh lock (ADR 0073) and `store adopt`'s hold on the root's
@@ -130,7 +135,9 @@ Constraints that hold across workstreams:
   in under a temporary `HOME` with `--store file` (ADR 0073's owner-only file
   backend), and the keychain and Secret Service backends are proved only by
   the `macos_keychain` and `secret_service` lanes on a temporary keychain and
-  a private session bus.
+  a private session bus. The one contact with a real keychain or Secret
+  Service is the read-only absence query of the installed lane's and
+  `m8-operator`'s removal steps, which writes nothing.
 
 <a id="technical-plan-order"></a>
 ### Implementation Order
@@ -142,8 +149,13 @@ in separate worktrees.
 
 1. **Acceptance.** The plan pair and each ADR it depends on, as listed in the
    prerequisites. Unrelated work does not wait.
-2. **Foundation (W1).** Extract the placement lock primitive; add the
-   `ExitStatus` 111 to 115 block once ADR 0071 is accepted.
+2. **Foundation (W1).** Extract the placement lock primitive with the
+   `loopex-placement-v2` record (D33); add the `ExitStatus` 111 to 115 block
+   once ADR 0071 is accepted. Land the recorder and runner changes of the
+   [release-check list](#technical-plan-release-check), each new lane's
+   registration landing later with its lane, then create campaign
+   `m8-closure-1` on `serenity` and commit its anchor line (item 1), so the
+   indexed pre-merge lanes record from here on.
 3. **Root marker and separation (W4)** under ADRs 0072 and 0037:
    `RootFormat`, `Placement.acquire/2` and
    `compose/1` admission, the read-only checks, daemon statuses 116 to 119,
@@ -163,8 +175,8 @@ in separate worktrees.
 5. **First installed workflow.** W1 and W3 rejoin: install a locally built
    archive, `init`, `chat --service`, detach, reconnect, `service stop`.
 6. **Daemon helpers (W2)** under
-   ADR 0071 decision 10 and its activation counting, adding the
-   `activation_permit` member to `host/5`. **Adopt, backup and restore
+   ADR 0071 decision 10 and its activation counting, adding
+   `Helper.bind_activation_permit/2`. **Adopt, backup and restore
    (W4)**, after status 124, then the retained format-1 fixture, its
    producer and `root_format_fixture_test.exs`, which need `store backup`
    to produce the fixture's capture. **Sign-in rejoin (W5)**: the public reason in
@@ -172,11 +184,13 @@ in separate worktrees.
    statuses 120 to 123 and the hints.
 7. **Failure matrices.** Process races, fault cuts, restart and signal cases
    for every workstream, on both toolchain pairs.
-8. **Demonstration and candidate.** `VERSION` advanced to `0.5.0`,
-   documentation and the evidence scaffold, then the closure matrix of D18:
-   the full release check on `serenity`, which runs `installed-artifact` for
-   `linux-x86_64`, `secret_service`, `cross_uid` and the
-   attended `real-sign-in-*` lanes whose clients exist, and on macOS arm64
+8. **Demonstration and candidate.** `VERSION` and the runner's
+   `release_version` advanced to `0.5.0` in one commit, documentation and the
+   evidence scaffold, then the closure matrix of D18: the full release check
+   on `serenity`, which runs `installed-artifact` for `linux-x86_64`,
+   `secret_service`, `cross_uid`, `m7-adopt` and the attended
+   `real-sign-in-*` lanes, less any lane deferred before the candidate under
+   D36, with `real-sign-in-anthropic` passing by refusing (D16), and on macOS arm64
    the `macos_keychain`, `installed-artifact` and attended `m8-operator`
    lanes with `--only`, the last carrying the outcome-6 record with
    `m8.service-review`, all recorded in the one M8 attempts index.
@@ -201,7 +215,7 @@ Each delivered fact creates an obligation that its owning ADR now fixes.
 | Trace controls exist on `chat` and `ask` only; the daemon exposes none | The file's `trace` member starts the service's trace; failure exits 115; attached chat refuses trace flags | ADR 0071 |
 | Durable admission stays closed until helper-history classification completes, bounded at 60,000 ms per start and resumable | Readiness reports `serving`, `classifying` with its two counts, `closed` with the named session, or `unavailable` with a code; a start waits at most 75,000 ms | ADR 0037 |
 | One unreadable session history closes the durable host until the root is restored from backup | The readiness report names the session and code; `store restore --source lost` recovers it, with `--discard-later-work` for an older backup | ADR 0072 |
-| ADR 0051 delivers host-embedded `LoopexComposition.Restore.restore/2` and `lookup/3`; the host owns backup creation, the capture record, plan construction and the attestation; there is no command | `store backup` produces the backup and capture record; `store restore` builds the plan from the operator's statements and calls the delivered `restore/2`, whose audit leaves the job index out of its index (D29), and `lookup/3` | ADR 0072 |
+| ADR 0051 delivers host-embedded `LoopexComposition.Restore.restore/2` and `lookup/3`; the host owns backup creation, the capture record, plan construction and the attestation; there is no command | `store backup` produces the backup and capture record; `store restore` builds the plan from the operator's statements and calls `restore/2`, whose audit M8 changes to leave the job index out of its index (D29, D35), and `lookup/3` | ADR 0072 |
 | Replay refuses an unknown record kind as `invalid_private_history`; a root with only the retired catalogue is refused; the Store takes its writer marker and may repair a torn tail before replay | The marker check runs before the placement lock and before composition starts a Store; `store adopt` audits an unmarked root in full before marking it | ADR 0072 |
 | Per-connection transfer accounting with a 1,073,741,824-byte cumulative allowance is enforced under ADR 0066 | None | — |
 | Hosted provider routes take only environment references; the public model failure is `model_call_failed` | Sign-in routes with host-held tokens, and the public `provider_sign_in_required` reason before dispatch | ADR 0073 |
@@ -227,48 +241,46 @@ each required: `installed-artifact` for `linux-x86_64`; `secret_service`, the
 `:secret_service` keyring cases under `dbus-run-session`; the delivered
 `cross_uid` lane, which the
 [verification guide](../process/verification.md#concept) requires for a
-daemon change; and the attended `real-sign-in-openai`,
+daemon change; `m7-adopt` (D26); and the attended `real-sign-in-openai`,
 `real-sign-in-gemini` and `real-sign-in-anthropic` lanes. On the macOS arm64
 host the same candidate runs three required lanes with `--only`:
 `macos_keychain`, `installed-artifact` for `darwin-arm64`, and `m8-operator`,
 the attended outcome-6 record. Each macOS lane is recorded in the same M8
 index as a required closure lane, so closure is the `serenity` full PASS and
-a PASS of each of the three. A lane that reports evidence unavailable blocks
-closure; it is never a pass and never a deferral without the maintainer's
-recorded decision. Both hosts' complete outputs are retained.
+a PASS of each of the three. A required lane that reports evidence
+unavailable blocks closure and is never a pass. Under D36 a deferral of
+`real-sign-in-openai` or `real-sign-in-gemini` is the maintainer's decision
+before the candidate, which then omits that lane from the runner's
+full-matrix lane list, so it is not pinned; `real-sign-in-anthropic` is
+always present. Both hosts' complete outputs are retained.
 
 | # | Fast-check proof | Release check |
 | --- | --- | --- |
-| 1 | The existing escript, provider-companion and launcher suites stay green with the relocatable launch pair; `apps/loopex_cli/test/service_start_test.exs` proves the installed command is resolved from the escript's own location | `installed-artifact` (ADR 0038): build with pinned inputs and the linkage table, manifest and verifier, a quarantined download cleared by the documented step on macOS, clean-host assertions, loaded-image probe and `loopex version`, with every Mix, Hex and Rebar step resolved from the pinned toolchain's `PATH` into writable build-only locations, on `darwin-arm64` and in a clean Ubuntu 22.04 `linux-x86_64` container. The closure matrix (D18) runs it inside the full release check on `serenity` and with `--only installed-artifact` on macOS |
+| 1 | The existing escript, provider-companion and launcher suites stay green with the relocatable launch pair; the refusal proofs ADR 0038 [names](../adr/0038-installed-distribution-and-release-artifact-technical.md#technical-adr-0038-failures): `scripts/test/release-artifact-test.sh` for the verifier, layout, linkage and launcher refusals, `apps/loopex_cli/test/provider_launch_test.exs` and `version_command_test.exs`, and `apps/loopex_llm_reqllm/test/provider_build_test.exs` (extended) for `--relocatable`; `apps/loopex_cli/test/service_start_test.exs` proves the installed command is resolved from the escript's own location | `installed-artifact` (ADR 0038): build with pinned inputs and the linkage table, manifest and verifier, a quarantined download cleared by the documented step on macOS, clean-host assertions, loaded-image probe and `loopex version`, with every Mix, Hex and Rebar step resolved from the pinned toolchain's `PATH` into writable build-only locations, on `darwin-arm64` and in a clean Ubuntu 22.04 `linux-x86_64` container. The closure matrix (D18) runs it inside the full release check on `serenity` and with `--only installed-artifact` on macOS |
 | 2 | `apps/loopex_cli/test/home_test.exs`, `config_inspection_test.exs` (extended), `config_writer_test.exs` | Installed lane step 3 |
 | 3 | `apps/loopex_composition/test/store_backup_test.exs`, `store_restore_command_test.exs` (both attestation forms, `--resume`, every refusal, the lookup answer after an unresolved result), `restore_workflow_test.exs` (extended: a backup holding the helper job index committed by `restore/2` with that index copied byte for byte and in every manifest, while a non-job-index unknown member under `delegation/` still refuses `invalid_current_history`), `store_backup_test.exs` also proving that backup writes nothing to the job index and copies it, `delegation_readiness_code_test.exs`; `apps/loopex_executor_local/test/restore_codec_test.exs` (extended); `apps/loopex_cli/test/store_command_test.exs`; `apps/loopex_daemon/test/readiness_closed_root_test.exs` | Installed lane step 5, the restore half |
-| 4 | `apps/loopex_cli/test/service_start_test.exs`, `service_command_test.exs`, `service_detach_pty_test.exs`, `live_service_test.exs`, `daemon_configuration_test.exs`; `apps/loopex_daemon/test/readiness_method_test.exs`, `command_test.exs` (extended); the Node contract lane decoding `daemon.readiness`. Under ADR 0037: readiness asked while a helper classification slice is held answers within 1,000 ms with a truthful `classifying` state from a nonblocking source, without a second writer of helper truth; `service status` emits one closed JSON result from its named reads, including helper activations; the `ExitStatus` table uses every status 65 to 125 except the retired 114 exactly once | Installed lane step 4's status and diagnostic commands |
-| 5 | `apps/loopex_cli/test/attached_chat_grammar_test.exs`, `attached_chat_test.exs`, `attached_chat_detach_test.exs`, `attached_chat_signal_test.exs`, `attached_chat_lease_test.exs`, `attached_chat_reconnect_test.exs`, `live_daemon_test.exs` (extended), `daemon_helpers_test.exs`, `daemon_helper_restart_test.exs`, `chat_configuration_test.exs` (extended), with ADR 0071's helper-child activation-counting cases, including the helper permit's atomic registry operation at the real `ConnectionRegistry` boundary (an activated-without-session and an unknown disposition, preserved through a post-create parent-binding failure) and the one counted sum in both directions (held permits refuse a client reservation `activation_ceiling_reached`, and client activations refuse a permit); `apps/loopex_daemon/test/helper_route_guard_test.exs` (extended); `apps/loopex/test/runtime_create_with_genesis_detailed_test.exs` | Attended: the reconnect case and `m8.service-review` in the outcome-6 record |
-| 6 | — | `installed-artifact` steps 1 to 6 on each host with complete output and archive evidence; the attended record, `--only m8-operator` on macOS, by an identified operator in a separate user account, following the runbook through install, `chat --service`, close and reconnect, `m8.service-review` (M7's `m7.review` profile through the service, a detach while a helper runs, and `service stop` during a second helper with the stop-only result after restart), backup, restore and removal, where removal runs `loopex auth logout` for every signed-in route before deleting anything and then asserts that no Loopex keychain item remains; the Linux installed lane's removal step asserts that no Loopex Secret Service item remains |
-| 7 | `apps/loopex_composition/test/root_format_test.exs` (concurrent marker publication with a deterministic gate at the link-before-unlink cut), `placement_root_format_test.exs`, `composition_root_format_test.exs`, `store_adopt_test.exs` (D17: the `adopting` marker refused by every entrypoint, `--old-writer stopped` required, a real synchronized `Placement.acquire/2` and daemon start attempted immediately after the `adopting` publication refused while adopt holds the lock and attempted immediately after the rename admitted only after adopt releases, two concurrent adopters of which exactly one proceeds, a real M7-style lock-taking writer (a separate process on the delivered `Placement.acquire/2` path, as the M7 daemon and CLI take it) refused `placement_active` while adopt holds the lock, the synthetic writers that take no lock labelled as non-cooperating writers, an old-build writer before and after the audit manifest, a kill before the rename and `root_changed` leaving `adopting`, a kill after the rename leaving a committed current root, a rerun redoing the full audit) and, on the retained root the `v0.4.0` build wrote (D24), refusal by every entrypoint with the root byte-identical, then an adopt through `StoreAdmin.test_adopt/3` with the workspace reference the fixture's genesis records, whose full audit passes and which changes nothing but the marker: the audit-and-marker proof with the workspace check bypassed; `apps/loopex_cli/test/root_format_fixture_test.exs` (the retained format-1 root and the retained M7 root through the full audit, exact re-encoding by the pure codecs and the named boundary checks; D28); `apps/loopex_cli/test/store_marker_entrypoints_test.exs`; `apps/loopex_daemon/test/daemon_root_format_test.exs` | Installed lane step 5: the retained M7-written root (D24) refused by name and byte-identical, and a backup taken by the candidate restored under it and served. `m7-adopt` in the `serenity` full check (D26), the product path: the `v0.4.0` release built in a temporary tree writes and stops a root on a live temporary workspace with a conversation and one helper run, the candidate's own `loopex store adopt --old-writer stopped` adopts it with no test seam, and the candidate's `doctor` reports `marker: current`, its offline `sessions` lists the conversation, the only session the M7 build catalogued, a read-only audit (`m7_adopt_child_audit_test.exs`) checks the helper child's journal and terminal record against the helper run log, and every M7 record stays byte-identical; a run without exactly one helper run whose child was prompted is evidence unavailable before adopt, never a candidate failure, as ADR 0072's [`m7-adopt` lane](../adr/0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-m7-adopt) states |
-| 8 | `apps/loopex_llm_reqllm/test/sign_in_profiles_test.exs`, `sign_in_routes_test.exs`, `chatgpt_reply_ceiling_test.exs`, `provider_bridge_test.exs` (extended), `sign_in_id_token_test.exs`; `apps/loopex_composition/test/sign_in_adc_test.exs`, `sign_in_store_test.exs`, `sign_in_refresh_test.exs`, `credential_plane_test.exs` (extended), `chatgpt_summarizer_test.exs`; `apps/loopex/test/sign_in_required_settlement_test.exs`. Under ADR 0073 these cover: ID-token signature verification against the provider's JWKS (forged, unknown-key and rotation negatives) and the validated subject paired with the token generation, refusing a mismatch in either direction after a different-account write cut and a restart before metadata publication; the ADC source and Google's refresh-response merge; one shared streaming reply ceiling proved through both the companion and the in-process caller, summarization included; and the terminal, no-accounting sign-in refusal on any legal attempt, including a route that becomes unavailable between attempts. The auth directory, the ADC directory and every state root, backup, destination and available restore source stay separate by resolved path under [ADR 0037's path-separation rule](../adr/0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation) (D27), refused before any token or root write, with overrides and a changed `HOME`, which `auth_separation_test.exs` proves with a credential-shaped canary; `apps/loopex_protocol/test/sign_in_required_vectors_test.exs`; `apps/loopex_cli/test/auth_command_test.exs`, `daemon_sign_in_test.exs`, `ask_sign_in_test.exs`; `apps/loopex_daemon/test/command_test.exs` (extended); the Node client decoding the new vectors. The tagged `sign_in_keychain_test.exs` (`:macos_keychain`, temporary keychain) and `sign_in_secret_service_test.exs` (`:secret_service`, under `dbus-run-session`) are excluded from the fast check and run in release lanes | `macos_keychain` with `--only` on macOS and `secret_service` in the `serenity` full check (D18), each required to execute its cases. Mounts are outside the separation guarantee (D27), so no release lane creates one. Attended, in the `serenity` full check, each gated on its provider's client and each under a temporary `HOME` with the store it names: `real-sign-in-openai` (`auth login openai --store file`, whose model list, fetched before the login's write, must be recorded non-empty within its bounds and name the lane's model (D25); one `chatgpt:` conversation through the installed service; a forced refresh; logout with revocation; then a second `auth login openai` under the generation floor, which must authorize under the floor's issued client and write a generation above the floor, with its model list recorded again; ADR 0073 verification items 1 and 11 to 15); `real-sign-in-gemini` (the same for `vertex:`, through the `loopex` source with `--store file` and through the `adc` source, which writes only metadata, from a file real `gcloud` wrote under that `HOME`, against a maintainer-owned project); `real-sign-in-anthropic` (refused `sign_in_unavailable` until a sanctioned registration exists, writing nothing; that tested refusal is the disabled route's proof under D16). No real sign-in lane uses a keychain or the Secret Service. Tokens are redacted from retained outputs |
+| 4 | `apps/loopex_cli/test/service_start_test.exs`, `service_command_test.exs`, `service_detach_pty_test.exs`, `live_service_test.exs`, `daemon_configuration_test.exs`; `apps/loopex_daemon/test/readiness_method_test.exs`, `readiness_slice_test.exs`, `command_test.exs` (extended); `apps/loopex_cli/test/service_status_test.exs`; the Node contract lane decoding `daemon.readiness`. Under ADR 0037: readiness asked while a helper classification slice is held answers within 1,000 ms with a truthful `classifying` state from a nonblocking source, without a second writer of helper truth; `service status` emits one closed JSON result from its named reads, including helper activations; the `ExitStatus` table uses every status 65 to 125 except the retired 114 exactly once | Installed lane step 4's status and diagnostic commands |
+| 5 | `apps/loopex_cli/test/attached_chat_grammar_test.exs`, `attached_chat_test.exs`, `attached_chat_detach_test.exs`, `attached_chat_signal_test.exs`, `attached_chat_lease_test.exs`, `attached_chat_reconnect_test.exs`, `live_daemon_test.exs` (extended), `daemon_helpers_test.exs`, `daemon_helper_restart_test.exs`, `chat_configuration_test.exs` (extended), `daemon_helper_activation_test.exs`, with ADR 0071's helper-child activation-counting cases, including the helper permit's atomic registry operation at the real `ConnectionRegistry` boundary (an activated-without-session and an unknown disposition, preserved through a post-create parent-binding failure) and the one counted sum in both directions (held permits refuse a client reservation `activation_ceiling_reached`, and client activations refuse a permit); `apps/loopex_composition/test/delegation_activation_permit_test.exs`, `delegation_create_parent_detailed_test.exs`; `apps/loopex_daemon/test/helper_activation_registry_test.exs`, `helper_parent_activation_test.exs`, `helper_route_guard_test.exs` (extended); `apps/loopex/test/runtime_create_with_genesis_detailed_test.exs` | Attended: the reconnect case and `m8.service-review` in the outcome-6 record |
+| 6 | — | `installed-artifact` steps 1 to 6 on each host with complete output and archive evidence; the attended record, `--only m8-operator` on macOS, by an identified operator in a separate user account, following the runbook through install, `chat --service`, close and reconnect, `m8.service-review` (M7's `m7.review` profile through the service, a detach while a helper runs, and `service stop` during a second helper with the stop-only result after restart), backup, restore and removal, where removal runs `loopex auth logout` for every signed-in route before deleting anything and then asserts, by a read-only query, that no Loopex keychain item remains; the Linux installed lane's removal step asserts the same of the Secret Service |
+| 7 | `apps/loopex_composition/test/root_format_test.exs` (concurrent marker publication with a deterministic gate at the link-before-unlink cut), `placement_root_format_test.exs`, `composition_root_format_test.exs`, `store_adopt_test.exs` (D17: the `adopting` marker refused by every entrypoint, `--old-writer stopped` required, a real synchronized `Placement.acquire/2` and daemon start attempted immediately after the `adopting` publication refused while adopt holds the lock and attempted immediately after the rename admitted only after adopt releases, two concurrent adopters of which exactly one proceeds, a real M7-style lock-taking writer (a separate process on the delivered `Placement.acquire/2` path, as the M7 daemon and CLI take it) refused `placement_active` while adopt holds the lock, the synthetic writers that take no lock labelled as non-cooperating writers, an old-build writer before and after the audit manifest, a kill before the rename and `root_changed` leaving `adopting`, a kill after the rename leaving a committed current root, a rerun redoing the full audit) and, on the retained root the `v0.4.0` build wrote (D24), refusal by every entrypoint with the root byte-identical, then an adopt through `StoreAdmin.test_adopt/3` with the workspace reference the fixture's genesis records, whose full audit passes and which changes nothing but the marker: the audit-and-marker proof with the workspace check bypassed; `apps/loopex_cli/test/root_format_fixture_test.exs` (the retained format-1 root and the retained M7 root through the full audit, exact re-encoding by the pure codecs and the named boundary checks; D28); `apps/loopex_cli/test/store_marker_entrypoints_test.exs`; `apps/loopex_daemon/test/daemon_root_format_test.exs` | Installed lane step 5: the retained M7-written root (D24) refused by name and byte-identical, and a backup taken by the candidate restored under it and served. `m7-adopt` in the `serenity` full check (D26), the product path: as host prerequisites before the case is recorded (D34), the `v0.4.0` release built in a temporary tree writes and stops a root on a live temporary workspace with a conversation and one helper run, and the shape precheck reads it; then the recorded case: the candidate's own `loopex store adopt --old-writer stopped` adopts it with no test seam, and the candidate's `doctor` reports `marker: current`, its offline `sessions` lists the conversation, the only session the M7 build catalogued, a read-only audit (`m7_adopt_child_audit_test.exs`) checks the helper child's journal and terminal record against the helper run log, and every M7 record stays byte-identical; a failed build or write, or a run without exactly one helper run whose child was prompted, is a pre-start stop, never a candidate failure, as ADR 0072's [`m7-adopt` lane](../adr/0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-m7-adopt) states |
+| 8 | `apps/loopex_llm_reqllm/test/sign_in_profiles_test.exs`, `sign_in_routes_test.exs`, `chatgpt_reply_ceiling_test.exs`, `provider_bridge_test.exs` (extended), `sign_in_id_token_test.exs`; `apps/loopex_composition/test/sign_in_adc_test.exs`, `sign_in_store_test.exs`, `sign_in_refresh_test.exs`, `credential_plane_test.exs` (extended), `chatgpt_summarizer_test.exs`; `apps/loopex/test/sign_in_required_settlement_test.exs`. Under ADR 0073 these cover: ID-token signature verification against the provider's JWKS (forged, unknown-key and rotation negatives) and the validated subject paired with the token generation, refusing a mismatch in either direction after a different-account write cut and a restart before metadata publication; the ADC source and Google's refresh-response merge; one shared streaming reply ceiling proved through both the companion and the in-process caller, summarization included; and the terminal, no-accounting sign-in refusal on any legal attempt, including a route that becomes unavailable between attempts. The auth directory, the ADC directory and every state root, backup, destination and available restore source stay separate by resolved path under [ADR 0037's path-separation rule](../adr/0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation) (D27), refused before any token or root write, with overrides and a changed `HOME`, which `auth_separation_test.exs` proves with a credential-shaped canary; `apps/loopex_protocol/test/sign_in_required_vectors_test.exs`; `apps/loopex_cli/test/auth_command_test.exs`, `daemon_sign_in_test.exs`, `ask_sign_in_test.exs`; `apps/loopex_daemon/test/command_test.exs` (extended); the Node client decoding the new vectors. The tagged `sign_in_keychain_test.exs` (`:macos_keychain`, temporary keychain) and `sign_in_secret_service_test.exs` (`:secret_service`, under `dbus-run-session`) are excluded from the fast check and run in release lanes | `macos_keychain` with `--only` on macOS and `secret_service` in the `serenity` full check (D18), each required to execute its cases. Mounts are outside the separation guarantee (D27), so no release lane creates one. Attended, in the `serenity` full check, each gated on its provider's client and each under a temporary `HOME` with the store it names: `real-sign-in-openai` (`auth login openai --store file`, whose model list, fetched before the login's write, must be recorded non-empty within its bounds and name the lane's model (D25); one `chatgpt:` conversation through the installed service; a forced refresh; logout with revocation; then a second `auth login openai` under the generation floor, which must authorize under the floor's issued client and write a generation above the floor, with its model list recorded again; ADR 0073 verification items 1, 2 and 11 to 15); `real-sign-in-gemini` (the same for `vertex:`, through the `loopex` source with `--store file` and through the `adc` source, which writes only metadata, from a file real `gcloud` wrote under that `HOME`, against a maintainer-owned project, recording ADR 0073 verification items 5 and 7); `real-sign-in-anthropic` (refused `sign_in_unavailable` until a sanctioned registration exists, writing nothing; that tested refusal is the disabled route's proof under D16). No real sign-in lane uses a keychain or the Secret Service. Tokens are redacted from retained outputs |
 
 ADR 0073's sixteen
 [verification items](../adr/0073-provider-oauth-sign-in-technical.md#technical-adr-0073-verification)
-each carry their own disposition in ADR 0073: 1 to 10 (refresh-token
-invalidation, partner client, allowed models, launch date, scope
-classification, token lifetime, ADC field names, regional Vertex host,
-Anthropic's terms, and each provider's ID-token issuer, JWKS URI and signing
-algorithm), 11 and 12 (the ID token's audience and the issued client
-returned at the callback; the nonce and a later authorize under the issued
-client), 13 (`resource` on refresh), 14 and 15 (the plan token's model
-listing and its bounds) and 16 (the keychain tool's maximum input line).
-Each is checked in W5 where it lands and recorded there, items 1 and 11 to
-15 by `real-sign-in-openai` and 16 by the tagged `sign_in_keychain_test.exs`,
-and none becomes a silent default.
+each carry their own disposition there. Those settled by a lane or test are
+checked where they land and recorded there: items 1, 2 and 11 to 15 by
+`real-sign-in-openai`, items 5 and 7 by `real-sign-in-gemini`, and item 16 by
+the tagged `sign_in_keychain_test.exs`. Items 2 and 5 follow from the
+provider actions [below](#technical-plan-open) and gate only those lanes.
+None becomes a silent default.
 
 Under D16, closing outcome 8 requires positive proof from
 `real-sign-in-openai` and `real-sign-in-gemini`. The deliberately disabled
 Anthropic route is proved by its tested refusal in `real-sign-in-anthropic`,
-which needs no deferral. If the OpenAI or Google client is unavailable at
-closure, that lane is evidence unavailable, not a pass, and closing outcome 8
-without its positive proof is a deferral that needs the maintainer's recorded
-decision.
+which needs no deferral. A pinned lane whose client is unavailable is
+evidence unavailable, not a pass; closing outcome 8 without a provider's
+positive proof needs that lane's deferral, decided before the candidate
+(D36).
 
 The two repository checks apply with the release-check changes below and the
 closure matrix above. The evidence page is `docs/evidence/M8-closure-runs.md`,
@@ -277,14 +289,17 @@ outside the repository. Under the M7
 [scaffold rule](M7-technical.md#technical-plan-evidence) it fixes the
 campaign and genesis digest of the M8 index and the committed pre-candidate
 head digest and count, and predeclares `Pending` slots for the index path,
-the final head digest and count, and, for each run root (the `serenity` run's
-`$retain/m7-runs` and the macOS run's `--writer-retain`), one cell holding
-the count and SHA-256 of its ordered invocation-log reference list. For
-each campaign that ended before the candidate's (D30, item 1 below) it
-holds one row: the ended index's path, its final head digest and count, the
-candidate commits it recorded, and the SHA-256 of its unresolved-case list,
-whose lines the page lists as unresolved. No case of an ended campaign is
-counted toward closure.
+the final head digest and count, and a list of run-root cells, one per
+invocation's run root (each `serenity` invocation's `$retain/m7-runs` and
+each macOS invocation's `--writer-retain`), each holding the count and
+SHA-256 of that root's ordered invocation-log reference list. For each
+campaign that ended before the candidate's (D30, item 1 below) it holds one
+row: the ended index's path, its final head digest and count, the candidate
+commits it recorded, and the SHA-256 of its unresolved-case list, whose lines
+the page lists as unresolved. Those rows name exactly the campaigns with an
+`index-head:` line in `docs/plans/M8.md` other than the closing one, and the
+closing campaign recorded no candidate those rows name; the closure review
+checks both. No case of an ended campaign is counted toward closure.
 
 <a id="technical-plan-release-check"></a>
 ### Release-Check Changes
@@ -300,24 +315,29 @@ guide pair's matching text, before the first M8 lane is recorded. They
 reuse the delivered writer `M7Evidence.AttemptWriter` and event codec
 `M7Evidence.AttemptEvents` unchanged: no new event, member, mechanical
 result or verdict, and no import of results written elsewhere.
-Line numbers are those of `4c05628f`, unchanged at `7b4293a6`; `matrix.ex`
+Line numbers are those of `4c05628f`, unchanged at `49eb2d6d`; `matrix.ex`
 below is `loopex.m7_matrix.ex`.
 
 1. **M8 campaign and its committed anchor.** The full matrix and every
-   indexed M8 lane take `--attempts-index FILE` naming one M8 index, campaign
-   `m8-closure-1`. Like every index, it starts with the delivered genesis
+   indexed M8 lane take `--attempts-index FILE` naming the current M8 index,
+   first campaign `m8-closure-1`. Like every index, it starts with the delivered genesis
    (campaign and codec version 1) and writer designation (writer
    `maintainer-serenity`, host `serenity`, ownership epoch 1)
    (`attempt_events.ex:47-48`); it has no other header, and neither the
    concept file nor the release label is an index member. It is created once
    on `serenity`, from a clean checkout of the M8 branch, by
    `mix loopex.m7_matrix --create --campaign m8-closure-1 --attempts-index
-   FILE --writer maintainer-serenity --host serenity --markers DIR`.
+   FILE --writer maintainer-serenity --host serenity --markers DIR
+   --checkout DIR --candidate SHA`.
    `--create` takes its campaign from `--campaign` instead of the delivered
    `campaign/0`, which reads the M7 fixture manifest (`matrix.ex:269-274`);
    it takes no `--case` and admits no lane, writes the two records through
    `AttemptWriter.create/4`, and prints `index-head: m8-closure-1 2 SHA256`
-   with the designation record's digest. The next commit appends that line to
+   with the designation record's digest. A `--create` that does not print
+   that line leaves a file no committed line anchors; it is retained aside
+   unchanged and `--create` runs again at a new path with the next campaign
+   number, so no committed line can anchor the torn file, whose genesis
+   names the earlier campaign. The next commit appends that line to
    `docs/plans/M8.md`'s Progress and Evidence section, below its table, as
    the M7 plan places its heads. Until that commit is checked out, every
    admission refuses `committed_attempt_head_unavailable`
@@ -337,10 +357,14 @@ below is `loopex.m7_matrix.ex`.
    lines 45-50: no replacement campaign merely because an acknowledgement
    was lost). A consumed non-pass (`fail`, `unavailable`, or a `started`
    case never finished, including one whose `started` reply was lost) ends
-   campaign `m8-closure-N`: continuation refuses `consumed_lane_failure`, a
-   join refuses `consumed_matrix_failure`, and a later candidate's new
-   matrix refuses `post_head_consumed_case` or, once that head is committed,
-   `prior_failure_unauthorized` (`attempt_events.ex:256-283`, `:416-417`).
+   campaign `m8-closure-N`. The index refuses only the lane that holds it:
+   its continuation refuses `consumed_lane_failure`, a join to its matrix
+   `consumed_matrix_failure`, and that lane on a later candidate
+   `post_head_consumed_case` or, once the head is committed,
+   `prior_failure_unauthorized`, which looks only at the same lane
+   (`attempt_events.ex:256-283`, `:377-382`). Other lanes of the ended index
+   may still admit, but closure needs a pass of every lane on one candidate
+   and matrix (item 4), so it cannot complete there.
    No production code appends the `reviewed`, `authorized_next_candidate`
    or `succession` records, and none is added. The next candidate instead
    gets a new index file, created as above with `--campaign
@@ -355,7 +379,7 @@ below is `loopex.m7_matrix.ex`.
    closure review checks the candidate against those rows.
 
    The recorder's `--concept` (`:255`) names `docs/plans/M8.md`, and
-   `CaseRunner`, which reads `docs/plans/M7.md` today (`case_runner.ex:120`),
+   `CaseRunner`, which reads `docs/plans/M7.md` today (`case_runner.ex:119`),
    gains `--concept FILE`, which the runner passes for the M7 conversation
    lanes (`:452-454`), so they admit against M8's heads. M8 runs never write
    the M7 index, which stays the record of M7's runs. The delivered M7 lanes
@@ -374,10 +398,11 @@ below is `loopex.m7_matrix.ex`.
    started anywhere but `serenity` refuses before staging, because the
    recorder starts before the fresh-source extraction (`:268`). The `PASS
    (closure-incomplete: cross_uid not run)` branch (`:471-472`) is removed.
-2. **Release version.** `release_version` (`:110`) becomes `0.5.0`, the
-   `VERSION` the candidate carries. The runner refuses before staging when
-   the checkout's `VERSION` differs, and the extraction check (`:329`) is
-   unchanged. The index pins no version.
+2. **Release version.** `release_version` (`:110`) becomes `0.5.0` in the
+   step-8 commit that advances `VERSION`, so the pre-merge lanes of steps 2
+   to 7 keep passing the extraction check (`:329`) at `0.3.0`. The runner
+   also refuses before staging when the checkout's `VERSION` differs from
+   `release_version`. The index pins no version.
 3. **Lane registration.** `--only` (`release-lane.sh:21`) admits
    `installed-artifact`, `secret_service`, `macos_keychain`,
    `real-sign-in-openai`, `real-sign-in-gemini`, `real-sign-in-anthropic`,
@@ -394,10 +419,16 @@ below is `loopex.m7_matrix.ex`.
    in a temporary tree under the current toolchain pair, which that tag's
    `.tool-versions` names; runs its chat under `with_m7_credentials`, since
    the M7 build has no credential-free chat provider; and runs the
-   candidate's read-only shape precheck, adopt, `doctor`, offline
-   `sessions` and the read-only child audit under `without_credential`; a
-   shape precheck that reports `unavailable` stops the lane before adopt as
-   evidence unavailable. Each tagged lane must execute its stated case count.
+   candidate's read-only shape precheck. These three are host prerequisites
+   run before the case's `start` (D34): a failed build or write, or a
+   precheck that reports `unavailable`, is a pre-start `stop` (item 7),
+   resumable on the same commit, and their provider calls are not
+   attempt-recorded. The recorded case is the candidate's adopt, `doctor`,
+   offline `sessions` and the read-only child audit, under
+   `without_credential`. `release_needs_provider`
+   (`release-lane.sh:169-175`) also answers yes for `installed-artifact` and
+   `m7-adopt`, which need the provider keys. Each tagged lane must execute
+   its stated case count.
    A lane that executes none, or whose host refuses its session
    bus or Docker, is evidence unavailable, recorded as item 7 states and
    never printed as a pass.
@@ -472,10 +503,25 @@ below is `loopex.m7_matrix.ex`.
    writes it to the lane command's standard output, so it passes through the
    redactor into `$retain/m8-operator.log` before that log's
    `lane-evidence:` line (`release-lane.sh:344-357`) and the one log item 7
-   records carries it. The `real-sign-in-*` lanes run on the `serenity` host
-   itself, not in the clean container, against the `linux-x86_64` archive
-   the same run's `installed-artifact` lane built and verified, each under a
-   temporary `HOME` with `--store file`. The delivered refusal of attended
+   records carries it. The runner holds no value of that account, so its
+   redactor cannot mask that account's keys or tokens: the runbook enters
+   the keys without echo, `loopex` prints no token (ADR 0073), and the
+   operator reviews the transcript before handing it back; a transcript that
+   shows a credential is not retained, and the case finishes `unavailable`.
+   The `real-sign-in-*` lanes run on the `serenity` host itself, not in the
+   clean container, each under a temporary `HOME` with `--store file`.
+
+   The `real-sign-in-*` lanes and `m8-operator` use the archive this
+   matrix's `installed-artifact` case built and verified, whose log names the
+   archive's path and SHA-256. When an invocation reuses that case, the
+   recorder's `plan skip` line also names the reused evidence's reference,
+   `plan skip KEY SHA256 PATH` (extending `matrix.ex:91-98` and its parser,
+   `release-lane.sh:103`); the runner requires the log at PATH, read on
+   macOS over the same SSH destination, to have that SHA-256, and the
+   archive it names to have its recorded SHA-256, before such a lane's
+   `start`. Any mismatch or missing file is a pre-start `stop` of that lane
+   (item 7), so the earlier invocation's retained directory must be kept.
+   The delivered refusal of attended
    rows under `--only` stays for `real-provider-1`, `real-provider-2` and
    `m7-operator`.
 6. **Credentials.** `:28` keeps every provider value unexported, and `loopex
@@ -523,19 +569,38 @@ below is `loopex.m7_matrix.ex`.
    and no `start` is sent to get one. When the retries are spent no `stop`
    is sent: the runner prints evidence unavailable with the local refusal
    log's path, closes the recorder and exits 2, and the case, with no
-   record, consumes nothing. Once the host is fixed, the lane continues on
-   the same commit, with `--resume-matrix` on `serenity` or the same
-   `--join-matrix` on macOS, without dispatching a completed case again.
+   record, consumes nothing.
+
+   A case with no record can also follow a runner killed between one case's
+   `finish` and the next case's `start`. The delivered continuation refuses
+   such a lane `not_dispatched_evidence_unavailable`
+   (`attempt_events.ex:318-319`), so the recorder's `--resume` and `--join`
+   admissions and `CaseRunner`'s `:auto` (`case_runner.ex:359-379`), on that
+   refusal, first record each selected case that has no history
+   `not_dispatched` with `evidence_incomplete_pre_dispatch` and, as
+   evidence, an invocation record written in the run root as the recorder
+   writes its own (`matrix.ex:236-245`), through the delivered append, then admit
+   again. A case with no record was never dispatched, because no lane runs
+   before its synced `started` record; the writer lock admits one recorder,
+   and one killed midway leaves the rest for the next. Once the host is
+   fixed, the lane continues on the same commit, with `--resume-matrix` on
+   `serenity` or the same `--join-matrix` on macOS, without dispatching a
+   completed case again.
 
    The runner prints evidence unavailable and exits 2 for an unavailable or
    stopped case, or when the M7 wrapper exits 2, as it does when its writer
    open refuses `attempt_writer_contention` (`case_runner.ex:151-152`, `:236`,
    replacing the RED exit at `check-release.sh:466`), and exits 1 for a
-   failure. The wrapper's complete output, which ends with its refusal line
-   `m7-fixture-chat: evidence unavailable: REASON` (`case_runner.ex:236`),
-   passes through the lane redactor into `$retain/<lane>.log`, so the
-   retained evidence keeps the underlying refusal. Exit 2 is never a pass:
-   closure counts only `pass` records (item 4).
+   failure. The wrapper exits 1 for both a failed case and a pre-dispatch
+   stop (`case_runner.ex:235`), so for an M7 conversation lane the runner
+   prints RED and exits 1 for either; its retained log's
+   `m7-fixture-chat: stopped:` line tells them apart, and a stop stays
+   resumable on the same commit. The wrapper's complete output, which ends
+   with its result line, such as `m7-fixture-chat: evidence unavailable:
+   REASON` (`case_runner.ex:236`), passes through the lane redactor into
+   `$retain/<lane>.log`, so the retained evidence keeps the underlying
+   refusal. Exit 2 is never a pass: closure counts only `pass` records
+   (item 4).
 
    Interruptions, replays and duplicates keep the delivered barriers:
 
@@ -559,9 +624,10 @@ below is `loopex.m7_matrix.ex`.
      invocation on either host refuses `attempt_writer_contention`
      (`attempt_writer.ex:215-221`), so two recorders never write.
    - A second `finish` of a completed case, with the same or another result,
-     refuses `invalid_attempt_append`, because the case history admits no
-     transition from `completed` to `completed` (`attempt_events.ex:566`,
-     `attempt_writer.ex:557-566`), and nothing is appended.
+     refuses `invalid_attempt_case_history`, because the case history admits
+     no transition from `completed` to `completed` (`attempt_events.ex:566`),
+     which the writer passes through (`attempt_writer.ex:565`), and nothing is
+     appended.
    - An invocation of a lane that ended with every case passing answers
      `plan ended` and runs nothing (`matrix.ex:104`); one that ended in a
      failure refuses.
@@ -599,9 +665,15 @@ below is `loopex.m7_matrix.ex`.
      before the transport closes, each end the campaign; an
      `m8-closure-2` index created after them admits on the next candidate
      and plans every case `plan run`, including one that passed in the
-     ended index; the ended index is byte-unchanged after the new
-     campaign's run; and the recorder on the ended index refuses a new
-     matrix and a join, so no case of it reaches a PASS line.
+     ended index; and the ended index is byte-unchanged after the new
+     campaign's run. On an ended index, with a consumed failure in turn in
+     the `release-matrix` lane, an M7 conversation lane and `macos-closure`,
+     that lane refuses on the next candidate while the other lanes admit,
+     and no invocation prints a closure PASS. A `--resume` after a runner
+     killed between one case's `finished` reply and the next `start`, and a
+     `--join` after a pre-start copy that spent its retries on a case that
+     is not the lane's first, each record the history-less cases
+     `not_dispatched` and then run them.
    - `apps/loopex_cli/test/m7_matrix_runner_test.exs` (new). The runner's
      own `lane` and recorder helpers from `scripts/lib/release-lane.sh`, in
      a disposable tree as `scripts/test/check-release-test.sh` builds one,
@@ -620,17 +692,25 @@ below is `loopex.m7_matrix.ex`.
      the `not_dispatched` rows reference that copy, whose bytes still match
      after the source directory is removed, and the same `--join-matrix`
      then runs the stopped cases. A pre-start copy that fails every retry
-     sends no `stop`, exits 2 and leaves the index unchanged.
+     sends no `stop`, exits 2 and leaves the index unchanged. A resumed
+     invocation that reuses `installed-artifact` hands the archive-consuming
+     lane the archive its `plan skip` reference names, and a changed log or
+     archive stops that lane before its `start`.
    - `apps/loopex_cli/test/m7_case_runner_test.exs` (extended). `--concept`
      admits against the named file's heads and refuses when that file has
-     none for the index's campaign.
+     none for the index's campaign; `:auto` after a wrapper killed between
+     two cases records the history-less cases `not_dispatched` and runs
+     them.
    - `scripts/test/check-release-test.sh` (extended). The macOS selection
      rules, the four new options' refusals, `--attempts-index` refused with
      any other selection, an M7 wrapper exit 2 printed as evidence
      unavailable with exit 2 and its refusal line kept in the retained lane
      log, and the final lines.
 
-   The closure run itself proves the SSH transport.
+   The SSH transport is proved by a rehearsal before the closure candidate:
+   one macOS join over SSH to a scratch index on `serenity`, admitted
+   against a scratch commit that carries its head line, both discarded
+   afterwards.
 
 <a id="technical-plan-open"></a>
 ### Open for the Maintainer
@@ -638,7 +718,10 @@ below is `loopex.m7_matrix.ex`.
 Concept: [Design decisions](M8.md#concept-plan-decisions).
 
 These are actions with providers, not design gaps. Each gates only its
-`real-sign-in-*` lane; nothing else in M8 waits on them.
+`real-sign-in-*` lane, which records the ADR 0073 verification item it
+settles (2 for OpenAI, 5 for Google); nothing else in M8, acceptance
+included, waits on them. A lane whose action is not done by the closure
+candidate is deferred under D36 or blocks closure.
 
 1. **OpenAI client.** Confirm that Loopex registers by Sign in with ChatGPT's
    dynamic registration as a locally run open-source app, and approve the
@@ -664,12 +747,12 @@ Concept: [Rollout](M8.md#concept-plan-rollout).
 | Surface | Boundary |
 | --- | --- |
 | Local storage container | Retained until M9's explicit engine migration; the `loopex-root-format 1` marker identifies the root format and proves nothing about other builds |
-| Root format number | Any change to a durable member, shape or encoding of a root, nested and delegated shapes included, advances `loopex-root-format N` in any release, a patch included, and existing roots are refused until a separately decided migration exists (D28); `root_format_fixture_test.exs` decodes a retained format-1 root and the retained M7 root through the full audit, requires exact re-encoding by the pure codecs and checks five named limits, so a change that breaks a retained record, a pure codec's bytes or one of those limits fails the fast check until a new fixture is produced, which D28 pairs with a new number; that pairing, and what the retained roots do not reach, is held by review (ADR 0072) |
+| Root format number | Any change to a durable member, shape or encoding of a root, nested and delegated shapes included, advances `loopex-root-format N` in any release, a patch included, and existing roots are refused until a separately decided migration exists (D28); `root_format_fixture_test.exs` decodes a retained format-1 root and the retained M7 root through the full audit and requires exact re-encoding by the pure codecs, and five named limits are checked, three there and two by the delivered `delegation_ledger_codec_test.exs` and `session_index_codec_test.exs` (ADR 0072), so a change that breaks a retained record, a pure codec's bytes or one of those limits fails the fast check until a new fixture is produced, which D28 pairs with a new number; that pairing, and what the retained roots do not reach, is held by review (ADR 0072) |
 | Durable records and host ledger | Delivered M7 versions as the current format; the settled-attempt record and run terminal admit the `provider_sign_in_required` category, proved by `sign_in_required_settlement_test.exs`; no older-reader or older-root promise |
 | Backup layout and its records | New experimental current-format contracts under ADR 0072: `loopex_store_backup_capture_v1`, `loopex_store_restore_attestation_v1` and `loopex_store_restore_continuation_v1` |
-| Restore transition | Accepted ADR 0051 with ADR 0072's two clause amendments: the commands are its operator front end, and the discard attestation form admits an older backup for a lost source. The delivered `restore/2` always leaves the disposable helper job index out of its audit index, as adopt and backup do, while copying it under the complete manifest, so a root holding one commits where it was refused `invalid_current_history` (D29); there is no `restore/3`. ADR 0051's walks and result grammar are unchanged. A latest-form plan's bytes are unchanged |
+| Restore transition | Accepted ADR 0051 with ADR 0072's two clause amendments: the commands are its operator front end, and the discard attestation form admits an older backup for a lost source. M8 changes `restore/2` to always leave the disposable helper job index out of its audit index, as adopt and backup do, narrowly amending ADR 0056's complete helper-namespace audit (D35), while copying it under the complete manifest, so a root holding one commits where it was refused `invalid_current_history` (D29); there is no `restore/3`. ADR 0051's walks and result grammar are unchanged. A latest-form plan's bytes are unchanged |
 | Daemon protocol | `loopex.experimental/4` gains `daemon.readiness` in its ADR 0044 manifest's `methods` inventory, and the `provider_sign_in_required` reason, each with schema, vectors and pinned digests updated in place |
-| Foreground protocol and embedded API | `loopex.experimental/3` gains the `provider_sign_in_required` reason. Under ADR 0073: the `chat_terminal_outcome` definition gains its `failed_reasons` list; `LoopexProtocol.Session.CompactResult` admits the category; `session-snapshot.v3.json`, `standalone-compact-result.v1.json` and `standalone-compact-completion.v1.json` each gain it in `failure.simple.categories`, with vectors; and ADR 0018's Model callback result union widens by `{:error, {:not_dispatched, "provider_sign_in_required"}}`, which every Model adapter's caller must accept. The embedded API is otherwise unchanged except an undocumented `Loopex.Runtime.create_session_with_genesis_detailed/4` and D29's changed `LoopexComposition.Restore.restore/2`, which now commits a root holding the disposable helper job index it used to refuse; no `restore/3` is added |
+| Foreground protocol and embedded API | `loopex.experimental/3` gains the `provider_sign_in_required` reason. Under ADR 0073: the `chat_terminal_outcome` definition gains its `failed_reasons` list; `LoopexProtocol.Session.CompactResult` admits the category; `session-snapshot.v3.json`, `standalone-compact-result.v1.json` and `standalone-compact-completion.v1.json` each gain it in `failure.simple.categories`, with vectors; and ADR 0018's Model callback result union widens by `{:error, {:not_dispatched, "provider_sign_in_required"}}`, which every Model adapter's caller must accept. The `loopex.ask/1` object that `ask --output json` prints admits the same failed reason. The embedded API is otherwise unchanged except an undocumented `Loopex.Runtime.create_session_with_genesis_detailed/4` and D29's changed `LoopexComposition.Restore.restore/2`, which now commits a root holding the disposable helper job index it used to refuse; no `restore/3` is added |
 | Configuration | ADR 0049's schema version 1 and resolver; discovery and writers by ADR 0037, the daemon's reader by ADR 0071, the `oauth` form and `vertex` members by ADR 0073 |
 | Credentials | Environment references unchanged; sign-in tokens in the operating system's keyring or an owner-only file under `<home>/auth/`, and gcloud's Application Default Credentials directory, separate by resolved path from every state root, backup, restore destination and available restore source under [ADR 0037's path-separation rule](../adr/0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation), checked before any store command reads or writes those paths, so no backup's complete copy contains them. Separation is that path rule only (D27): no mount table is read, and a mount of any kind that makes credential storage reachable inside a walked tree, or a credential file copied into a root, is outside the guarantee under ADR 0037's [operator limit](../adr/0037-host-configuration-and-path-discovery-technical.md#technical-0037-operator-limit): do not mount credential storage into or over a Loopex state root, backup or restore destination. The `adc` source reads gcloud's own file under ADR 0073's stated exception to its decision 3 (D20) |
 | Existing commands | The foreground `chat` keeps its grammar and exit semantics. `run`, `resume`, `attach` and `sessions` keep theirs; with `--service`, `run` and `resume` start the service on demand |

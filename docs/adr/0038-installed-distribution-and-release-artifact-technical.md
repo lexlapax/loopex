@@ -48,8 +48,9 @@ new file in the source tree; everything else is built or copied.
 
 **Launcher.** `bin/loopex` keeps its interrupt contract verbatim: saved
 standard input, asynchronous child, trapped `INT TERM HUP QUIT` forwarded as
-`SIGTERM`, the `ask` crash-dump settings and the `kill -0` wait loop. It
-changes in two places only.
+`SIGTERM`, the `ask` crash-dump settings and the `kill -0` wait loop. Besides
+extending the crash-dump case from `ask` to `auth` (`bin/loopex:60-67`; M8
+D37, ADR 0073), it changes in two places.
 
 1. It resolves `$0` through symbolic links (a `readlink` loop, relative
    targets joined to the link's directory) before computing its own
@@ -247,9 +248,11 @@ arguments. `installed_layout/1` is a private function in the umbrella
    and `<build path>/loopex_provider` to `libexec/`, and `SOURCE_IDENTITY` and
    `LICENSE` to the root;
 5. setting directory modes to `0755` and file modes to `0755` or `0644`, and
-   raising `release_layout_unexpected: <path>` for a symbolic link, a path
-   outside the manifest character set, an executable file outside `bin/`,
-   `libexec/` and `erts-*/bin/`, or a native object outside the inventory.
+   running `scripts/release/check-layout.sh <tree>`, raising
+   `release_layout_unexpected: <path>` with the path it prints for a symbolic
+   link, a path outside the manifest character set, an executable file
+   outside `bin/`, `libexec/` and `erts-*/bin/`, or a native object outside
+   the inventory.
 
 It writes no manifest and no archive. A probe of this definition on
 2026-10-13, with the M7 escript pair and the mise toolchain on the Mac, gave a
@@ -264,6 +267,7 @@ the runner cannot boot, and without `compiler` Elixir does not start.
 | --- | --- | --- | --- |
 | `scripts/release/build.sh <commit> <out-dir>` | On the build host | A commit and an existing empty directory outside the checkout | In `<out-dir>`: the archive, its `.sha256`, a copy of `MANIFEST` named `loopex-<label>-<platform>.MANIFEST`, `build.log`, `linkage.log` |
 | `scripts/release/assemble.sh <src> <out-dir>` | Inside the build environment | A fresh source extraction | The same outputs |
+| `scripts/release/check-layout.sh <tree>` | Inside the build environment, from `installed_layout/1` | A staged tree | The first unexpected path; exit `1` on refusal |
 | `scripts/release/write-manifest.sh <platform> <tree>` | Inside the build environment | A staged tree | `<tree>/MANIFEST` |
 | `scripts/release/assert-linkage.sh <platform> <tree> [--smoke]` | Build and smoke | A tree of native objects | A report on standard output; exit `1` on refusal |
 | `scripts/release/smoke.sh <out-dir>` | The installed-artifact lane | Build outputs | The lane's retained evidence |
@@ -526,7 +530,7 @@ macOS user account whose shell profile loads no mise or Homebrew.
    item (macOS, `security find-generic-password -s loopex-oauth` over the
    lane's keychains) or Secret Service item (Linux,
    `secret-tool search application loopex-oauth` where a session bus
-   exists) remains. A before-and-after
+   exists) remains; both are read-only queries. A before-and-after
    inventory proves that nothing was written outside the home, the workspace,
    the lane's temporary directory and the provider's transient `/tmp/lxp-*`
    namespaces, which must be gone. On Linux the inventory is `find / -xdev`
@@ -558,7 +562,7 @@ After steps 1 to 3 it runs:
 
 It then completes steps 5 and 6, whose removal runs `loopex auth logout`
 for every route the account signed in and then asserts that no Loopex item
-remains in that account's keychains. The record names the operator, the
+remains in that account's keychains, by the same read-only query. The record names the operator, the
 archive digest, both providers and each session identifier. The release
 runner's `m8-operator` lane hands the account the verified archive and
 retains the record's transcript, checking that it names that archive's
@@ -584,7 +588,7 @@ Concept: [Context and decision](0038-installed-distribution-and-release-artifact
 | `release_source_mismatch` | The extraction's `SOURCE_IDENTITY` does not name the requested commit | `scripts/release/build.sh` | No build |
 | `release_input_digest_mismatch` | A downloaded OTP, OpenSSL or Elixir input differs from its pinned digest | `scripts/release/linux/Dockerfile` | No image |
 | `release_toolchain_mismatch` | Elixir, OTP, ERTS or OpenSSL differ from the pins, or the pins differ from `.tool-versions`' current pair | `scripts/release/assemble.sh` | No build |
-| `release_layout_unexpected` | A symbolic link, a path outside the character set, a misplaced executable or an unknown native object in the staged tree | `installed_layout/1` in the umbrella `mix.exs` | `mix release` fails |
+| `release_layout_unexpected` | A symbolic link, a path outside the character set, a misplaced executable, an unknown native object, or a build-tool name or source file in the staged tree | `scripts/release/check-layout.sh`, run by `installed_layout/1` in the umbrella `mix.exs` | `mix release` fails |
 | `linkage_outside_base` | A dependency outside the platform's allowed list, or a `ldd` line that is `not found` or resolves elsewhere | `scripts/release/assert-linkage.sh` | Build or lane fails |
 | `linkage_search_path` | An `LC_RPATH`, `RPATH`, `RUNPATH` or `@`-relative install name | `scripts/release/assert-linkage.sh` | Build or lane fails |
 | `linkage_minimum_exceeded` | A Mach-O `minos` above `15.0`, a `GLIBC_` version above `2.35`, or any `GLIBCXX_`, `CXXABI_` or `GCC_` version | `scripts/release/assert-linkage.sh` | Build or lane fails |
@@ -603,6 +607,41 @@ Concept: [Context and decision](0038-installed-distribution-and-release-artifact
 | `loaded_image_outside_base` | The loaded-image probe shows an image outside the allowed locations | `scripts/release/smoke.sh` | Lane fails |
 | `install_written` | The verifier fails after the workflow | `scripts/release/smoke.sh` | Lane fails |
 | `outside_write` | The inventories differ outside the permitted locations | `scripts/release/smoke.sh` | Lane fails |
+
+**Fast-check proofs.** Each refusal the fast check can reach without a
+release build has a named test:
+
+- `scripts/test/release-artifact-test.sh`, a `scripts/check.sh` step, on
+  trees it writes with `write-manifest.sh`: the verifier's `PASS`, usage exit
+  `2`, `--inventory` equal to the writer's records, and each of
+  `platform_mismatch` and `platform_minimum_unmet` (a manifest naming the
+  other platform or a minimum above the host's), `manifest_unreadable`
+  (absent, bad header, bad record), `install_entry_unexpected` (a symbolic
+  link, a FIFO), `install_writable_by_others` and `manifest_mismatch`
+  (missing, extra, mode class, size, digest, first path named);
+  `check-layout.sh`'s `release_layout_unexpected` for each listed case;
+  `assert-linkage.sh`'s `linkage_outside_base`, `linkage_search_path` and
+  `linkage_minimum_exceeded` on retained `otool` and `objdump` outputs under
+  `scripts/fixtures/release/`; and the launcher: installed-mode selection,
+  `$0` reached through a relative and an absolute symbolic link, the
+  variables it unsets, `install_incomplete` exit `127` with no `escript`,
+  two, or a non-executable `libexec/loopex`, and checkout mode unchanged.
+- `apps/loopex_cli/test/provider_launch_test.exs`: `options/0` joins a
+  relative pair to the root two levels above the running escript, returns an
+  absolute pair unchanged, and returns a mixed pair that
+  `ProviderConfiguration.validate/1` refuses `invalid_provider_configuration`.
+- `apps/loopex_llm_reqllm/test/provider_build_test.exs` (extended):
+  `--relocatable` writes the relative pair with unchanged digests, and a
+  relocatable CLI run from a checkout refuses
+  `provider_artifact_unavailable`.
+- `apps/loopex_cli/test/version_command_test.exs`: `loopex version` prints
+  the manifest header line in the installed mode, exits `1` with
+  `manifest_unreadable` for a malformed header, and prints
+  `loopex <VERSION> source` from a checkout.
+
+`linkage_signature_invalid`, the build refusals and the smoke refusals run
+on a real toolchain or install; the installed-artifact lane proves their
+passing path.
 
 A refused, unmarked or unknown root is ADR 0072's refusal and keeps its names
 there. Deleting or replacing the install while the service runs is an operator
@@ -653,7 +692,7 @@ Concept: [The compiler clarification of ADR 0003](0038-installed-distribution-an
 - **Why the application is needed.** `elixir.app` lists `compiler` in its
   `applications`, and `mix release` keeps it with mode `:load`. Without it
   the runner cannot start Elixir (measured in the build section above).
-- **Proof.** The release layout step (step 5 of the release definition above)
+- **Proof.** The release layout check (step 5 of the release definition above)
   also raises `release_layout_unexpected` for any file named `mix`, `hex`,
   `erlc`, `elixirc` or `rebar3` and for any `.ex`, `.exs`, `.erl` or `.hrl`
   file, so no build toolchain or source enters the manifest. The installed
@@ -676,9 +715,9 @@ restore command, an installed layout or the marker check.
 **Rejected alternatives.**
 
 - *Running the CLI as release code* through the release's `eval` entry would
-  replace the artifact the real-provider lanes test, move the standard-I/O
-  encoding and signal handling off the escript path, and leave two copies of
-  every application on the code path.
+  leave the escript form the release check's lanes test, move the
+  standard-I/O encoding and signal handling off the escript path, and leave
+  two copies of every application on the code path.
 - *Copying the toolchain root by hand* would reimplement what `mix release`
   already does: the application closure from `.app` metadata, NIF `priv`
   copying, beam stripping and a relocatable `erl`.

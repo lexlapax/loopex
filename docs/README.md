@@ -120,8 +120,8 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0066 — owned artifact transfer opening | [Decision](adr/0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](adr/0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
 | 0067 — tool-result event projections | [Decision](adr/0067-tool-result-event-projections.md#concept) | [Technical depth](adr/0067-tool-result-event-projections-technical.md#technical-depth) |
 | 0068 — CLI-owned output | [Decision](adr/0068-cli-owned-output.md#concept) | [Technical depth](adr/0068-cli-owned-output-technical.md#technical-depth) |
-| 0069 — Helper run evidence and route guard | [Decision](adr/0069-helper-run-evidence-and-route-guard.md#concept) | [Technical depth](adr/0069-helper-run-evidence-and-route-guard-technical.md#technical-depth) |
-| 0070 — Pre-1.0 superseded surface retirement | [Decision](adr/0070-pre-1-superseded-surface-retirement.md#concept) | [Technical depth](adr/0070-pre-1-superseded-surface-retirement-technical.md#technical-depth) |
+| 0069 — helper run evidence and route guard | [Decision](adr/0069-helper-run-evidence-and-route-guard.md#concept) | [Technical depth](adr/0069-helper-run-evidence-and-route-guard-technical.md#technical-depth) |
+| 0070 — pre-1.0 superseded surface retirement | [Decision](adr/0070-pre-1-superseded-surface-retirement.md#concept) | [Technical depth](adr/0070-pre-1-superseded-surface-retirement-technical.md#technical-depth) |
 | 0071 — daemon-attached conversation | [Decision](adr/0071-daemon-attached-conversation.md#concept) | [Technical depth](adr/0071-daemon-attached-conversation-technical.md#technical-depth) |
 | 0072 — store readiness: current-format marker and operator backup and restore | [Decision](adr/0072-store-readiness-marker-backup-and-restore.md#concept) | [Technical depth](adr/0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth) |
 | 0073 — provider OAuth sign-in | [Decision](adr/0073-provider-oauth-sign-in.md#concept) | [Technical depth](adr/0073-provider-oauth-sign-in-technical.md#technical-depth) |

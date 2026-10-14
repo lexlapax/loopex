@@ -65,14 +65,14 @@ a decision adds a new record rather than rewriting the old one.
 | 0053 | Current configure request | Accepted | [Decision](0053-current-configure-request.md#concept) | [Technical depth](0053-current-configure-request-technical.md#technical-depth) |
 | 0054 | Compaction activity progress | Accepted | [Decision](0054-compaction-activity-progress.md#concept) | [Technical depth](0054-compaction-activity-progress-technical.md#technical-depth) |
 | 0055 | Remote session creation options | Accepted (creation carrier, recovery and eligibility amended by 0059) | [Decision](0055-remote-session-creation-options.md#concept) | [Technical depth](0055-remote-session-creation-options-technical.md#technical-depth) |
-| 0056 | Host helper ledger byte recipe | Accepted | [Decision](0056-host-helper-ledger-recipe.md#concept) | [Technical depth](0056-host-helper-ledger-recipe-technical.md#technical-depth) |
-| 0057 | Attempts event bodies | Accepted | [Decision](0057-attempts-event-bodies.md#concept) | [Technical depth](0057-attempts-event-bodies-technical.md#technical-depth) |
+| 0056 | Host helper ledger byte recipe | Accepted (offline audit of the derived job index narrowly amended by Proposed 0072 on its acceptance, M8 D35) | [Decision](0056-host-helper-ledger-recipe.md#concept) | [Technical depth](0056-host-helper-ledger-recipe-technical.md#technical-depth) |
+| 0057 | Attempts event bodies | Accepted (succession obligation amended for M8 only by M8 D30) | [Decision](0057-attempts-event-bodies.md#concept) | [Technical depth](0057-attempts-event-bodies-technical.md#technical-depth) |
 | 0058 | Bounded progress delivery | Accepted | [Decision](0058-bounded-progress-delivery.md#concept) | [Technical depth](0058-bounded-progress-delivery-technical.md#technical-depth) |
 | 0059 | Responsive creation transactions and durable custody | Accepted (remote cancellation envelope clarified by 0061) | [Decision](0059-responsive-creation-transactions.md#concept) | [Technical depth](0059-responsive-creation-transactions-technical.md#technical-depth) |
 | 0060 | Restore full-mode helper | Proposed | [Decision](0060-restore-full-mode-helper.md#concept) | [Technical depth](0060-restore-full-mode-helper-technical.md#technical-depth) |
 | 0061 | Creation cancellation admission envelope | Accepted | [Decision](0061-creation-cancellation-admission-envelope.md#concept) | [Technical depth](0061-creation-cancellation-admission-envelope-technical.md#technical-depth) |
 | 0063 | Runtime creation startup status | Accepted | [Decision](0063-runtime-creation-startup-status.md#concept) | [Technical depth](0063-runtime-creation-startup-status-technical.md#technical-depth) |
-| 0065 | Private attempts IO prerequisite | Accepted | [Decision](0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
+| 0065 | Private attempts IO prerequisite | Accepted (succession obligation amended for M8 only by M8 D30) | [Decision](0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
 | 0066 | Owned artifact transfer opening | Accepted | [Decision](0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
 | 0067 | Tool-result event projections | Accepted | [Decision](0067-tool-result-event-projections.md#concept) | [Technical depth](0067-tool-result-event-projections-technical.md#technical-depth) |
 | 0068 | CLI-owned output | Accepted | [Decision](0068-cli-owned-output.md#concept) | [Technical depth](0068-cli-owned-output-technical.md#technical-depth) |
@@ -260,12 +260,16 @@ proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
 `store adopt`, `store backup` and `store restore`, and on acceptance amends
 exactly two clauses of accepted ADR 0051: its statement that no backup CLI
 is added; and its latest-backup-only restriction, which `--discard-later-work`
-relaxes for a lost source. The delivered `restore/2` leaves the
-disposable helper job index out of its audit index, as adopt and backup do,
-while still copying it, which no ADR 0051 sentence governs (D29). Credential separation is
-ADR 0037's path rule, applied before the transition is called (D27). 0072 also ties the marker's format number to a pinned
-inventory of every durable shape, so any format change advances it. ADR
-0051's other decisions, ADR 0070 and the pre-1.0 rule settle the rest.
+relaxes for a lost source. M8 changes `restore/2` to leave the disposable
+helper job index out of its audit index, as adopt and backup do, while still
+copying it (D29); no ADR 0051 sentence governs that, and it narrowly amends
+ADR 0056's complete helper-namespace audit (D35). Credential separation is
+ADR 0037's path rule, applied before the transition is called (D27). 0072
+also states the format-number rule (D28): any durable change needs a new
+number, held in the fast check by a retained format-1 root and the M7 root
+through the full audit, exact pure-codec re-encoding and five named limits,
+and otherwise by review. ADR 0051's other decisions, ADR 0070 and the
+pre-1.0 rule settle the rest.
 
 0073 was proposed on 2026-10-13 when the maintainer added provider sign-in to
 M8 as outcome 8. It lets a provider binding name an `oauth` credential on
