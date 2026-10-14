@@ -8304,3 +8304,25 @@ remain Proposed and M8 remains Open.
    project check's failure line with login exit 0; `sign_in_route_lost` as a
    new `loopex.ask/1` status-1 code; the time-zone precondition as a
    pre-start prerequisite of `m7-adopt-lock`.
+
+<a id="disposition-m8-holistic3-2026-10-14"></a>
+### M8 internal holistic review round 3 answered — 2026-10-14
+
+A third internal holistic review round at `ab20e0d1` closed most round-2
+findings and found further findings, chiefly two unrecorded amendments of
+accepted ADRs (0032 by D42, 0016 by D45), the sign-in route's ownership in
+foreground and ephemeral hosts, and release-runner resumption. The
+maintainer kept sign-in in M8 and decided D48 to D53 on 2026-10-14; the
+other items were fixed without a new decision. All five prerequisite ADRs
+remain Proposed and M8 remains Open.
+
+1. **ADR 0016 (D48).** Adopt's rebinding carries open authority and narrowly
+   amends ADR 0016, recorded in ADR 0072.
+2. **Torn attempts index (D49)**, **foreground sign-in refusals (D50)**, **a
+   revoked grant at service start (D51)**, **a disabled route at
+   configuration (D52)** and **the fail-stop residual and `--socket`
+   canonicalization (D53)**.
+3. **ADR 0032.** D42's stopping reason is recorded as ADR 0073's amendment of
+   ADR 0032's closed `daemon.stopping` reasons.
+4. **D22.** Its precheck covers what the metadata and floor show; other
+   not-ready states refuse after the spawn with the daemon's class.
