@@ -32,7 +32,7 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   sentence qualified with D40 (D61), the Direct marker's new callers
   (D62) and ephemeral `ask`'s opening of only the sign-in routes it uses
   (D63), and after them the OpenAI registration as a lane prerequisite
-  (D64)
+  (D64), refined by its mechanism (D65)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -48,7 +48,9 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   listed under [amendments](#concept-adr-0073-amendments). It changes one
   sentence of the Proposed [ADR 0037](0037-host-configuration-and-path-discovery.md#concept)
   and one non-goal of the M8 plan, and at acceptance it replaces ADR 0039's
-  common credential exception in the vision pair and `AGENTS.md` (D40).
+  common credential exception in the vision pair and `AGENTS.md` (D40),
+  and qualifies the vision pair's other credential passages and
+  `AGENTS.md`'s credential sentence (D56, D61).
 - **Depends on:** [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
   and [ADR 0049](0049-explicit-host-configuration.md#concept), delivered by M7;
   [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the
@@ -540,10 +542,13 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
    locally run apps, and sends paid or hosted apps to an interest form. Confirm
    that Loopex registers this way, and approve the `agent_name_hint` it
    presents. If OpenAI requires a partner client, submit the interest form.
-   The maintainer decided on 2026-10-14 (D64) that the
-   `real-sign-in-openai` lane performs or checks this registration before
-   its case starts, so OpenAI refusing it stops the lane with the evidence
-   unavailable, resumable on the same commit, and is not a failed case.
+   The maintainer decided on 2026-10-14 (D64, refined by D65) that the
+   `real-sign-in-openai` lane performs this registration before its case
+   starts, by an attended sign-in and sign-out in the lane's own temporary
+   home, which keeps the issued client. OpenAI refusing the registration,
+   or a sign-in that returns no issued client, stops the lane with the
+   evidence unavailable, resumable on the same commit, and is not a failed
+   case. The case's first sign-in then uses that issued client.
 2. **Google client.** Create Loopex's Google OAuth desktop client in a Google
    Cloud project the maintainer owns, and decide when to pass verification for
    the `cloud-platform` scope. Until the app is verified, users see an
