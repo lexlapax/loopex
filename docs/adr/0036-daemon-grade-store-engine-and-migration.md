@@ -22,17 +22,18 @@ Technical depth: [Selection procedure, migration contract and candidate evidence
 
 Technical depth: [Selection procedure](0036-daemon-grade-store-engine-and-migration-technical.md#technical-adr-0036-decision).
 
-**Scope split, proposed 2026-09-30.** This is proposal P2 of the Open
-[M8 plan](../plans/M8.md#concept), an author proposal until the maintainer
-selects it; this record's earlier framing had M8 accept it with the engine
-chosen. This record first proposed the store engine and
-the installed release's readiness work together. Under the proposal the
-readiness work is
-Proposed [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept),
-so that backup and restore do not wait on the engine experiment. This record
-keeps the engine selection, the migration and the capacity refusal. Where the
-text below mentions the marker, the reader boundary, backup or restore, ADR
-0072 owns their contract and this record states only how migration uses them.
+**Scope split, selected 2026-10-13.** The maintainer selected proposal P2 of
+the [M8 plan](../plans/M8.md#concept) (decision D5). M8 carries the installed
+operator commands: the current-format marker, `store adopt`, `store backup`
+and `store restore`, under Proposed
+[ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept), so
+that backup and restore do not wait on the engine experiment. M9 carries this
+record: the engine's measured selection, the migration and the capacity
+refusal. This record first proposed the store engine and the installed
+release's readiness work together, and its earlier framing had M8 accept it
+with the engine chosen. Where the text below mentions the marker, the reader
+boundary, backup or restore, ADR 0072 owns their contract and this record
+states only how migration uses them.
 
 ADR 0031 selected the existing local adapter for `0.2.0` and stated its
 ceilings plainly: a hard 256 MiB log capacity, a 4 MiB frame ceiling, full
@@ -79,7 +80,9 @@ measurement would repeat the mistake ADR 0031 corrected.
    M7's host ledger remains byte-for-byte at its
    host-root paths outside the Store. Whole-root backup and restore include them.
 4. **Restore is the migration's rollback procedure.** ADR 0072 supplies
-   backup and restore as operator commands on a closed root. A previous binary
+   backup and restore as operator commands on a closed root. A backup is a
+   directory holding the complete copy under ADR 0051's manifest and ADR
+   0072's capture record, not an archive. A previous binary
    is not a rollback plan when storage has changed, so the engine milestone's
    rollback proof is a restore of the pre-migration backup under the previous
    release.

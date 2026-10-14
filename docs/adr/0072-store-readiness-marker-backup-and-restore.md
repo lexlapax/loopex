@@ -4,7 +4,7 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision and the daemon exit-status renumbering recorded on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering and the two-phase adoption recorded on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added, and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
@@ -44,10 +44,16 @@ decided, not proposed:
    new root, and refuses an unmarked or unknown-marked root before any write:
    before the placement lock, the Store writer marker or any torn-tail repair.
 3. **`store adopt`.** A one-time command marks an existing root that the M7
-   source build wrote, or any unmarked current-format root. It first decodes
-   every record read-only and confirms it is current format. It writes nothing
-   except the marker, and refuses at the first undecodable record without
-   writing.
+   source build wrote, or any unmarked current-format root. It changes no
+   record and writes nothing but the marker. Adoption has two phases, decided
+   by the maintainer on 2026-10-13. The operator first states
+   `--old-writer stopped`: no process of the build that wrote the root is
+   running. Adopt then publishes an `adopting` marker, which every entry point
+   of this build refuses, so no new start can write during the audit. It
+   decodes every record and confirms the root is current format. Only when the
+   audit passes and the root is still exactly what was audited does the marker
+   become current. An adopt killed or refused after it publishes `adopting`
+   leaves `adopting`; running adopt again redoes the whole audit.
 4. **Restore attestation.** `store restore` refuses unless the operator states
    the source branch, available or lost, and confirms that the old writer is
    stopped. The command also checks that the placement lock is free and that
@@ -92,8 +98,10 @@ again before composition starts a Store:
 
 - an absent directory, or an empty one, is a new root: the marker is written
   first, then work proceeds;
-- a marked root proceeds;
+- a root marked current proceeds;
 - a nonempty root without the marker is refused as `root_unmarked`;
+- a root whose marker says `adopting` is refused as `root_adopting`: an
+  adoption started and has not finished;
 - a marker naming another format or version is refused as
   `root_format_unknown`; one that cannot be read is `root_marker_unreadable`.
 
@@ -108,20 +116,38 @@ service manager can tell them apart.
 
 Technical depth: [Adopt algorithm, limits and crash safety](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-adopt).
 
-`loopex store adopt` exists for roots written before the marker: by the M7
-source build, or by any build whose records are already current format. It is
-not a migration. It changes no record. It reads the whole closed root with the
-same decoders and audit ADR 0051's restore uses: every Store frame, every
-session's replay, every receipt and ledger, artifact, resource record and
-helper log. Only if everything decodes does it write the marker, and nothing
-else.
+`loopex store adopt --old-writer stopped` exists for roots written before the
+marker: by the M7 source build, or by any build whose records are already
+current format. It is not a migration. It changes no record. The statement is
+required and has no default: the operator states that no process of the build
+that wrote the root is running, because that build does not know the marker
+and nothing else can stop it.
 
-It refuses a root that is held, that stopped uncleanly, that has only the
-retired catalogue, or that changed while it was being read. It stops at the
-first record it cannot decode, names it, and writes nothing. Running it again
-on a marked root reports that the root is already marked and writes nothing.
-A root it refuses is recovered the same way as any unsupported root: through a
-backup restored under the build that wrote it.
+Adoption has two phases.
+
+1. **Fence.** Adopt checks that the root is closed and publishes the marker in
+   its `adopting` form. From then on every entry point of this build refuses
+   the root as `root_adopting`: the service, every foreground command, `ask`,
+   an embedded durable start, `store backup` and `store restore`.
+2. **Audit, then commit.** Adopt records the root's complete manifest and
+   reads the whole root with the same decoders and audit ADR 0051's restore
+   uses: every Store frame, every session's replay, every receipt and ledger,
+   artifact, resource record and helper log. It then records the manifest
+   again. Only when everything decoded and the second manifest equals the
+   first does it replace the `adopting` marker with the current one in one
+   atomic step. It then checks once more, and if the root changed around the
+   replacement it puts `adopting` back.
+
+A root marked `adopting` is never used. Adopt stops at the first record it
+cannot decode and names it; it refuses a root that is held, that stopped
+uncleanly or that has only the retired catalogue before publishing anything.
+Every failure after the fence, and a killed adopt, leaves `adopting`:
+`root_changed` when the root changed during the audit, and the decode
+refusal when a record cannot be read. Running adopt again redoes the full
+audit from the start and never trusts an earlier run. `doctor` reports an
+`adopting` root. Running adopt on a root already marked current reports that
+and writes nothing. A root adopt cannot read is recovered the same way as any
+unsupported root: through a backup restored under the build that wrote it.
 
 <a id="concept-adr-0072-backup"></a>
 ### Backup
@@ -135,6 +161,11 @@ what it will back up, removes only the disposable helper job-index cache, then
 copies the whole root with ADR 0051's owned copy and checks the copy against
 the source twice. It audits the copy exactly as restore will, so a backup that
 restore would refuse is never published.
+
+The copy takes every file of the root, under ADR 0051's complete manifest,
+with no exclusion. Provider sign-in tokens never enter it because ADR 0037
+keeps their directory physically separate from every state root, not because
+backup leaves anything out.
 
 The backup directory holds the complete copy, the canonical manifest and a
 capture record carrying everything ADR 0051's plan needs except the
@@ -184,7 +215,7 @@ its own.
 Technical depth: [Root facts and service readiness fields](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-readiness).
 
 `doctor` shows this record's root facts without writing or scanning history:
-the marker and its format, whether the root is held, stale, or has writer
+the marker and its format, including a root left `adopting`, whether the root is held, stale, or has writer
 markers left, its restore state, and the root and backup formats this build
 reads and writes. The running service's readiness report carries the facts
 this record fixes: for a closed host, the session whose history cannot be read
@@ -214,7 +245,8 @@ the usual case, the operator adds `--discard-later-work` and knowingly gives
 up that work; the restored root's history ends at the backup, and effects made
 after it are not reconciled. An operator who points the release at an unmarked or unknown root gets a
 named refusal and an unchanged root, never a partial upgrade. A root the M7
-source build wrote is adopted once and then used normally.
+source build wrote is adopted once, after its writer is stopped, and then used
+normally; until adoption completes, the root is refused as `root_adopting`.
 
 <a id="concept-adr-0072-compatibility"></a>
 ### Compatibility and Rollback
@@ -226,9 +258,11 @@ the daemon's placement rules and ADR 0051's records and outcomes do not
 change. ADR 0051's plan gains one alternative attestation form, used only
 with `--discard-later-work`; a plan in the existing form is unchanged. The marker, the backup layout and its records are experimental
 current-format contracts, each with its own version. Before 1.0 only the
-current version of each is read. A later engine migration reads its source
-root through the marker check; how its retired source relates to these backups
-is ADR 0036's to state.
+current version of each is read. A backup is a directory holding the complete
+copy, ADR 0051's manifest and this record's capture record; there is no
+archive. The store engine and its migration are M9's work under ADR 0036,
+which reads its source root through the marker check and states its rollback
+as a restore of one of these backup directories.
 
 This decision is removed by not shipping the three commands and the marker
 writer. A root that already carries a marker stays readable by the build that

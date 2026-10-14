@@ -69,8 +69,9 @@ Concept: [Observable consequences](0036-daemon-grade-store-engine-and-migration.
    verifies it by replaying every session from the target and comparing
    session heads, record counts and per-record digests with the source.
 4. Only after verification does it publish the target with one atomic rename
-   and retire the source under a fixed archive name that `loopex store restore`
-   accepts. Nothing deletes the source.
+   and retire the source under a fixed name. Nothing deletes the source. The
+   rollback point is the pre-migration backup directory below, not the
+   retired source.
 5. A migration interrupted at any point converges on the next run: a partial
    target is detected by a marker written first and removed last, and is
    discarded and rebuilt; a verified-but-unpublished target is published; a
@@ -105,12 +106,17 @@ a marker. Retain exact old binaries to test their real behavior. Never claim an
 old binary emits a new refusal class or honors a marker it never understood.
 
 **Backup and restore.** ADR 0072 defines `loopex store backup` and `loopex
-store restore`, their archive and their refusals. Migration's retired source
-must be restorable by that command, which accepts only a manifest-bearing
-archive; step 4's retirement therefore writes or accompanies an ADR 0072
-archive, in a form fixed before acceptance. Rollback is `restore` of
-the pre-migration backup under the previous release, and the engine
-milestone's plan proves it.
+store restore` and their refusals. A backup is a directory, not an archive:
+`state/`, the complete copy taken under ADR 0051's unexcluded canonical
+manifest; `manifest`, those exact bytes; and `capture`, the
+`loopex_store_backup_capture_v1` record carrying everything ADR 0051's plan
+needs except the operator's statements and the destination. `store restore`
+accepts only such a directory, on a closed, marked, current-format root's
+copy. Migration therefore requires a `store backup` of the closed local root
+before it writes the target, and rollback is `store restore` of that
+pre-migration backup directory under the previous release, which the engine
+milestone's plan proves. Whether migration takes that backup itself or
+refuses until the operator has taken one is fixed before acceptance.
 
 <a id="technical-adr-0036-compatibility"></a>
 ### Compatibility and Rollback Mechanics
@@ -140,9 +146,9 @@ do not apply; no extension state exists.
   withdrew its own successor half.
 
 **Open before acceptance.** The engine cell and the retained experiment record
-it cites, produced as the store successor milestone is prepared and not as M8
-evidence; the form in which migration retires its source so that ADR 0072's
-restore accepts it; the adapter application's name; the exact capacity ceiling the
+it cites, produced as M9 is prepared and not as M8 evidence; whether
+migration takes the pre-migration ADR 0072 backup directory itself or requires
+the operator to take it; the adapter application's name; the exact capacity ceiling the
 definite refusal enforces and how the operator configures it, which ADR 0049's
 successor schema version or an explicit ADR 0049 amendment carries once this
 pair names the key. The closed version-1 schema is never extended in place.

@@ -19,10 +19,12 @@ Technical depth: [Prerequisites](m9-store-engine-successor-technical.md#technica
 > never loses a committed fact?
 
 The `0.2` local store is a full-replay log. It stops at 256 MiB and asks the
-operator to retire the root. The Open [M8 plan](../plans/M8.md#concept) adds a
-current-format root marker and operator backup and restore commands over
-accepted ADR 0051's restore, under
+operator to retire the root. The [M8 plan](../plans/M8.md#concept) adds a
+current-format root marker, `store adopt`, and operator backup and restore
+commands over accepted ADR 0051's restore, under
 [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept).
+A backup is a directory holding the complete copy, ADR 0051's manifest and
+ADR 0072's capture record.
 M9 takes the engine decision from a retained measured experiment under
 [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept)
 and builds what that decision selects.
@@ -63,8 +65,10 @@ engine migration; complete backup/restore includes it and its child sessions.
 Technical depth: [Prerequisites](m9-store-engine-successor-technical.md#technical-plan-prerequisites).
 
 [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept) is the governing
-decision. Under the Open M8 plan's proposal P2, which the maintainer has not
-yet selected, its measured selection experiment runs as M9 is prepared and the
-pair is accepted with M9, once its engine cell is filled from the experiment
-record. M9 implements the engine, migration and capacity refusal it names. The
-earlier framing had M8 run the experiment and accept the pair.
+decision. The maintainer selected the M8 plan's proposal P2 on 2026-10-13:
+M8 takes the installed operator commands, backup and restore; M9 takes the
+store engine's measurement and the migration. The measured selection
+experiment runs as M9 is prepared and the pair is accepted with M9, once its
+engine cell is filled from the experiment record. M9 implements the engine,
+migration and capacity refusal it names. Migration's rollback is a restore of
+the pre-migration ADR 0072 backup directory.
