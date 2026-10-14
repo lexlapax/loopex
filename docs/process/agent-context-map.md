@@ -7968,3 +7968,41 @@ the decisions already recorded:
    ([M8 plan](../plans/M8.md#concept)).
 
 All five prerequisite ADRs remain Proposed and M8 remains Open.
+
+<a id="disposition-m8-internal-review-2026-10-13"></a>
+### M8 internal adversarial review answered — 2026-10-13
+
+An internal adversarial review of the M8 planning branch at
+`e560939d87e7727b73950048f07f000d50a4c908`, in two read-only halves, found
+the plan not ready. The maintainer took four decisions in response, recorded
+as D18 to D20 in the [M8 plan](../plans/M8.md#concept-plan-decisions) and in
+the Proposed ADRs:
+
+1. **Linux separation by filesystem location (D19).** On Linux the sign-in
+   and protected-credential separation check and every backup, adopt and
+   restore walk compare paths by device and by their path inside the
+   filesystem, read from `/proc/self/mountinfo`, so a bind mount of any
+   credential subdirectory is refused. ADR 0072's restore guard carries at
+   most two `{major_device, inode, filesystem_path}` entries
+   ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)).
+2. **Linux refuses only listed mounts (D19).** On Linux a walk refuses only
+   mount points listed in the mount table strictly inside the walked tree, so
+   overlay (container) and btrfs roots are admitted; macOS keeps the
+   device-change rule.
+3. **ADC client exception (D20).** The `adc` source presents the client
+   identity in gcloud's Application Default Credentials file, as Google
+   documents for any application; this is the only exception to ADR 0073's
+   decision 3 and never applies to `chatgpt:` or `claude:`
+   ([ADR 0073](../adr/0073-provider-oauth-sign-in.md#concept)).
+4. **Release hosts (D18).** The full release check runs once at closure on
+   macOS arm64; Linux x86-64 additionally runs the required `--only` lanes,
+   and a lane reporting evidence unavailable blocks closure.
+
+The review's other findings were fixed without a new decision: one shared
+activation sum for client admission, helper permits and the reported count
+(ADR 0071); `Delegation.host/5`; the readiness row written on every
+classification change; the post-commit destination walk, the available-source
+pointer and the guard's lifetime in restore (ADR 0072); ADR 0073's
+amendments of accepted ADRs 0018, 0021 and 0043, the post-secret-write refresh
+claim, `Store.read/2` with the sign-in context, and the in-process raw-body
+bound. All prerequisite ADRs remain Proposed and M8 remains Open.
