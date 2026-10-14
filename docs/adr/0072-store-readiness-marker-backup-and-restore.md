@@ -4,9 +4,9 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck; the maintainer's D33 to D35 (time-zone-independent lock and writer-marker records, the `m7-adopt` prerequisites, the ADR 0056 amendment) and an internal review's fixes recorded on 2026-10-14; the maintainer's D45 (adopt rebinds a ledger bound through an alias) and a second internal review's fixes recorded on 2026-10-14
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck; the maintainer's D33 to D35 (time-zone-independent lock and writer-marker records, the `m7-adopt` prerequisites, the ADR 0056 amendment) and an internal review's fixes recorded on 2026-10-14; the maintainer's D45 (adopt rebinds a ledger bound through an alias) and a second internal review's fixes recorded on 2026-10-14; the maintainer's D48 (the rebinding carries the ledger's open authority, amending ADR 0016) and a third internal review's fixes recorded on 2026-10-14
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendments](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It narrowly amends accepted [ADR 0056](0056-host-helper-ledger-recipe.md#concept) in one clause, stated in five sentences: the helper job index is left out of ADR 0051's audit (D35). It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
+- **Supersedes:** nothing. It narrowly amends accepted [ADR 0016](0016-configured-cancellation-observation.md#concept) in one clause (D45, D48): `store adopt`, under the placement lock, the `adopting` fence and the `--old-writer stopped` attestation, may replace a ledger generation bound through the selected alias with a fresh-epoch generation bound to the physical path, carrying the open index, markers and receipts unchanged. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendments](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It narrowly amends accepted [ADR 0056](0056-host-helper-ledger-recipe.md#concept) in one clause, stated in five sentences: the helper job index is left out of ADR 0051's audit (D35). It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0056](0056-host-helper-ledger-recipe.md#concept) for the helper ledgers the audit decodes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the physical root path every opener receives, the configuration writer, `doctor` and the readiness report
 - **Prerequisite for:** M8 outcomes 3 and 7, accepted before any marker, adopt, backup or restore command code is written
 
@@ -45,10 +45,13 @@ decided, not proposed:
    before the placement lock, the Store writer marker or any torn-tail repair.
 3. **`store adopt`.** A one-time command marks an existing root that the M7
    source build wrote, or any unmarked current-format root. It writes
-   nothing but the marker, the removal of stray marker
-   temporaries and the root's own placement lock, and, for a root whose
-   executor ledger was bound through an alias of its path, a rebound ledger
-   generation (D45, which narrows this decision). Adoption has two phases,
+   nothing but the marker; the root's own placement lock, whose taking
+   removes a dead contender's leftover lock files as any start does; the
+   removal of stray marker temporaries and of rebinding temporaries an
+   earlier adopt left; and, for a root whose executor ledger was bound
+   through an alias of its path, a rebound ledger generation that carries
+   the ledger's open effect authority unchanged (D45 and D48, which narrow
+   this decision and amend ADR 0016). Adoption has two phases,
    decided by the maintainer on 2026-10-13. The operator first states
    `--old-writer stopped`: no process of the build that wrote the root is
    running. Adopt then takes the root's placement lock, the
@@ -201,9 +204,14 @@ that path is a symbolic-link alias of the physical one: after the audit and
 the second manifest, and before
 the commit, still under the lock, it replaces that ledger's generation with
 a new one bound to the physical path, the way restore installs a fresh
-generation, and changes no other ledger file. A crash in between leaves
+generation, and changes no other ledger file: the open effects, markers and
+receipts the audit read stay the ledger's authority, unchanged and never
+redispatched (D48). ADR 0016 treats an alias as an administrator rewrite and requires a
+migration to close the old open authority first; this record amends that
+for adopt alone (below). A crash in between leaves
 `adopting`, and the rerun audits each ledger as it then is and rebinds only
-those still bound through the alias. A ledger bound under any other path,
+those still bound through the alias; the old build can no longer open a
+rebound ledger through its alias, so the operator reruns adopt. A ledger bound under any other path,
 such as a moved or copied root or an alias the operator did not select, is
 refused before the fence as `ledger_path_mismatch`, with nothing written.
 
@@ -381,7 +389,9 @@ in the existing form is unchanged. The placement lock record and the Store
 writer marker take new versions whose process identity no longer depends on
 the time zone; an M7 process reads either as unreadable and never reclaims it
 while its holder lives (D33). For the same reason `TZ` can no longer name a
-credential variable or a Store launch exclusion. The marker, the backup layout and its records
+credential variable or a Store launch exclusion. `store adopt` gives a Local
+ledger the old build bound through the selected alias a new generation
+bound to the physical path, with its open authority unchanged (D45, D48). The marker, the backup layout and its records
 are experimental current-format contracts, each with its own version. Before 1.0 only the
 current version of each is read. A backup is a directory holding the complete
 copy, ADR 0051's manifest and this record's capture record; there is no
@@ -394,13 +404,13 @@ writer. A root that already carries a marker stays readable by the build that
 wrote it; no other build is promised to read it.
 
 <a id="concept-adr-0072-amendment"></a>
-### Amendments of ADRs 0051 and 0056
+### Amendments of ADRs 0016, 0051 and 0056
 
 Technical depth: [Amendment text](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-amendment).
 
-ADRs 0051 and 0056 stay byte-for-byte as accepted. On acceptance this record
-amends exactly two clauses of ADR 0051 and one of ADR 0056, and the ADR index
-records all three:
+ADRs 0016, 0051 and 0056 stay byte-for-byte as accepted. On acceptance this
+record amends exactly two clauses of ADR 0051 and one each of ADRs 0056 and
+0016, and the ADR index records all four:
 
 1. **Backup CLI.** ADR 0051 says no backup CLI is added. This record adds
    `store backup`, `store restore` and `store adopt` as host commands in front
@@ -427,6 +437,19 @@ records all three:
    0051 sentence names the job index or what the audit's index holds, so this
    amends no ADR 0051 clause; its manifests, copy, comparisons, walks, phases
    and result grammar are unchanged. There is no `restore/3`.
+4. **Adopt's ledger rebinding (ADR 0016, D45, D48).** ADR 0016 binds a
+   Local ledger's generation to the expanded path and directory it was
+   opened through, refuses a root moved to another path, replaced or
+   copied, treats retargeting a path through an alias as an unsupported
+   administrator rewrite, and requires a
+   future migration to close every old open authority before it creates a
+   new generation, never copying the old one as authority. The maintainer
+   decided on 2026-10-14 that `store adopt`, and nothing else, may, under
+   the placement lock, the `adopting` fence and the `--old-writer stopped`
+   attestation, replace a generation bound through the selected alias with
+   a fresh-epoch generation bound to the physical path, carrying the
+   audited open index, markers and receipts unchanged. Every other ADR 0016
+   rule stands, for every other migration as well.
 
 <a id="concept-adr-0072-open"></a>
 ### Open for the Maintainer
