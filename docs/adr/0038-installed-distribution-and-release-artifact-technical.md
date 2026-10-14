@@ -482,7 +482,8 @@ the provider credential variables the lane names, `ANTHROPIC_API_KEY` and
 `OPENAI_API_KEY`, which the release runner's `with_installed_credentials`
 wrapper exports by name and never places in argv. The lane's `init`
 configuration references exactly those names: `loopex daemon --config`
-discards `LOOPEX_PROVIDER_API_KEY` unread under ADR 0071, so the release
+discards `LOOPEX_PROVIDER_API_KEY` unread under ADR 0071 unless a binding
+names it, and none does, so the release
 credential reaches the installed service only under the name its
 configuration references. Before it starts it
 asserts that `command -v erl erlc escript elixir mix iex` finds nothing and

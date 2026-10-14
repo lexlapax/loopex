@@ -19,7 +19,8 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   the uninstall keychain query limited to the operator's own home; the
   untouched-paths statement narrowed to what the service's own stop and
   start touch, and the closure matrix completed with `m7-adopt`,
-  `m7-adopt-lock` and D36's deferral, on 2026-10-14
+  `m7-adopt-lock` and D36's deferral, and the daemon's discard of
+  `LOOPEX_PROVIDER_API_KEY` stated with its binding exception, on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
