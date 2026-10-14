@@ -4,7 +4,7 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering and the two-phase adoption recorded on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added, and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
@@ -45,15 +45,21 @@ decided, not proposed:
    before the placement lock, the Store writer marker or any torn-tail repair.
 3. **`store adopt`.** A one-time command marks an existing root that the M7
    source build wrote, or any unmarked current-format root. It changes no
-   record and writes nothing but the marker. Adoption has two phases, decided
-   by the maintainer on 2026-10-13. The operator first states
-   `--old-writer stopped`: no process of the build that wrote the root is
-   running. Adopt then publishes an `adopting` marker, which every entry point
-   of this build refuses, so no new start can write during the audit. It
-   decodes every record and confirms the root is current format. Only when the
-   audit passes and the root is still exactly what was audited does the marker
-   become current. An adopt killed or refused after it publishes `adopting`
-   leaves `adopting`; running adopt again redoes the whole audit.
+   record and writes nothing but the marker and the root's own placement
+   lock. Adoption has two phases, decided by the maintainer on 2026-10-13. The
+   operator first states `--old-writer stopped`: no process of the build that
+   wrote the root is running. Adopt then takes the root's placement lock, the
+   same exclusion the service and every root-opening command take, and holds
+   it for its whole run. Under the lock it publishes an `adopting` marker,
+   which every entry point of this build refuses, so no new start can write
+   during the audit. It decodes every record and confirms the root is current
+   format. Only when the audit passes and the root is still exactly what was
+   audited does it rename the marker to current, still under the lock; that
+   rename is the commit, and adopt releases the lock after it. An adopt killed
+   or refused before the rename leaves `adopting`, and running adopt again
+   redoes the whole audit; one killed after it leaves a committed current
+   root. A concurrent adopt or start is refused by the existing placement
+   refusal while adopt holds the lock.
 4. **Restore attestation.** `store restore` refuses unless the operator states
    the source branch, available or lost, and confirms that the old writer is
    stopped. The command also checks that the placement lock is free and that
@@ -123,7 +129,15 @@ required and has no default: the operator states that no process of the build
 that wrote the root is running, because that build does not know the marker
 and nothing else can stop it.
 
-Adoption has two phases.
+Adopt first takes the root's placement lock, the same lock the service and
+every lock-taking command take on a root, and holds it until the root is
+committed. A service, a command or a second adopt that tries to take the
+root meanwhile is refused as the lock already refuses a held root. A stale
+lock left by a dead process, such as a killed adopt, is reclaimed as any start
+reclaims it. The lock's own files are lock state, not records, and adopt's
+manifests leave them out.
+
+Adoption then has two phases.
 
 1. **Fence.** Adopt checks that the root is closed and publishes the marker in
    its `adopting` form. From then on every entry point of this build refuses
@@ -135,16 +149,19 @@ Adoption has two phases.
    artifact, resource record and helper log. It then records the manifest
    again. Only when everything decoded and the second manifest equals the
    first does it replace the `adopting` marker with the current one in one
-   atomic step. It then checks once more, and if the root changed around the
-   replacement it puts `adopting` back.
+   atomic rename, still holding the lock. That rename is the commit. Adopt
+   then releases the lock and checks nothing more.
 
 A root marked `adopting` is never used. Adopt stops at the first record it
 cannot decode and names it; it refuses a root that is held, that stopped
 uncleanly or that has only the retired catalogue before publishing anything.
-Every failure after the fence, and a killed adopt, leaves `adopting`:
-`root_changed` when the root changed during the audit, and the decode
-refusal when a record cannot be read. Running adopt again redoes the full
-audit from the start and never trusts an earlier run. `doctor` reports an
+Every failure after the fence, and an adopt killed before the rename, leaves
+`adopting`: `root_changed` when the root changed during the audit, and the
+decode refusal when a record cannot be read. An adopt killed after the rename
+leaves a committed current root. Running adopt again redoes the full audit
+from the start and never trusts an earlier run. The `--old-writer stopped`
+statement remains required, because the build that wrote the root neither
+reads the marker nor is bound to this build's lock. `doctor` reports an
 `adopting` root. Running adopt on a root already marked current reports that
 and writes nothing. A root adopt cannot read is recovered the same way as any
 unsupported root: through a backup restored under the build that wrote it.

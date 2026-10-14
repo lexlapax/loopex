@@ -39,7 +39,8 @@ composition, the Local executor's restore codec, the CLI and the daemon.
 | Marker check before composition starts a Store | `LoopexComposition.compose/1`, before `RestoreGuard.state/1` | `loopex_composition` | Existing, changed |
 | Closed-root checks, adopt, backup, restore plan construction and continuation; closed result maps, no printing | `LoopexComposition.StoreAdmin` (`lib/loopex_composition/store_admin.ex`) | `loopex_composition` | New |
 | Capture, attestation and continuation record codec | `LoopexComposition.StoreAdmin.Codec` | `loopex_composition` | New |
-| Read-only inventory and audit of a live root path; whole-tree backup copy | Two operations added to `LoopexComposition.Restore.IO`: `{:root_inventory, root, manifest, workspace_ref, mode}` and `{:backup_copy, root, staging_state, manifest}` | `loopex_composition` | Existing guardian, new operations |
+| Read-only inventory and audit of a live root path; adopt's manifest without the placement lock's entries; whole-tree backup copy | Three operations added to `LoopexComposition.Restore.IO`: `{:root_inventory, root, manifest, workspace_ref, mode}`, `{:adopt_manifest, root, max_total}` and `{:backup_copy, root, staging_state, manifest}` | `loopex_composition` | Existing guardian, new operations |
+| Adopt's hold of the root's placement lock | The extracted placement lock primitive on `STATE_ROOT/placement.lock`, called by `StoreAdmin.adopt/2`; never `Placement.acquire/2` | `loopex_composition` | Existing primitive, new caller |
 | Session-identifying failure of the audit | `LoopexComposition.Restore.Audit` and `Restore.IO.audit_store_bytes/1` return the failing session identifier privately; `restore/2`'s public results are unchanged | `loopex_composition` | Existing, changed |
 | `store backup|restore|adopt` grammar, output, exit statuses | `LoopexCli.Store` (`lib/loopex_cli/store.ex`), dispatched from `LoopexCli.dispatch/2` as `"store"` | `loopex_cli` | New |
 | Marker check for read-only commands (`sessions`, `artifact`) | `LoopexCli` before `SessionCatalog.list/1` and `LoopexComposition.artifacts/1` | `loopex_cli` | Existing, changed |
@@ -182,7 +183,7 @@ marker.
 | `Loopex.runtime_placement_id/1` (`runtime_id` file) | Called only after `Placement.acquire/2` in the CLI, chat and daemon | Covered by the row above |
 | `sessions` offline listing, `artifact` | No write intended; `Artifacts.open/1` may create directories | `check/1`; `:absent` or `:empty` keeps today's empty answer without creating anything; any error refuses |
 | `store backup`, `store restore` (source and backup) | Their own steps below | `check/1`, never `admit/1`; `root_adopting` refuses |
-| `store adopt` | Its own steps below | `check/1`, then the two-phase marker of the adopt section |
+| `store adopt` | The root's placement lock (adopt step 4) | `check/1` before the lock and again under it, then the two-phase marker of the adopt section |
 | Ephemeral `ask` | Its own temporary root, never reopened | Unchanged |
 
 `store restore` never admits its destination: the destination must be empty
@@ -243,9 +244,12 @@ and `--cleanup-grace-ms` to 5,000; both are positive integers, passed as the
 explicit limits ADR 0051's owned IO requires. They are this command's host
 choices; ADR 0051's embedded API keeps no default.
 
-**Algorithm** (`StoreAdmin.adopt/2`). Steps 1 to 5 write nothing. Step 6 is
-the fence; from step 6 on, every exit except the success of step 12 leaves the
-marker `adopting`.
+**Algorithm** (`StoreAdmin.adopt/2`). Steps 1 to 3 write nothing. Step 4
+takes the root's placement lock and writes only the lock's own files. Step 7
+is the fence and step 11's rename is the commit: every exit between them
+leaves the marker `adopting`, and every exit after the rename leaves it
+`current`. Adopt holds the placement lock from step 4 through the rename and
+releases it on every exit after step 4, success or refusal.
 
 1. Resolve the root and workspace to physical paths with
    `WorkspaceIdentity.resolve_path/1`; refuse a path that is not absolute
@@ -257,30 +261,52 @@ marker `adopting`.
    any other error refuses with its code.
 3. `STATE_ROOT/sessions` present as a directory refuses
    `session_catalog_retired`.
-4. Closed-root checks (`StoreAdmin.closed/1`, shared with backup):
-   `Placement.live_owner/1` returns `{:ok, pid}` → `root_held`; `:none` with
-   `placement.lock` or any `placement.lock.owner-*` present → `root_unclean`;
-   `{:error, _}` → `root_held`. `store.log.writer` present → `root_unclean`.
-   Any `delegation/*/objects.writer` present → `root_unclean`. A socket or
-   other special node at `daemon/daemon.sock` → `root_unclean`.
+4. **Placement lock.** Take the lock at `STATE_ROOT/placement.lock` with the
+   extracted placement lock primitive: the same file, owner record, owner
+   handle, guard and stale-incarnation rule `Placement.acquire/2` uses after
+   its first step, so adopt excludes, and is excluded by, every daemon, app
+   server and lock-taking command on the root. Adopt never calls
+   `Placement.acquire/2` itself, whose `admit/1` first step refuses this root.
+   The primitive's existing refusals apply and it does not wait:
+   `placement_active` (a live holder, a concurrent adopt included) and
+   `placement_unverifiable` refuse `root_held`, naming the holder's PID where
+   known; `placement_lock_failed` refuses `inventory_unavailable`. A lock whose
+   recorded process incarnation is gone is reclaimed by the primitive exactly
+   as any start reclaims it. That stale lock is the residue a killed adopt
+   leaves; every other trace of an unclean stop is still refused at step 5 or
+   by the audit.
+5. Under the lock, `RootFormat.check/1` again: `:current` prints `already
+   marked`, releases the lock and exits 0 (a concurrent adopt committed and
+   released first); `root_unmarked` and `root_adopting` continue; any other
+   result refuses with its code. Then the closed-root checks of
+   `StoreAdmin.closed/1` other than the placement lock, which step 4 owns:
+   `store.log.writer` present → `root_unclean`; any
+   `delegation/*/objects.writer` present → `root_unclean`; a socket or other
+   special node at `daemon/daemon.sock` → `root_unclean`;
    `RestoreGuard.state/1` other than `{:ok, _}` refuses with its code
    (`source_retired`, `restore_incomplete`, `history_invalid`), which includes
    a restore claim beside the root.
-5. `WorkspaceIdentity.reference/1` of the workspace; failure refuses
+6. `WorkspaceIdentity.reference/1` of the workspace; failure refuses
    `workspace_unavailable`.
-6. **Fence.** On an unmarked root, publish the `adopting` marker
-   (`RootFormat` Publication with state `adopting`). On `:eexist` an
-   `adopting` marker continues (a concurrent adopt fenced first), a `current`
-   marker prints `already marked` and exits 0, and any other classification
-   refuses with its code. On a root already `adopting`, nothing is published.
-   Then `sweep/1` removes every marker temporary, so the marker's `nlink` is 1
-   for the manifest. From here every entry point of this build refuses the
-   root as `root_adopting`.
-7. Audit manifest A: `Restore.IO.run({:manifest, root, 2^64 - 1}, limits)`.
-   A includes the `adopting` marker entry. The manifest's own caps apply:
-   65,536 entries and 4 MiB encoded; beyond them refuse
-   `inventory_limit_exceeded`.
-8. Inventory and audit: `Restore.IO.run({:root_inventory, root, A,
+7. **Fence.** On an unmarked root, publish the `adopting` marker
+   (`RootFormat` Publication with state `adopting`). `:eexist` cannot come from
+   another adopt, which the lock excludes, or from a start of this build, whose
+   `admit/1` refuses a nonempty unmarked root without publishing; any marker
+   found there refuses `root_changed` and is left as found. On a root already
+   `adopting`, nothing is published. Then `sweep/1` removes every marker
+   temporary, so the marker's `nlink` is 1 for the manifest. From here every
+   entry point of this build refuses the root as `root_adopting` before it
+   reaches the lock.
+8. Audit manifest A: `Restore.IO.run({:adopt_manifest, root, 2^64 - 1},
+   limits)`, ADR 0051's manifest of the root with exactly the placement lock's
+   own top-level entries omitted: `placement.lock` and every entry whose name
+   begins `placement.lock.` (adopt's owner handle and the transient guard).
+   They are lock state, not records, and the owner handle is a second link to
+   the lock file, which ADR 0051's `nlink` rule would refuse. Every other
+   entry, rule and encoding is ADR 0051's. A includes the `adopting` marker
+   entry. The manifest's own caps apply: 65,536 entries and 4 MiB encoded;
+   beyond them refuse `inventory_limit_exceeded`.
+9. Inventory and audit: `Restore.IO.run({:root_inventory, root, A,
    workspace_ref, :adopt}, limits)`. This runs ADR 0051's
    `Restore.Audit.complete/4` over the live root path with a draft plan whose
    descriptors it derives (see Backup step 7) inside the same owned worker. In
@@ -293,26 +319,28 @@ marker `adopting`.
    generation, marker, open entry and receipt, every artifact use and object,
    every resource record and every helper object and log. It stops at the
    first failure, which refuses with its inventory code.
-9. Final manifest C; require C = A byte for byte, else `root_changed`.
-10. Commit. Write a marker temporary holding the `current` bytes (Publication
-    step 2), read the marker and require the exact `adopting` bytes (else
-    `root_changed`), then `rename(temporary, marker)`, which atomically
-    replaces `adopting` with `current`, and `fsync` the root.
-11. Post-commit manifest D; require D = A with only the marker entry changed
-    to `regular`, mode `0600`, size 21, `nlink` 1 and the `current` bytes'
-    SHA-256. Otherwise put `adopting` back by the same temporary-and-rename
-    step, `fsync` the root, and exit 2 with `root_changed`: another process
-    wrote around the commit, and the operator must stop it, run `doctor` and
-    rerun adopt.
-12. Print `adopted STATE_ROOT as loopex-root-format 1` with the counts of
+10. Final manifest C by the same operation; require C = A byte for byte, else
+    `root_changed`.
+11. **Commit.** Write a marker temporary holding the `current` bytes
+    (Publication step 2), read the marker and require the exact `adopting`
+    bytes (else `root_changed`), then `rename(temporary, marker)`, which
+    atomically replaces `adopting` with `current`, and `fsync` the root. This
+    rename, performed while adopt holds the placement lock and after the full
+    audit and C = A, is the linearization point of adoption. Nothing is
+    checked after it and nothing puts `adopting` back.
+12. Release the placement lock with the primitive's release and adopt's owner
+    handle. A release failure leaves a stale lock that the next start
+    reclaims; the root is committed, so adopt still succeeds and names the
+    lock on standard error.
+13. Print `adopted STATE_ROOT as loopex-root-format 1` with the counts of
     sessions, Store frames, ledgers and artifact objects decoded. Exit 0.
 
-**Inventory failure codes** reported by step 8, each with an optional detail:
+**Inventory failure codes** reported by step 9, each with an optional detail:
 `invalid_current_history` with the session identifier when a session's replay
 failed, or the relative path of the failing member otherwise;
 `store_log_torn`, which the command reports as `root_unclean`;
 `workspace_mismatch` when a retained session genesis names a different
-workspace than step 5's reference; `inventory_limit_exceeded`;
+workspace than step 6's reference; `inventory_limit_exceeded`;
 `inventory_mismatch`; `inventory_unavailable` for an IO error. The detail is
 a bounded identifier or path, at most 8,192 bytes, never record content.
 
@@ -323,31 +351,41 @@ a bounded identifier or path, at most 8,192 bytes, never record content.
 Stores and 128 ledgers.
 
 **Crash safety, reruns and concurrent writers.** The marker moves only
-absent → `adopting` (no-replace link, step 6) and `adopting` → `current`
-(rename, step 10), plus the step 11 return to `adopting`. `current` is
-written only after a complete audit of manifest A and a final manifest C
-equal to A, so no root reaches `current` with a change the audit did not
-read:
+absent → `adopting` (no-replace link, step 7) and `adopting` → `current`
+(rename, step 11), and both moves happen while adopt holds the placement
+lock. `current` is written only after a complete audit of manifest A and a
+final manifest C equal to A. The rename is the commit: a crash before it
+leaves `adopting`, and a crash after it leaves a committed `current` root. The
+rename is durable once step 11's root `fsync` returns; a power loss between
+the two leaves either marker, and each is a row of this table.
 
 | Cut | Root left | Next invocation |
 | --- | --- | --- |
-| Refused before step 6 | Unchanged byte for byte; at most a temporary of an earlier run, which `check/1` ignores | Any 0.5.0 start refuses `root_unmarked`; adopt starts over |
-| Killed before the step 6 link | Unmarked, at most one temporary | As above |
-| Killed after the step 6 link, before or after the sweep | `adopting`, at most one temporary | Every entry point refuses `root_adopting`; adopt reruns the full audit |
-| Concurrent writer after step 6, before manifest A | `adopting`; the write is in A and is audited, or is torn and refused by the audit | Refused or adopted only on the audited bytes |
-| Concurrent writer after manifest A | `adopting`; C ≠ A refuses `root_changed` (exit 2) | Every entry point refuses `root_adopting`; adopt reruns from the start |
-| Audit refusal (`invalid_current_history` and the other inventory codes) | `adopting` | Refused; recovered by a backup restored under the build that wrote it |
-| Killed after the step 10 rename | `current`, audited and unchanged at C | Ordinary use; adopt reports `already marked` |
-| Concurrent writer around the step 10 rename, observed by step 11 | `adopting` again; exit 2 `root_changed` | Every entry point refuses `root_adopting` |
+| Refused before step 4 | Unchanged byte for byte; at most a temporary of an earlier run, which `check/1` ignores | Any 0.5.0 start refuses `root_unmarked`; adopt starts over |
+| Refused at steps 4 to 6 | Unchanged byte for byte apart from a stale placement lock that step 4 reclaimed; the lock is released | As above |
+| Killed after step 4, before the step 7 link | Unmarked; adopt's stale placement lock; at most one temporary | Any 0.5.0 start refuses `root_unmarked` before the lock; adopt reclaims the lock and starts over |
+| Killed after the step 7 link, before the rename (during the sweep, a manifest or the audit) | `adopting`; adopt's stale placement lock; at most one temporary | Every entry point refuses `root_adopting` before the lock; adopt reclaims the lock and reruns the full audit |
+| Old-build writer after step 7, before manifest A | `adopting`; the write is in A and is audited, or is torn and refused by the audit | Refused or adopted only on the audited bytes |
+| Old-build writer after manifest A, before manifest C | `adopting`; C ≠ A refuses `root_changed` (exit 2); the lock is released | Every entry point refuses `root_adopting`; adopt reruns from the start |
+| Audit refusal (`invalid_current_history` and the other inventory codes) | `adopting`; the lock is released | Refused; recovered by a backup restored under the build that wrote it |
+| A 0.5.0 start or a second adopt after step 7, before the rename | `adopting`, unchanged by it | The start refuses `root_adopting` at `admit/1`; a second adopt refuses `root_held` at step 4 |
+| A 0.5.0 start or a second adopt after the rename, before step 12 | `current`, unchanged by it | `Placement.acquire/2` refuses `placement_active` (daemon exit 76) and a second adopt refuses `root_held` at step 4; after step 12 both are admitted as on any current root, the second adopt reporting `already marked` |
+| Killed after the rename, before or during step 12 | `current`, audited and unchanged at C; at most adopt's stale placement lock | Ordinary use: the next start reclaims the stale lock; adopt reports `already marked` |
 
-The one window adopt cannot observe is a writer of the old build that runs
-between manifest C and the end of manifest D while adopt is killed before
-step 11 completes. The `--old-writer stopped` statement covers that window
-and only that window; a 0.5.0 start in it is not unaudited history, because
-it opens through the marker check and replay. Adopt never takes the placement
-lock, because taking it writes into an unadopted root; steps 4, 9 and 11
-detect a concurrent start instead. `doctor` reports `marker: adopting` for
-every root left in that state.
+No process of this build writes the root between the fence and the release:
+before the rename every entry point refuses the marker, and between the rename
+and the release every lock-taking start is refused by the lock. A lockless
+path such as `cancel`, admitted by the marker only after the rename, opens a
+committed current root. Two adopters overlap only up to step 4: exactly one
+holds the lock, and the other refuses `root_held` or, once the first has
+committed and released, reports `already marked` at step 5.
+
+A process of the build that wrote the root does not read the marker and is
+not bound to this build's placement lock, so `--old-writer stopped` remains
+its only fence. Such a writer during the audit is detected by C ≠ A; one after
+the rename writes to a committed root and is exactly what the statement
+excludes. `doctor` reports `marker: adopting` for every root left in that
+state.
 
 <a id="technical-adr-0072-backup"></a>
 ### Backup Capture, Layout and Verification
@@ -423,7 +461,11 @@ same bytes have distinct cuts.
    ancestors free of symlinks after resolution (`backup_path_invalid`).
 2. `RootFormat.check/1` must be `:current`; `:absent` or `:empty` refuse
    `root_empty`; errors refuse with their code.
-3. `StoreAdmin.closed/1` as in adopt step 4. A torn tail is found at step 7.
+3. `StoreAdmin.closed/1`: `Placement.live_owner/1` returns `{:ok, pid}` →
+   `root_held`; `:none` with `placement.lock` or any `placement.lock.owner-*`
+   present → `root_unclean`; `{:error, _}` → `root_held`; then the writer
+   marker, socket and `RestoreGuard` checks of adopt step 5. A torn tail is
+   found at step 7.
 4. `RestoreGuard.state/1` gives the prior restore count (0 for an ordinary
    root, else the committed ordinal); count 64 refuses
    `inventory_limit_exceeded`, because ADR 0051 refuses transition 65.
@@ -705,8 +747,8 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `root_empty` | backup, adopt | Root absent or empty | Nothing to back up or adopt |
 | `root_unmarked`, `root_format_unknown`, `root_marker_unreadable` | backup, restore (backup copy or source) | Marker check | Adopt, or restore under the matching build |
 | `root_adopting` | backup, restore (backup copy or source) | An adoption started and has not completed | Stop the old build's processes and rerun `store adopt --old-writer stopped` |
-| `root_held` | backup, adopt | Live or unverifiable placement holder | Stop the service or command |
-| `root_unclean` | backup, adopt | Stale lock or owner link, Store or helper writer marker, socket left, or torn Store tail | Start and stop the root once under the build that wrote it; that start recovers a dead holder and repairs the tail |
+| `root_held` | backup, adopt | Live or unverifiable placement holder, including a concurrent adopt | Stop the service or command, or let the other adopt finish |
+| `root_unclean` | backup, adopt | Stale lock or owner link (backup only; adopt reclaims a stale lock), Store or helper writer marker, socket left, or torn Store tail | Start and stop the root once under the build that wrote it; that start recovers a dead holder and repairs the tail |
 | `session_catalog_retired` | adopt | Only the retired catalogue | Restore under the build that wrote it |
 | `source_retired`, `restore_incomplete`, `history_invalid` | backup, adopt | Restore metadata state | Resolve the earlier restore |
 | `workspace_unavailable`, `workspace_mismatch`, `workspace_changed` | all | Workspace missing or not the root's | Select the root's workspace |
@@ -721,11 +763,13 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `source_absent`, `source_not_absent` | restore | Path contradicts `--source` | State the true branch |
 | `destination_not_empty`, `destination_path_invalid` | restore | Destination rules | Choose a new empty directory |
 | ADR 0051 refusal codes | restore | Passed through verbatim from `{:not_committed, refusal}` | As the operator runbook's outcome table says |
-| `root_changed` | adopt | Root changed after the audit manifest, or around the commit; the marker is left `adopting` | Stop other processes; run `doctor`; rerun adopt |
+| `root_changed` | adopt | Root changed between the audit manifest and the final manifest, or a marker appeared at the fence; the marker is left `adopting` or as found | Stop other processes; run `doctor`; rerun adopt |
 
-A crash of any `store` command leaves: for adopt, an unmarked root, an
-`adopting` marker every entry point refuses, or a current marker written only
-after a complete, unchanged audit (the cut table above); for backup, at most a staging directory beside
+A crash of any `store` command leaves: for adopt, before its rename, an
+unmarked root or an `adopting` marker every entry point refuses, and after
+it, a committed current marker written under the placement lock only after a
+complete, unchanged audit, in each case with at most adopt's stale placement
+lock (the cut table above); for backup, at most a staging directory beside
 `BACKUP`, never a partial `BACKUP`; for restore, the retained plan and ADR
 0051's own uncertainty, resolved by `--resume`.
 
@@ -750,7 +794,7 @@ own manifest.
 | `apps/loopex_cli/test/store_marker_entrypoints_test.exs` | For `run`, `resume`, `cancel`, `skill`, `chat`, durable `ask`, `sessions` and `artifact`: an M7-shaped unmarked root, a root with only `sessions/`, an `adopting` marker, an unknown marker and an unreadable marker each exit 1 with the named code and leave the root unchanged; `sessions` on an absent root creates nothing |
 | `apps/loopex_daemon/test/daemon_root_format_test.exs` | Daemon start exits 116, 117, 118, 119 and 124 for the five codes with the root unchanged, no socket, and the fatal line naming the class |
 | `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` maps every status from 65 to 124 except 114 exactly once and none to 114; its assertion grows from `65..110` to that list (ADR 0071, this record and ADR 0073) |
-| `apps/loopex_composition/test/store_adopt_test.exs` | A root built by the current code with its marker removed is adopted and differs only by the marker; idempotent second run writes nothing; job-index caches tolerated and left; without `--old-writer stopped`, `attestation_required` with no write; refusals with no write for a retired catalogue, a live lock, a stale lock, a writer marker, a helper writer marker and a restore claim; audit refusals for a corrupt frame, a torn tail, a session with an unknown record kind (session named), a receipt without its marker, a missing artifact object and a workspace mismatch, each leaving only the `adopting` marker added; fault cuts through private hooks at each cut, each with a concurrent writer that appends a valid Store frame and creates a file: after the `adopting` publication and before manifest A (the write is audited, the root is adopted, and manifest D equals the audited bytes), after manifest A (`root_changed`, marker `adopting`), and after the step 10 rename (step 11 restores `adopting`, exit 2); kill before the step 6 link, after it, after manifest A, during the audit and after the rename; after every cut whose root is left `adopting`, `admit/1`, `Placement.acquire/2`, `compose/1`, `store backup` and `store restore` with that root as source refuse `root_adopting` with the root unchanged, `report/1` says `adopting`, and a rerun of adopt repeats the full audit (observed by its decode count) before reaching `current`; no cut ever leaves `current` on a root whose final bytes differ from the audited manifest A apart from the marker |
+| `apps/loopex_composition/test/store_adopt_test.exs` | A root built by the current code with its marker removed is adopted and differs only by the marker; idempotent second run writes nothing; job-index caches tolerated and left; without `--old-writer stopped`, `attestation_required` with no write; refusals with no write for a retired catalogue, a live lock (`root_held`), a writer marker, a helper writer marker and a restore claim, each releasing adopt's lock; a stale lock of a dead incarnation reclaimed at step 4 and the root adopted with no lock left; manifests A and C omit exactly `placement.lock` and the `placement.lock.*` entries and include everything else; audit refusals for a corrupt frame, a torn tail, a session with an unknown record kind (session named), a receipt without its marker, a missing artifact object and a workspace mismatch, each leaving only the `adopting` marker added and the lock released; an old-build writer simulated by a test process that takes no placement lock, appending a valid Store frame and creating a file at a private hook after the `adopting` publication and before manifest A (the write is audited and the root adopted) and after manifest A (`root_changed`, marker `adopting`, lock released); real exclusion at private hooks that pause adopt: `Placement.acquire/2` and a real daemon start attempted immediately after the `adopting` publication are refused (`root_adopting`, daemon exit 124) with the root and the lock unchanged, and attempted immediately after the rename, before the release, are refused `placement_active` (daemon exit 76) and admitted, the daemon serving, only after adopt releases; two adopters started together on one unmarked root, one paused while holding the lock: exactly one reaches the fence and commits, and the other refuses `root_held` with nothing written or, started after the release, reports `already marked`; kill after step 4, after the step 7 link, after manifest A, during the audit, after the rename and before the release: before the rename the root is left `adopting` (or unmarked before the link) with a stale lock, and after it `current`; after every cut whose root is left `adopting`, `admit/1`, `Placement.acquire/2`, `compose/1`, `store backup` and `store restore` with that root as source refuse `root_adopting` with the root unchanged, `report/1` says `adopting`, and a rerun of adopt reclaims the stale lock and repeats the full audit (observed by its decode count) before reaching `current`; after the cut following the rename, the next `Placement.acquire/2` reclaims the stale lock and serves the root, and adopt reports `already marked`; in every successful run the marker becomes `current` only by the rename, while adopt holds the lock and after C = A |
 | `apps/loopex_composition/test/store_backup_test.exs` | Backup of a closed root with sessions, receipts, artifacts, resources, a helper namespace and earlier restore lineage: `state/` equals an independent walk of the source; capture fields equal an independent derivation; refusals for held, stale, writer-marker, helper-marker, claim, unmarked, existing, nested and symlinked targets, a changed workspace and 65,537 entries; a source write during the copy gives `source_changed` and no `BACKUP`; kill during copy, before rename and after rename leave no `BACKUP` or a complete one; job-index removal is the only source change |
 | `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; kill at each ADR 0051 phase, then `--resume` reaching committed with the same plan bytes; `previous_restore_running`; an edited plan file gives `restore_conflict`. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged |
 | `apps/loopex_executor_local/test/restore_codec_test.exs` (extended) | The discard attestation form round-trips exactly; a form carrying both `discard_later_work` and `latest_cut`, or `discard_later_work` `false`, is refused; the latest form's bytes are unchanged |
@@ -803,8 +847,12 @@ directory taken by `store backup`, as ADR 0036 states.
   into a root not yet known to be supported.
 - *Marker published by rename.* Rename replaces an existing marker; hard-link
   publication cannot, which keeps a concurrent different-format marker intact.
-- *Adopt taking the placement lock.* Its lock file would be a write to the
-  unmarked root besides the marker.
+- *Adopt without the placement lock, re-checking the root after the commit.*
+  Between publishing `current` and the re-check a legitimate start could
+  acquire placement and write, and returning the marker to `adopting` would
+  then strand a live writer; two adopters could also overlap. Holding the lock
+  through the rename makes the rename the single commit point. The lock's
+  files are transient lock state, left out of adopt's manifests.
 - *Backup taking the placement lock.* Its lock and owner link would enter the
   complete manifest and refuse under ADR 0051's link rule.
 - *Rewriting configuration after restore.* The maintainer decided the command
