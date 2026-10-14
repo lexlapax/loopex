@@ -248,7 +248,8 @@ branch and renumbered when that branch was rebased onto the closed M7 baseline.
 service read ADR 0049's configuration file at startup, and makes the service
 host M7's read-only helper roles, with helper children counted toward the
 daemon's activation limit. On acceptance it narrowly amends ADR 0049's
-conversation status record, ADR 0032's activation ceiling and ADR 0055's
+conversation status record, ADR 0032's activation ceiling, ADR 0046's fixed
+refusal order with one new refusal, `helper_activation_limit`, and ADR 0055's
 creation options on a helper-enabled service. 0072 takes the operator backup
 and restore work out of 0036, so the installed release does not wait on the
 engine experiment; 0036 keeps the engine selection, migration and capacity
@@ -268,8 +269,9 @@ registration for Loopex. Tokens are host-held in the operating system's
 keyring or an owner-only file outside the state root, and Loopex uses only its
 own client identities. On acceptance it amends named clauses of accepted ADRs
 0019, 0029, 0034, 0039 and 0048, including the new public failure reason
-`provider_sign_in_required` in ADR 0029's bounded vocabulary, and one sentence
-of Proposed ADR 0037. M8's daemon exit statuses are 111 to 115 for 0071 (114
+`provider_sign_in_required` in ADR 0029's bounded vocabulary; adds the `oauth`
+binding form and `vertex` members to ADR 0049's schema version 1 as additive
+members; and amends one sentence of Proposed ADR 0037. M8's daemon exit statuses are 111 to 115 for 0071 (114
 retired), 116 to 119 for 0072 and 120 to 123 for 0073. All five M8
 prerequisites remain Proposed.
 

@@ -7818,3 +7818,39 @@ whether it will sanction an OAuth client registration for Loopex.
 All five prerequisite ADRs remain Proposed and M8 remains Open. No accepted
 ADR, vision text or M7 file changes. M8 carries no implementation authority;
 its acceptance and each ADR's acceptance remain the maintainer's.
+
+<a id="disposition-m8-readiness1-2026-10-13"></a>
+### M8 readiness review 1 answered — 2026-10-13
+
+Readiness review 1 of the M8 planning branch at
+`d2d26465f4e40e2bfd972e40ee1e0c6e8497d5a3` found the plan not ready, with
+findings F1 to F14 (P1: F1 to F5; P2: F6 to F13; P3: F14). The maintainer took
+two decisions in response, recorded as D16 and D17 in the
+[M8 plan](../plans/M8.md#concept-plan-decisions):
+
+1. **Anthropic refusal proof (D16, F12).** The deliberately disabled Anthropic
+   `claude:` route is proved by its tested refusal. Closing outcome 8 requires
+   positive real-sign-in lanes for OpenAI and Google only; Anthropic needs no
+   deferral.
+2. **Two-phase adoption (D17, F8).** `loopex store adopt` requires the
+   operator statement `--old-writer stopped` that no M7-built process is
+   running, and first publishes an `adopting` marker that every `0.5.0`
+   entrypoint refuses, so a `0.5.0` start stops immediately. Only after the
+   full audit and an unchanged final manifest does the marker become current.
+   A killed adopt or `root_changed` leaves `adopting`, and rerunning adopt
+   redoes the full audit.
+   [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept).
+
+Findings F1 to F14 were addressed in the five Proposed M8 ADR pairs, the M8
+plan pair, the ADR index and the successor material: ID-token JWKS
+verification and subject/generation pairing, the ADC source, the shared
+streaming reply ceiling through both callers and sign-in refusal on any legal
+attempt (ADR 0073); the auth and state-root path separation, nonblocking
+readiness during classification and a closed `service status` result (ADR
+0037); the helper permit registry operation (ADR 0071); two-phase adoption and
+cooperative marker publication (ADR 0072); the Linux build recipe's `PATH` and
+writable Mix, Hex and Rebar locations (ADR 0038); exit statuses 65 to 123
+except 114, each used once; and the amendment inventories, which now list ADR
+0073's additive ADR 0049 schema-version-1 members and ADR 0071's amendment of
+ADR 0046's refusal order. All five prerequisite ADRs remain Proposed and M8
+remains Open; acceptance remains the maintainer's.

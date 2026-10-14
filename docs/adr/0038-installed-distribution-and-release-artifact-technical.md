@@ -282,7 +282,9 @@ runs `assemble.sh` in the platform's build environment.
    `29.0.5`, `:erlang.system_info(:version)` is `17.0.5`, `crypto:info_lib()`
    reports OpenSSL `3.5.7`, and `assert-linkage.sh` passes on the toolchain's
    copies of the seven native objects;
-2. runs `mix deps.get`, which verifies every package against `mix.lock`;
+2. runs `mix local.hex --force` and `mix local.rebar --force` into the
+   build's writable `MIX_HOME`, then `mix deps.get`, which verifies every
+   package against `mix.lock`;
 3. runs `MIX_ENV=prod mix cmd --app loopex_cli mix escript.build --relocatable`
    with no provider credential in the environment, then
    `elixir scripts/escript-inventory.exs` on the two escripts;
@@ -327,16 +329,29 @@ make -j"$(nproc)" && make install_sw
   --without-megaco LDFLAGS="-static-libstdc++ -static-libgcc"
 make -j"$(nproc)" && make install
 # Elixir 1.20.3 from elixir-otp-29.zip, unzipped into /opt/elixir
-MIX_HOME=/opt/mix mix local.hex --force
-ENV PATH=/opt/elixir/bin:/opt/erlang/bin:$PATH LANG=C.UTF-8 MIX_HOME=/opt/mix
+ENV PATH=/opt/elixir/bin:/opt/erlang/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=C.UTF-8
+# No Mix, Hex or Rebar step runs at image build time; /opt stays root-owned
+# and read-only to the build user.
 ```
 
 `--without-termcap` removes the terminal library (the escripts run without the
 interactive shell), `--enable-builtin-zlib` removes `libz`, and the static
 `libstdc++` and `libgcc` remove the C++ runtime the JIT would otherwise
-need. `build.sh` runs the image as the invoking user's UID and GID, with the
-extraction and `<out-dir>` bind-mounted read-write and no credential in the
-environment. Hex is a build-only tool; its version appears in `build.log`.
+need. The image's `PATH` names `/opt/elixir/bin` and `/opt/erlang/bin` before
+any command runs in it, so every `mix`, `elixir` and `erl` invocation resolves
+to the pinned toolchain. `build.sh` runs the image as the invoking user's UID
+and GID, with the extraction and `<out-dir>` bind-mounted read-write, a fresh
+mode-`0700` host temporary directory bind-mounted read-write at `/build-home`,
+and no credential in the environment. That user cannot write `/opt`, so every
+Mix, Hex and Rebar location is writable and confined to the build:
+`HOME=/build-home`, `MIX_HOME=/build-home/mix`, `HEX_HOME=/build-home/hex`,
+`REBAR_CACHE_DIR=/build-home/rebar3-cache` and
+`XDG_CACHE_HOME=/build-home/cache`; `deps` and `_build` stay inside the mounted
+extraction. On macOS the same variables are set under the `env -i` temporary
+`HOME`. `assemble.sh` step 2 installs Hex and Rebar into those locations.
+`build.sh` removes the temporary directory after the build. Hex and Rebar are
+build-only tools; their versions appear in `build.log`.
 
 <a id="technical-adr-0038-install"></a>
 ### Install, Upgrade and Removal
