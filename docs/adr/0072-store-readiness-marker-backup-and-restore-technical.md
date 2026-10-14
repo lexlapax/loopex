@@ -138,8 +138,8 @@ left. The producer then takes one `store backup` of that root and keeps its
 `capture` file; the backup's `state/` copy equals the root and is not kept.
 The root, its workspace and that `capture` become one canonical archive,
 `apps/loopex_cli/test/fixtures/root_format/format-1.tar`, written by
-`scripts/fixtures/m7-root-archive.exs` in the canonical form the [retained
-M7 root](#technical-adr-0072-m7-fixture) uses. A `README.md` beside it
+`scripts/fixtures/m7-root-archive.exs` in the canonical form the
+[retained M7 root](#technical-adr-0072-m7-fixture) uses. A `README.md` beside it
 records the producing commit, the command, the toolchain pair, the session
 identifiers, the workspace reference the genesis records and the archive's
 SHA-256, which the test also pins. `loopex_cli` holds the fixture and its
