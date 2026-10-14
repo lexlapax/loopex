@@ -282,8 +282,9 @@ categories and valid-combination table, ADR 0021's settled-attempt result
 schema and ADR 0043's episode failure union; adds the `oauth`
 binding form and `vertex` members to ADR 0049's schema version 1 as additive
 members; and amends one sentence of Proposed ADR 0037. M8's daemon exit statuses are 111 to 115 for 0071 (114
-retired), 116 to 119 and 124 (`root_adopting`) for 0072 and 120 to 123 for
-0073, landing as 111 to 115, then 116 to 119, then 120 to 124. All five M8
+retired), 116 to 119 and 124 (`root_adopting`) for 0072, 120 to 123 for
+0073 and 125 (`service_record_write_failed`) for 0037, landing as 111 to
+115, then 116 to 119, then 120 to 125. All five M8
 prerequisites remain Proposed.
 
 0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on
