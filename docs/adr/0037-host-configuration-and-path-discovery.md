@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file, stated on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), superseding D19, D21 and every mount and walk-identity rule, recorded on 2026-10-14; the maintainer's decision that a service that cannot write its service record refuses the start with daemon status 125 (D31), recorded on 2026-10-14
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file, stated on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), superseding D19, D21 and every mount and walk-identity rule, recorded on 2026-10-14; the maintainer's decision that a service that cannot write its service record refuses the start with daemon status 125 (D31), recorded on 2026-10-14; the maintainer's acceptance of the start and status contracts (D39) and the fixes of the second holistic internal review, recorded on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -54,7 +54,14 @@ They are recorded here as decided, not proposed.
    `service status` prints one closed object: the service's state, process,
    socket, state root and selected file, the service's whole readiness answer
    kept intact, and the activations it has used out of its 64, helper
-   children included.
+   children included. Its state is one of `stopped`, `held` (a process that
+   is not a service holds the root), `starting`, or the service's own
+   `serving`, `classifying`, `closed` or `unavailable`; it exits `0` when
+   serving, `3` in any other state and `1` when it cannot tell. `service
+   stop` signals only a holder whose socket answers as this root's service;
+   a live holder whose socket does not answer, a foreground command or a
+   service still starting, is refused as `root_held` and is not signalled.
+   The maintainer accepted these contracts on 2026-10-14 (D39).
 5. **The service is asked for by name.** `--service` on `chat`, `run`,
    `resume`, `attach` and `sessions` names the selected home's service. The
    conversation, `run` and `resume` start it on demand; `attach` and
@@ -68,7 +75,7 @@ They are recorded here as decided, not proposed.
    started directly on such a configuration exits with ADR 0073's status 120;
    the maintainer confirmed on 2026-10-13 that this stays (D22). The service inherits that
    command's environment and runs detached from its terminal, so closing the
-   terminal or interrupting the command does not stop it. It never prompts and
+   terminal or interrupting or suspending the command does not stop it. It never prompts and
    leaves the workspace's project resources unadmitted, which its readiness
    report states. `loopex service start` at a terminal shows the project
    resources and asks, as the daemon does in the foreground today. Concurrent
@@ -78,13 +85,22 @@ They are recorded here as decided, not proposed.
    takes the lock, so the lock's holder shows whether it is a service. A
    service that cannot write that record refuses to start: it exits with the
    new status 125, `service_record_write_failed`, before taking the lock, and
-   its starter refuses with that class (D31). A command that finds the root held by a process
-   whose socket does not answer waits only when that holder is a service;
-   any other holder is a foreground command, and the command refuses at once
-   as held, naming that process, because no wait would end a foreground
-   command. A command whose own service lost the lock judges the holder the
-   same way, so starters that all lost to a foreground command never wait on
-   one another.
+   its starter refuses with that class (D31). A command that finds the root
+   held by a process whose socket does not answer waits only when that
+   holder is a service: its record in the selected file's log directory
+   matches the lock's incarnation and names the same socket. Any other
+   holder, a foreground command or a service started from a file in another
+   directory, is refused at once as held, naming that process, because no
+   wait is known to end. A command whose own service lost the lock judges
+   the holder the same way, so starters that all lost to a foreground
+   command never wait on one another. A start that does not end with a
+   serving service refuses by name: `root_held`, `service_stopped`,
+   `service_exited`, `service_not_ready`, `service_not_serving`,
+   `service_closed`, `service_command_unavailable`,
+   `service_record_write_failed`, `placement_unverifiable` or
+   `placement_lock_failed`, or with the precheck's or the service's own
+   class. The maintainer accepted this classification and these classes on
+   2026-10-14 (D39).
 7. **Readiness is reported as it is.** The running service answers one new
    query, `daemon.readiness`: serving; still classifying helper history, with
    ADR 0046's two counts; closed, with the session whose history could not be
@@ -213,7 +229,7 @@ earlier build; recovery restores a backup under the matching build with ADR
 
 ## Open for the Maintainer
 
-None. Every cell is decided in the companion.
+None.
 
 ## Governance Record
 

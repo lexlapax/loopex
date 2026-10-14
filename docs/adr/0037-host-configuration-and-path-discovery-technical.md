@@ -49,7 +49,7 @@ $HOME/.loopex/              0700, created by init (one mkdir, never -p)
   config.json               0600, written only by the writers below
   .config-writer/           0700, holds the writer lock
   auth/                     0700, ADR 0073's sign-in metadata and file-fallback token store
-  log/                      0700, created by the first service start
+  log/                      0700, created by `spawn` or by the daemon, whichever is first
     service.log             0600, the service's stdout and stderr, appended
     service.log.1           the previous log, kept once
     start-<16 hex>.exit     one start's exit status, read and removed by its starter;
@@ -293,7 +293,8 @@ process of the command:
 **HOME unusable.** When `HOME` fails `LoopexCli.Home`'s rules, `A` and `G` cannot be
 computed and separation cannot be shown. Every row above then refuses
 `home_unavailable` before any write, including commands given only
-`--config` and `--state-root`. Ephemeral `ask` is the exception. Without
+`--config` and `--state-root`; `loopex daemon` exits 111 with class
+`home_unavailable`. Ephemeral `ask` is the exception. Without
 `HOME`, no sign-in directory exists that the invocation could write. The
 refusal still applies to roots, because another invocation with `HOME` set
 could later create `A` or `G` inside the selected root.
@@ -305,8 +306,8 @@ that overlapped, and exits `1`, as every refusal in this
 record does; `loopex auth` exits 76 from its own status table in
 [ADR 0073](0073-provider-oauth-sign-in-technical.md#technical-depth). `loopex daemon` exits [ADR 0071](0071-daemon-attached-conversation-technical.md#technical-adr-0071-decision)'s
 `111`, `configuration_invalid`, with class `auth_root_overlap` and the
-pointer on its diagnostic line. This refusal assigns no new daemon status;
-the record's one daemon status is 125, `service_record_write_failed`
+pointer, or class `home_unavailable`, on its diagnostic line. Neither
+refusal assigns a new daemon status; the record's one daemon status is 125, `service_record_write_failed`
 ([service record](#technical-0037-service-record)). The M8 set is every
 integer from 65 through 125 except 114, which ADR 0071 retires.
 
@@ -364,9 +365,12 @@ precedence and origins are unchanged.
 
 Every write runs the same stages: take the lock; read the current bytes
 (`init`: none); build the candidate; validate it with
-`ConfigSchema.validate/1`, then `ConfigFile` path resolution and
-`ConfigInspection.prepare/3`'s model, instruction and genesis checks against
-the candidate's own directory; encode it with keys in byte order, two-space
+`ConfigInspection.validate_document/2` (new), which takes the candidate
+document and its path instead of argv and runs `ConfigSchema.validate/1`,
+`ConfigFile.resolve_document/2` (new: the path resolution `ConfigFile.load/2`
+runs after decoding, today private) and the selection, instruction and
+genesis checks `prepare/3` runs after its load, with no overrides;
+`ConfigFile.load/2` and `prepare/3` call the same two functions; encode it with keys in byte order, two-space
 indentation and one trailing LF (authored formatting is not preserved); write
 `config.json.tmp-<16 hex>` opened `[:raw, :binary, :write, :exclusive]` with
 mode 0600; `:file.sync/1`; `File.rename/2`; sync the directory with the
@@ -409,10 +413,10 @@ All waits yield to the command's signal route exactly as `LoopexCli.Live`'s
 | State | Action | Next |
 | --- | --- | --- |
 | `select` | `Home.select`, `ConfigFile.load`, `ConfigSelection.compose` with no overrides; derive root and socket | `probe`; a load or selection refusal ends the command with its class and pointer |
-| `probe` | `DaemonClient.connect(socket, timeout: 1_000)` | answers: `readiness`; else a live `Placement.live_owner(root)`, classified as below: a service holder: `wait` without spawning (that service is still starting, so this command waits for it under the same deadline, measured from its own start); a foreground holder: refuse `root_held` at once with its PID, because no wait would end a foreground command; else `precheck` |
-| `precheck` | For each `providers.*.credential.env`, test presence and nonemptiness of the variable without retaining, printing, hashing or comparing the value; for each `providers.*.credential.oauth` route, read only ADR 0073's non-secret sign-in metadata | all present: `spawn`; an absent reference: refuse `provider_credential_absent` naming the first absent pointer (for example `/providers/anthropic/credential/env`); an `oauth` route whose metadata is absent or signed out: refuse `provider_sign_in_required` naming the route (D22; `loopex daemon` itself exits 120 for it). Either refusal creates no process, lock, log or socket |
-| `spawn` | Prune stale exit and service-record files, rotate the log, then start the detached service as below and record `t0` | `wait` |
-| `wait` | Every 250 ms until `t0 + 75_000` (for a command that entered from `probe`, its own start plus 75,000 ms): connect; else, for a command that spawned, read this start's `log/start-<16 hex>.exit`; then, for a command whose own service has exited 76 and for a command that entered from `probe`, read `Placement.live_owner(root)` and classify the holder | answers: `readiness`; an own exit status other than 76: refuse with its `LoopexDaemon.ExitStatus` class, or, for `0` (the service stopped, for example by a concurrent `service stop`), `service_stopped`, and for any status without a class (`1`, or `128`+n after a signal), `service_exited` naming the number and the log; own service still running (no exit status yet): stay in `wait`, classifying nothing, because this command's own start is still in progress; a service holder: stay in `wait`; a foreground holder: refuse `root_held` at once with its PID; no live holder: the service this command waited for has exited without serving, so return to `probe` under the same deadline; deadline: refuse `service_not_ready`, naming `starting` or the live holder's PID |
+| `probe` | `DaemonClient.connect(socket, timeout: 1_000)` | answers: `readiness`; else `Placement.live_owner(root)`: `:none`: `precheck`; an error: refuse its class, `placement_unverifiable` or `placement_lock_failed`, at once; a live holder, classified as below: a service: `wait` without spawning (that service is still starting, so this command waits for it under the same deadline, measured from its own start); not a service: refuse `root_held` at once with its PID, because no wait is known to end |
+| `precheck` | For each `providers.*.credential.env`, test presence and nonemptiness of the variable without retaining, printing, hashing or comparing the value; for each `providers.*.credential.oauth` route, read only ADR 0073's non-secret sign-in metadata and its [generation floor](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-generation-floor) | all present: `spawn`; an absent reference: refuse `provider_credential_absent` naming the first absent pointer (for example `/providers/anthropic/credential/env`); an `oauth` route whose metadata is absent, not `signed_in`, or at a generation at or below the floor's (a logout cut after its floor write): refuse `provider_sign_in_required` naming the route (D22; `loopex daemon` itself exits 120 for it). Either refusal creates no process, lock, log or socket |
+| `spawn` | Create `log/` (`0700`) when absent, prune stale exit and service-record files, rotate the log, then start the detached service as below and record `t0` | `wait` |
+| `wait` | Every 250 ms until `t0 + 75_000` (for a command that entered from `probe`, its own start plus 75,000 ms): connect; else, for a command that spawned, read this start's `log/start-<16 hex>.exit`; then, for a command whose own service has exited 76 and for a command that entered from `probe`, read `Placement.live_owner(root)` and classify the holder | answers: `readiness`; a `live_owner` error: refuse its class at once; an own exit status other than 76: refuse with its `LoopexDaemon.ExitStatus` class, or, for `0` (the service stopped, for example by a concurrent `service stop`), `service_stopped`, and for any status without a class (`1`, or `128`+n after a signal), `service_exited` naming the number and the log; own service still running (no exit status yet): stay in `wait`, classifying nothing, because this command's own start is still in progress; a service holder: stay in `wait`; a holder that is not a service: refuse `root_held` at once with its PID; no live holder: the service this command waited for has exited without serving, so return to `probe` under the same deadline; deadline: refuse `service_not_ready`, naming `starting` or the live holder's PID |
 | `readiness` | `daemon.readiness` | `serving`: done; `closed`: refuse `service_closed` with the session, its code and `loopex store restore`; `classifying` or `unavailable`: poll every 1,000 ms until the same deadline, then refuse `service_not_serving` with the last answer |
 
 The 75,000 ms bound is the delivered startup gate (`@owner_start_gate_ms`
@@ -430,11 +434,14 @@ file's directory, creating `log/` (`0700`) when absent: `<pid>` is its own
 `System.pid()` in decimal and the content, mode `0600`, is its
 `Placement.process_incarnation/1` answer followed by one LF, the same
 incarnation its placement lock record will carry, then a second line with
-the socket path it will listen on and one LF. `LoopexCli.Daemon` writes it
+the socket path it will listen on and one LF. It writes the content to
+`service-<pid>.id.tmp` and renames it over the record's name, replacing any
+file there, which can only be a dead process's record whose PID was reused.
+`LoopexCli.Daemon` writes it
 after reference presence and the project-resource decision, immediately
 before `LoopexDaemon.Sentinel.run/2` starts the service, so the record is
 complete before the process can reach `Placement.acquire/2`, and removes it
-when the daemon exits. A daemon that cannot write it removes any partial
+when the daemon exits. A daemon that cannot write it removes its temporary
 file, writes its diagnostic line naming the class and exits 125, `service_record_write_failed`
 (D31), before `Sentinel.run/2`: it never reaches `Placement.acquire/2`, so
 it holds no lock, socket or session, and every daemon that holds the lock
@@ -444,30 +451,48 @@ file and refuses `service_record_write_failed`.
 **Holder classification.** For a live `Placement.live_owner(root)` answer
 `P`, the holder is a *service* when `log/service-<P>.id` is a regular file
 whose first line equals `Placement.process_incarnation(P)`'s answer and
-whose second line equals this command's own socket path, each followed by
-one LF. A record naming another socket, from a second configuration file in
-the same directory selecting the same root, is no match, so that command
-refuses rather than waiting on a socket nobody will open. Any other holder is *foreground*: a `chat`, `run` or M7-form
-`loopex daemon` writes no record, and a record left by an earlier process
-that had the same PID carries that process's incarnation, so it does not
-match; a failed incarnation read is no match. A `Placement.live_owner(root)` that
-answers `placement_unverifiable` (an unattributable lock or a `ps` that
-does not answer) refuses `placement_unverifiable` at once, as the delivered
-`cancel` does. Before refusing a foreground
-holder the command reads `Placement.live_owner(root)` again, and when it no
-longer answers `P` it classifies afresh at the next poll, so a holder that
-handed over between the two reads is never reported. The decision reads
+whose second line names this command's own socket, each followed by one
+LF. The two sockets are compared in the [canonical form](#technical-0037-auth-separation)
+the separation rule uses, equal `E` identity and equal `S`, so two
+spellings of one root match. Any other holder is *not a service*: a `chat`,
+`run` or M7-form `loopex daemon` writes no record, a service started from a
+file in another directory wrote its record there, and a record left by an
+earlier process that had the same PID carries that process's incarnation.
+A `Placement.process_incarnation(P)` read answering `process_absent` means
+the holder has exited: `probe` probes again, `wait` polls again and `service
+status` reports `stopped`; any other failed read refuses
+`placement_unverifiable` at once, and a `Placement.live_owner(root)` error,
+`placement_unverifiable` (an unattributable lock or a `ps` that does not
+answer) or `placement_lock_failed` (an unreadable lock), refuses its class
+at once, as the delivered `cancel` does. Before refusing a holder that is
+not a service the command reads `Placement.live_owner(root)` again; when it
+no longer answers `P`, `probe` probes again and `wait` classifies afresh at
+its next poll, so a holder that handed over between the two reads is never
+reported. The decision reads
 only the live holder's own record, so no command's waiting depends on
 another starter's files or on whether that starter is still alive.
+
+**Lock publication.** `Placement.live_owner/1` reads the lock without the
+acquisition guard, and the delivered `create_owner/2`
+(`apps/loopex_composition/lib/loopex_composition/placement.ex` :207-230)
+opens the lock exclusively, then writes and closes it, so a read in between
+finds an empty record and answers `placement_unverifiable`
+(`unattributable_owner_record`, :450-461), which a starter would refuse.
+M8's extracted lock primitive therefore writes and closes the whole record
+under its owner handle's name first and then publishes it with `File.ln/2`
+to the lock's name, which fails with `:eexist` wherever the exclusive open
+did; a reader finds no lock or a complete record. A handle left by a kill
+before the link is removed by the delivered `cleanup_owner_handles/1`
+(:248-261) at the next acquisition.
 
 Two or more commands that spawn, because each probed before any service
 took the lock, converge through status 76: a loser's service exits 76 only
 because another process holds the lock, and the loser then classifies that
 holder. The winning service wrote its record before taking the lock, since
 a service that cannot write one exits 125 without taking it, so every loser
-waits for its socket; a foreground command that took the lock
-between the probes and the spawns is classified foreground by each loser
-independently, and each refuses `root_held` at once with its PID, however
+started from the same file's directory waits for its socket; a foreground
+command that took the lock between the probes and the spawns is classified
+as not a service by each loser independently, and each refuses `root_held` at once with its PID, however
 many losers there are. A third command that probes after the winner took
 the lock finds a service holder and waits for the same service. A
 starter killed at any step leaves no file another command reads: its
@@ -482,15 +507,18 @@ live holder keeps waiting, since that service has yet to take the lock.
 **Exit-file pruning.** Each start writes one `log/start-<16 hex>.exit` (and
 transiently its `.tmp`), and its starter removes it once read; a starter that
 was killed or that refused at its deadline leaves it. A service killed before
-it removes its record leaves `log/service-<pid>.id`. The `spawn` step and
+it removes its record leaves `log/service-<pid>.id`, or its `.tmp`. The `spawn` step and
 `service stop`, after the owner is gone, prune: they read
 `Placement.live_owner(root)` once, list `log/` once, stop after 1,024
 entries, and remove each entry whose `File.lstat/1` reports a regular file,
 whose modification time is more than 300,000 ms old, and whose name is either
 `start-` followed by 16 lowercase hexadecimal characters and `.exit` or
 `.exit.tmp`, or `service-` followed by a decimal PID of at most 10 digits
-without a leading zero and `.id`, other than the record of the PID that read
-answered. 300,000 ms is four times the longest any starter waits, so no live
+without a leading zero and `.id.tmp`, or the same and `.id` when its
+first 8,192 bytes read as two lines whose second names this command's
+socket in the canonical form above, other than the record of the PID that
+read answered. A record naming another socket belongs to another root's
+service and is left to that root's commands. 300,000 ms is four times the longest any starter waits, so no live
 starter's exit file is removed. A service writes its record during startup,
 moments before it takes the lock or exits 76, so a record that old belongs to
 the live holder, which is kept, or to a process that has exited. `:enoent` is
@@ -501,6 +529,7 @@ later prune. Other names in `log/` are never touched.
 
 ```text
 /usr/bin/nohup /bin/sh -c 'c=$0 f=$1 l=$2 e=$3; shift 3
+  trap "" TSTP TTIN TTOU; unset LOOPEX_ESCRIPT
   "$c" daemon --config "$f" "$@" </dev/null >>"$l" 2>&1
   printf "%s\n" "$?" >"$e.tmp" && mv "$e.tmp" "$e"' \
   COMMAND FILE LOG EXIT [--admit-project-resources DIGEST] </dev/null >/dev/null 2>&1 &
@@ -518,11 +547,16 @@ not being an executable regular file refuses `service_command_unavailable`;
 no fallback path is tried. The service therefore starts with
 `SIGHUP` ignored by `nohup` and `SIGINT` and `SIGQUIT` ignored as an
 asynchronous list. Because those three were ignored on entry, the launcher's
-own traps for them cannot be installed (POSIX), while its `SIGTERM` forward
-still works for `service stop`. Standard input is `/dev/null`, so
+own traps for them cannot be installed (POSIX). Neither `sh` nor `nohup`
+starts a new session, so the service stays in the starter's process group;
+the script ignores `SIGTSTP`, `SIGTTIN` and `SIGTTOU`, which the service
+inherits, so a suspend typed at the starter's terminal does not stop it. It
+unsets `LOOPEX_ESCRIPT`, which the launcher prefers over the escript beside
+it (`apps/loopex_cli/bin/loopex` :37-38), so the service runs the build
+`COMMAND` names. Standard input is `/dev/null`, so
 `ProjectResources.operator_present?/0` is false and the delivered decision
 path leaves project resources unadmitted without asking. The environment is
-the starter's own; nothing else supplies credentials. Before spawning, a log
+the starter's own less `LOOPEX_ESCRIPT`; nothing else supplies credentials. Before spawning, a log
 over 1,048,576 bytes is renamed to `service.log.1`.
 
 #### Readiness
@@ -553,15 +587,9 @@ no readiness answer may wait on it.
 *Readiness source.* The helper owner publishes its classification state to a
 `:protected` ETS table it creates in `init/1` with `read_concurrency: true`.
 The owner is the table's only writer; the table is unnamed, so it is
-per-runtime and never global, and its identifier reaches the service in the
-handle `Delegation.host/5` returns, so obtaining it calls nothing.
-`Delegation.host/5` is the delivered `host(root, runtime_id, placement,
-enabled)` with a fifth options keyword, and `host/4` delegates to it with
-`[]`. It lands with this record's readiness, at M8 implementation step 4,
-because readiness needs the handle's table; its options keyword then admits
-no member. [ADR 0071](0071-daemon-attached-conversation-technical.md#technical-adr-0071-decision)
-later adds the keyword's one member, its activation permit; the handle's
-table member is this record's. The table
+per-runtime and never global, and its identifier reaches the service as a
+new `readiness` member of the handle map the delivered `Delegation.open/4`,
+and so `Delegation.host/4`, returns, so obtaining it calls nothing. The table
 holds one row, `{:readiness, sequence, classified, slice}`:
 
 | Field | Value |
@@ -609,7 +637,11 @@ later read saw a later write.
 
 While a pass is incomplete without a named session, the service runs
 a further 60,000 ms `Helper.classify/2` slice from a linked task one second
-after the last one ends, as ADR 0046 requires of a resident host. The schema
+after the last one ends, as ADR 0046 requires of a resident host. The loop
+starts only after ADR 0071's startup step 5 has bound the activation permit,
+so no slice delays that bind or recovers a child uncounted, and it stops as
+ADR 0071's [stop order](0071-daemon-attached-conversation-technical.md#technical-adr-0071-stop-order)
+states. The schema
 addition updates `loopex-experimental-4.json` (method list,
 `initialized.supported_methods`, result definition), its vectors, the pinned
 digest in `LoopexCli.DaemonClient` and `clients/node/contract-manifest.mjs`,
@@ -630,7 +662,7 @@ output with keys in the order listed, as `sessions --daemon --status` does.
   restarted, and its admission cannot change until it is restarted. Prints the
   status object; exits `0` when `serving`, else `1`.
 - **`service stop`.** With no live placement owner it prints `stopped` and
-  exits `0`. When the socket answers and `daemon.status`'s
+  exits `0`; a `live_owner` error prints `loopex: <class>` and exits `1`. When the socket answers and `daemon.status`'s
   `placement_identity` equals `Loopex.runtime_placement_id(root)`, it
   re-verifies the owner's incarnation, sends that BEAM process `SIGTERM`, and
   polls every 250 ms until the owner is gone, printing `loopex: stopping
@@ -641,24 +673,26 @@ output with keys in the order listed, as `sessions --daemon --status` does.
   owner is gone and the placement lock file is gone, else `1` with
   `stop_unconfirmed` and the log path. Whenever no owner remains, including
   the `stopped` case, it then prunes stale start exit and service-record files as `spawn` does;
-  a prune never changes its exit status. A live owner whose socket does not answer is a foreground
-  command or a service still starting: it refuses `root_held` with the PID and
-  never signals it.
+  a prune never changes its exit status. A live owner whose socket does not
+  answer is a foreground command or a service still starting: it refuses
+  `root_held` with the PID and never signals it.
 - **`service status`.** Prints the closed status object below and exits `0`
   for `serving`, `3` for any other state, and `1` when it cannot determine
   one: the file cannot be selected or loaded, the socket answers
-  `daemon.readiness` but not `daemon.status`, or `Placement.live_owner(root)`
-  answers `placement_unverifiable` or `placement_lock_failed`, which it
+  `daemon.readiness` but not `daemon.status`, `Placement.live_owner(root)`
+  answers `placement_unverifiable` or `placement_lock_failed`, or the
+  holder's incarnation read fails (`placement_unverifiable`), which it
   prints as `loopex: <class>` with no object. `service start` prints the same
   object. A live owner whose socket does not answer is `starting` when its
   service record matches under the holder classification, and `held`
-  otherwise: a foreground command.
+  for any holder that is not a service.
 - **`paths`.** Keys: `home`, `configuration_file`, `selected_by` (`flag` or
   `home`), `state_root`, `workspace`, `socket`, `log_directory`. Exits `1`
   only when the file cannot be loaded.
 - **`doctor`.** Keys: `configuration_file`, `selected_by`, `configuration`
   (`valid` or `<class> <pointer>`), `state_root`, `workspace`, `socket`,
-  `credentials` (one `{"pointer":…,"present":…}` per configured reference;
+  `credentials` (one `{"pointer":…,"present":…}` per configured reference,
+  an `oauth` route present by the `precheck` row's metadata and floor rule;
   environment names are not printed, as ADR 0049 redacts them),
   `legacy_credential` (`absent`, or `present_ignored` for
   `LOOPEX_PROVIDER_API_KEY`), `root` (ADR 0072's marker, holder and backup
@@ -675,9 +709,11 @@ output with keys in the order listed, as `sessions --daemon --status` does.
 Exactly these eight keys, in this order; no other key is ever printed. The
 command reads, in order: the selection (`Home.select`, `ConfigFile.load`,
 `ConfigSelection.compose` with no overrides); `Placement.live_owner(root)`;
-one `DaemonClient.connect(socket, timeout: 1_000)`; and, on that one
-connection, `daemon.readiness` and then `daemon.status`, each bounded at
-1,000 ms.
+and, only when that answers a live owner, one
+`DaemonClient.connect(socket, timeout: 1_000)` and, on that one connection,
+`daemon.readiness` and then `daemon.status`, each bounded at 1,000 ms. With
+no live owner it connects to nothing, so a service whose owner exits between
+the reads is never reported `stopped` beside a readiness answer.
 
 | Key | Type | Source |
 | --- | --- | --- |
@@ -704,7 +740,7 @@ classes, `service_and_daemon`, `config_requires_service`,
 `service_not_running`, `provider_credential_absent`,
 `provider_sign_in_required` (ADR 0073's class, from the start precheck),
 `service_command_unavailable`, `service_not_ready`, `service_closed`,
-`service_not_serving`, `service_stopped`, `service_exited`, `placement_unverifiable`, `root_held`, `stop_unconfirmed`, `auth_root_overlap`, and a daemon start refusal under its
+`service_not_serving`, `service_stopped`, `service_exited`, `placement_unverifiable`, `placement_lock_failed`, `root_held`, `stop_unconfirmed`, `auth_root_overlap`, and a daemon start refusal under its
 `LoopexDaemon.ExitStatus` class name, among them `service_record_write_failed`
 for a service that exited 125.
 
@@ -715,14 +751,14 @@ for a service that exited 125.
 | `HOME`, file selection, layout paths | `LoopexCli.Home` (new) |
 | Sign-in directory, path selection and sign-in context, including `secret_service_bus` from `DBUS_SESSION_BUS_ADDRESS` | `LoopexCli.Home` (`auth_directory/1`, `adc_directory/1`, `sign_in_context/1`, new), called by every row of its table |
 | Separation comparison | `LoopexComposition.SignIn.Separation.check/1` (new), its only public function, called by `LoopexCli.Home`, by ADR 0072's `StoreAdmin.restore/3` for an available restore source, and, on the context it was given, by ADR 0073's store and refresher. It has one implementing owner, M8's W4, and lands before `LoopexCli.Home` |
-| `init`, `config set`, `config unset`, lock and atomic write | `LoopexCli.ConfigWriter` (new) |
+| `init`, `config set`, `config unset`, lock and atomic write | `LoopexCli.ConfigWriter` (new); candidate validation by `ConfigInspection.validate_document/2` and `ConfigFile.resolve_document/2` (both new) |
 | Optional `--config`, selection line | `LoopexCli.ConfigOptions`, `LoopexCli.ConfigInspection` |
 | On-demand machine, spawn, wait, holder classification, exit-file and service-record pruning | `LoopexCli.ServiceStart` (new); `LoopexCli.Service` calls its prune after `service stop` |
 | Service record write and removal | `LoopexCli.Daemon` |
 | `service`, `paths`, `doctor` | `LoopexCli.Service` (new); dispatch in `LoopexCli` |
 | `--service` on live forms | `LoopexCli.Live` |
 | `--config`, `--admit-project-resources` | `LoopexCli.Daemon`, `LoopexDaemon.Command` (ADR 0071) |
-| `daemon.readiness` and the slice loop | `LoopexDaemon.ServiceReadiness` (new), `LoopexDaemon.Service`, `Request`, `SocketConnection`, `WireRecords`; `LoopexComposition.Delegation.Helper` (the readiness table and its single writer), `LoopexComposition.Delegation` (the `host/5` handle carries the table) |
+| `daemon.readiness` and the slice loop | `LoopexDaemon.ServiceReadiness` (new), `LoopexDaemon.Service`, `Request`, `SocketConnection`, `WireRecords`; `LoopexComposition.Delegation.Helper` (the readiness table and its single writer), `LoopexComposition.Delegation` (the handle's `readiness` member) |
 | `service status` object | `LoopexCli.Service` |
 
 #### Accepted text this record touches
@@ -771,15 +807,15 @@ Every case uses a temporary `HOME` and `LOOPEX_HOME`. Test files are in
 | `home_test.exs` | Unit | Absent, relative, non-UTF-8 and oversized `HOME` refuse; default path on each platform; `--config` wins; missing discovered file refuses naming `init`; a `config.json` in the invocation directory is ignored |
 | `config_inspection_test.exs` (extended) | Unit | Explicit and discovered selection of the same bytes give identical rows and origins; the selection line; `LOOPEX_HOME` still overrides the file's root |
 | `config_writer_test.exs` | Unit and fault | `init` refuses an existing file and each missing flag; written document validates and holds no value outside the schema; `set` and `unset` pointer rules and `/schema_version`; kill points before the temporary write, before rename and after rename leave prior bytes or the new bytes, never a partial file; a live lock refuses; a lock whose incarnation is gone, including a reused PID, is reclaimed; modes 0700 and 0600 |
-| `service_start_test.exs` | Process race | Eight concurrent starters released together at one barrier, each probing before any daemon holds the lock, spawn at most eight daemons and all converge on one serving socket, the others recording 76 and classifying the winner as a service from its record; a starter whose first probe finds a live foreground holder and no answering socket refuses `root_held` with that PID within 2,000 ms, never waiting for the 75,000 ms deadline, and signals nothing; a starter whose first probe finds another starter's service held at a startup pause after it took the lock waits and converges on the same serving socket once the pause is released; a `loopex daemon --config` started directly and held at the same pause is waited for the same way, and an M7-form `loopex daemon` without `--config` holding the root is refused at once; **two losers, foreground winner**: two starters that probed an unheld root are paused before their spawns while a foreground `chat` takes the placement lock, then resumed together; both services exit 76, each starter refuses `root_held` with the foreground PID within 2,000 ms of reading its own exit file, neither waits for the deadline, and the `chat` receives no signal; in a second case one of the two starters is killed after its spawn and before it reads its exit file, and the other still refuses within 2,000 ms; **unrelated records**: with the foreground `chat` holding the lock and `log/` holding a fresh `service-<pid>.id` that names the `chat`'s PID with another incarnation, a fresh record for a PID no process has, and the record of a spawned daemon killed with `SIGKILL` after writing it and before taking the lock, a probe refuses `root_held` with the `chat`'s PID within 2,000 ms; **holder handover**: a holder that changes between the two `live_owner` reads (the `chat` releases and a service takes the lock at a private pause hook) is not refused, and the command converges on that service; **winner exits before serving**: a service held at a startup pause after taking the lock, with a second command waiting on it from `probe`, is made to exit with a startup failure; its starter refuses with that class, and the waiting command returns to `probe`, spawns its own service and converges on its serving socket within its deadline; the daemon removes its record on a clean exit and on exit 76; **record write refused** (D31): a daemon whose record write is refused at a private hook exits 125 before taking the lock, leaving no record, lock or socket, and its starter refuses `service_record_write_failed`; a second starter released concurrently with it, whose own write is not refused, finds nothing holding the root and converges on its own serving service; a record naming another socket is no match and the probe refuses `root_held`; an own exit status of `0` refuses `service_stopped` and a spawned daemon killed with `SIGKILL` before taking the lock refuses `service_exited` naming `137`; a `live_owner` answering `placement_unverifiable` refuses it at once; **pruning**: with `log/` holding a start exit file, a `.exit.tmp` and the record of a dead process, each aged past 300,000 ms, a fresh exit file of a starter still waiting, a file named `start-` with 15 hex characters, a record name with a leading zero, a symbolic link with an exit-file name and an unrelated file, `spawn` and `service stop` (including when it prints `stopped`) remove exactly the three aged files, and the waiting starter still reads its own status; a prune run while a service holds the lock keeps that holder's record aged past 300,000 ms; 1,025 aged files are pruned at most 1,024 per prune; an absent reference refuses before any process, lock, log or socket; an `oauth` route signed out refuses `provider_sign_in_required` naming the route before any process (D22); presence check reads no value (sentinel variable never appears in any output or log); a started service's readiness says `unadmitted`; the 75,000 ms bound reports `starting` with an injected slow start; an early exit maps its status to its class; the spawned command is `<root>/bin/loopex` for an escript at `<root>/libexec/loopex` beside a `MANIFEST` and the launcher beside a checkout escript, unchanged with `LOOPEX_ESCRIPT` and any other variable set to a different tree; a non-executable selection refuses `service_command_unavailable` |
-| `service_command_test.exs` | Real daemon | `start`, `stop`, `status`, `paths` and `doctor` objects and exit statuses; `stop` refuses a foreground holder and never signals it; `doctor` with a service running reads readiness from it and opens no session record |
-| `service_detach_pty_test.exs` | PTY | A service started on demand from a PTY survives `SIGINT` to the foreground group and hangup of the PTY, and stops on `service stop` |
+| `service_start_test.exs` | Process race | Eight concurrent starters released together at one barrier, each probing before any daemon holds the lock, spawn at most eight daemons and all converge on one serving socket, the others recording 76 and classifying the winner as a service from its record; a starter whose first probe finds a live foreground holder and no answering socket refuses `root_held` with that PID within 2,000 ms, never waiting for the 75,000 ms deadline, and signals nothing; a starter whose first probe finds another starter's service held at a startup pause after it took the lock waits and converges on the same serving socket once the pause is released; a `loopex daemon --config` started directly and held at the same pause is waited for the same way, and an M7-form `loopex daemon` without `--config` holding the root is refused at once; **two losers, foreground winner**: two starters that probed an unheld root are paused before their spawns while a foreground `chat` takes the placement lock, then resumed together; both services exit 76, each starter refuses `root_held` with the foreground PID within 2,000 ms of reading its own exit file, neither waits for the deadline, and the `chat` receives no signal; in a second case one of the two starters is killed after its spawn and before it reads its exit file, and the other still refuses within 2,000 ms; **unrelated records**: with the foreground `chat` holding the lock and `log/` holding a fresh `service-<pid>.id` that names the `chat`'s PID with another incarnation, a fresh record for a PID no process has, and the record of a spawned daemon killed with `SIGKILL` after writing it and before taking the lock, a probe refuses `root_held` with the `chat`'s PID within 2,000 ms; **holder handover**: a holder that changes between the two `live_owner` reads (the `chat` releases and a service takes the lock at a private pause hook) is not refused, and the command converges on that service; **winner exits before serving**: a service held at a startup pause after taking the lock, with a second command waiting on it from `probe`, is made to exit with a startup failure; its starter refuses with that class, and the waiting command returns to `probe`, spawns its own service and converges on its serving socket within its deadline; the daemon removes its record on a clean exit and on exit 76; **record write refused** (D31): a daemon whose record write is refused at a private hook exits 125 before taking the lock, leaving no record, lock or socket, and its starter refuses `service_record_write_failed`; a second starter released concurrently with it, whose own write is not refused, finds nothing holding the root and converges on its own serving service; a record naming another socket is no match and the probe refuses `root_held`; an own exit status of `0` refuses `service_stopped` and a spawned daemon killed with `SIGKILL` before taking the lock refuses `service_exited` naming `137`; a `live_owner` answering `placement_unverifiable` or `placement_lock_failed`, and a failed incarnation read, each refuse at once; **lock publication**: a probe made while a service's acquisition is paused at a private hook between its owner-handle write and the link finds no holder, a probe after the link finds the complete record, and neither refuses `placement_unverifiable`; **record replacement**: a record placed under a spawned daemon's own PID with another incarnation, at a private hook before its write, is replaced and the daemon serves; **root spelling**: a service started from a file naming the root through a symbolic link is waited for by a probe from a file in the same directory naming it directly; **pruning**: with `log/` holding a start exit file, a `.exit.tmp` and the record of a dead process, each aged past 300,000 ms, a fresh exit file of a starter still waiting, a file named `start-` with 15 hex characters, a record name with a leading zero, a symbolic link with an exit-file name and an unrelated file, `spawn` and `service stop` (including when it prints `stopped`) remove exactly the three aged files, and the waiting starter still reads its own status; an aged `.id.tmp` is removed and an aged record naming another socket is kept; a prune run while a service holds the lock keeps that holder's record aged past 300,000 ms; 1,025 aged files are pruned at most 1,024 per prune; an absent reference refuses before any process, lock, log or socket; an `oauth` route signed out, or whose floor is at its metadata's generation after a logout killed after its floor write, refuses `provider_sign_in_required` naming the route before any process (D22); with `log/` absent the first start creates it and its starter reads its own exit file; presence check reads no value (sentinel variable never appears in any output or log); a started service's readiness says `unadmitted`; the 75,000 ms bound reports `starting` with an injected slow start; an early exit maps its status to its class; the spawned command is `<root>/bin/loopex` for an escript at `<root>/libexec/loopex` beside a `MANIFEST` and the launcher beside a checkout escript, unchanged with `LOOPEX_ESCRIPT` and any other variable set to a different tree, the started service's readiness `version` being the starter's build's; a non-executable selection refuses `service_command_unavailable` |
+| `service_command_test.exs` | Real daemon | `start`, `stop`, `status`, `paths` and `doctor` objects and exit statuses; `stop` refuses a foreground holder, and a service held at a startup pause after taking the lock, with `root_held` and signals neither; `doctor` with a service running reads readiness from it and opens no session record |
+| `service_detach_pty_test.exs` | PTY | A service started on demand from a PTY survives `SIGINT` and `SIGTSTP` to the foreground group and hangup of the PTY, still answering readiness from another client, and stops on `service stop` |
 | `live_service_test.exs` | Real daemon | `run` and `resume --service` start on demand; `attach` and `sessions --service` refuse `service_not_running`; `--daemon` never starts |
 | `apps/loopex_daemon/test/readiness_method_test.exs` | Socket | Each of the four states from helper and runtime seams; the `closed` session and code; project-resource values; schema vectors and the updated digest |
 | `auth_separation_test.exs` | Unit and real filesystem | For each origin (`--state-root`, `LOOPEX_HOME`, the file's `paths.state_root`): the root equal to `A`, containing it, and contained by it each refuse `auth_root_overlap` with that origin's pointer, before any file, lock, log, socket or process; `/x/state` beside `/x/stateful` and the default `<home>/state` beside `<home>/auth` pass; a root selected under one `HOME` and used under another whose `.loopex/auth` lies inside it refuses; a symbolic-link root resolving to an ancestor of `A`, a symbolic-link `HOME` and a symbolic-link `auth` each refuse; a link loop and 41 chained links refuse; **missing-tail aliases**, on real directories on both hosts: with `data` and a symbolic link `alias` to it, `HOME` under `alias` with `.loopex/auth` absent and a root `data/.loopex/auth/state` absent refuse, as do the reverse containment and an equal pair, while `alias/.loopex/auth` beside an absent `data/.loopex/state` passes; a `..` in a missing suffix refuses; **missing-component rule**: an ASCII case variant (`Auth` against `auth`) and any non-ASCII missing component at the same position refuse on both hosts, and `/x/state` beside `/x/stateful` passes; an existing case variant on a case-insensitive `darwin-arm64` volume refuses through identity; the `Separation.check/1` context grammar (shape, a missing or sixth member, relative or non-UTF-8 path, 17 roots, a `secret_service_bus` that is empty, non-UTF-8, 4,097 bytes or not a string) refuses, and contexts differing only in a valid `secret_service_bus` or `nil` give the same answer on every pair above; `Home.sign_in_context/1` sets `secret_service_bus` from `DBUS_SESSION_BUS_ADDRESS`, to `nil` when it is unset, empty, over 4,096 bytes or not UTF-8, and never refuses for it; an absent or relative `HOME` refuses `home_unavailable` on every row, and an ephemeral `ask` still runs; `config set /paths/state_root` to an overlapping path leaves the earlier bytes; `auth login` refuses when an ancestor of `A` holds a `loopex-root-format` marker; `store adopt`, `store backup` and `store restore` refuse an overlapping root, `BACKUP` and `DESTINATION` before reading or writing any of them; **available source**: a valid backup whose capture names a source root equal to, containing or inside `A` or `G`, restored with `--source available`, and resumed with `--resume` from a retained `available` plan, refuses `auth_root_overlap /capture/source_state_root` after the capture is read and before `BACKUP/manifest`, `BACKUP/state` or the source is read, with nothing written, while the same capture with `--source lost` and the source absent is not refused by separation; a backup of a separated root holds every file of the root and no file of `A`; **ADC directory**, on real directories with a temporary `HOME` and a credential-shaped canary `application_default_credentials.json` (random bytes in the file's grammar, never a real credential) under `<HOME>/.config/gcloud`: for each origin, a state root equal to `<HOME>/.config/gcloud`, containing it (`<HOME>/.config`) and contained by it (`<HOME>/.config/gcloud/state`) refuses `auth_root_overlap` with that origin's pointer, both when `gcloud` exists and when it is absent, before any file, lock, log, socket or process; `store backup` of such a root refuses before `BACKUP` or its staging directory exists, so no copy of the canary is written; `store restore` with `DESTINATION` an empty `<HOME>/.config/gcloud`, or a path under it, refuses before any write and leaves the directory as found, so no restored file lands in or overwrites it; `store adopt` of such a root refuses with the canary's bytes unchanged; the complete manifest of a separated root is unchanged and holds no exclusion. No case creates a mount: under D27 mounts are outside the guarantee, and the walk's refusal of symbolic links and hard-linked files is ADR 0051's delivered behaviour, proved by `restore_io_test.exs`'s existing symlink and hard-link manifest cases |
-| `daemon_configuration_test.exs` (ADR 0071, extended) | Real daemon | `loopex daemon`, with and without `--config`, exits 111 with class `auth_root_overlap` and each origin's pointer, leaving no lock, log entry or socket |
+| `daemon_configuration_test.exs` (ADR 0071, extended) | Real daemon | `loopex daemon`, with and without `--config`, exits 111 with class `auth_root_overlap` and each origin's pointer, and with class `home_unavailable` for an absent or relative `HOME`, leaving no lock, log entry or socket |
 | `apps/loopex_daemon/test/readiness_slice_test.exs` | Socket, real helper owner | A gated store adapter holds a classification slice open: `daemon.readiness` asked concurrently and repeatedly answers within 1,000 ms each (measured), as `classifying` with the previous slice's counts, `"0"` and `"0"` before the first completes; the row's `sequence` advances at slice start and end; a parent creation held in the owner does not delay readiness; releasing the gate gives `serving`; killing the owner gives `unavailable` with `unexpected`; no readiness path calls the owner |
-| `service_status_test.exs` | Real daemon | The status object has exactly its eight keys in order for `stopped`, `held`, `classifying` and `serving`; `readiness` is the verbatim result or `null`; `activations_used` and `activation_limit` equal `daemon.status`'s and include a helper child after one runs; a service started from another file keeps its own `readiness.configuration_file`; exit statuses 0, 3 and 1, including a socket that answers readiness and not status |
+| `service_status_test.exs` | Real daemon | The status object has exactly its eight keys in order for `stopped`, `held`, `starting` (a service held at a startup pause after taking the lock), `classifying`, `serving`, `closed` and `unavailable`; `stopped` is never printed beside a readiness answer, including when a service stops between the `live_owner` read and the connection; `readiness` is the verbatim result or `null`; `activations_used` and `activation_limit` equal `daemon.status`'s and include a helper child after one runs; a service started from another file keeps its own `readiness.configuration_file`; exit statuses 0, 3 and 1, including a socket that answers readiness and not status |
 | `clients/node` contract lane (extended) | Independent client | `daemon.readiness` decoded from the schema by the Node client, and the recomputed ADR 0044 manifest digest matched by its independent preimage |
 
 The installed demonstration under ADR 0038 runs `init`, `chat --service`,
