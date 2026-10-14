@@ -104,19 +104,17 @@ new provider protocol.
    available. Without a keyring, as on a headless Linux host, tokens go to a
    private file in the Loopex home, readable only by its owner. The token
    directory, gcloud's Application Default Credentials directory that the
-   `adc` source reads, and every selected state root must lie physically
-   apart, under ADR 0037's separation invariant, which refuses an overlapping
-   selection before any token or root write, and whose walk check refuses a
-   backup, adopt or restore whose walked root lies over either directory or
-   that meets either directory, or any mount, inside the tree it walks,
-   and whose walked root lies on a FUSE filesystem or under an overlay
-   whose backing directories overlap either directory (ADR 0037's D21). The installed host checks the paths once
-   and hands the token store the checked paths; the store and its refreshers
-   repeat that check before every token write and never look for a root
-   themselves. So backups never contain tokens, within ADR 0037's stated
-   scope: local filesystems, bind mounts and checked overlays, not a
-   network or virtual filesystem that exports the host's own credential
-   directories back to it. Tokens never enter
+   `adc` source reads, and every state root, backup, restore destination
+   and available restore source must lie apart by path, under ADR 0037's
+   separation invariant, which refuses an overlapping selection, after
+   symbolic links are resolved, before any token or root write. The
+   installed host checks the paths once and hands the token store the
+   checked paths; the store and its refreshers repeat that check before
+   every token write and never look for a root themselves. So backups never
+   contain tokens, within the operator limit ADR 0037 states under the
+   maintainer's D27: separation is a path rule only, and the operator must
+   not mount credential storage into or over a Loopex state root, backup or
+   restore destination. Tokens never enter
    journals, public events, progress, diagnostics, traces, fixtures, executor
    jobs or project resources.
 6. **An access token travels exactly like an API key.** For each provider call

@@ -258,13 +258,12 @@ engine experiment; 0036 keeps the engine selection, migration and capacity
 refusal for the M9 draft. The maintainer accepted that split, the M8 plan's
 proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
 `store adopt`, `store backup` and `store restore`, and on acceptance amends
-exactly three clauses of accepted ADR 0051: its statement that no backup CLI
-is added; its latest-backup-only restriction, which `--discard-later-work`
-relaxes for a lost source; and its manifest walks, which stop on a
-host-supplied credential directory's identity or filesystem location or on
-any mount inside the walked tree, through a new `restore/3` beside the unchanged `restore/2`. Behind `restore/3` the delivered audit also
-leaves the disposable helper job index out of its index, which no ADR 0051
-sentence names. 0072 also ties the marker's format number to a pinned
+exactly two clauses of accepted ADR 0051: its statement that no backup CLI
+is added; and its latest-backup-only restriction, which `--discard-later-work`
+relaxes for a lost source. Behind a new `restore/3` beside the unchanged
+`restore/2`, the delivered audit leaves the disposable helper job index out
+of its index, which no ADR 0051 sentence names. Credential separation is
+ADR 0037's path rule, applied before the transition is called (D27). 0072 also ties the marker's format number to a pinned
 inventory of every durable shape, so any format change advances it. ADR
 0051's other decisions, ADR 0070 and the pre-1.0 rule settle the rest.
 

@@ -194,27 +194,22 @@ stored.
   decreases. Nothing but the operator removing `auth/` deletes it. The
   [write protocol](#technical-adr-0073-pairing) and `auth login` read it.
 - `<home>` is ADR 0037's home. That `auth/`, the ADC directory
-  `$HOME/.config/gcloud` and every selected state root are physically
-  disjoint is ADR 0037's
+  `$HOME/.config/gcloud` and every selected state root are disjoint by path
+  is ADR 0037's
   [separation invariant](0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation),
   which owns the check and its refusal. The context's
   `protected_directories` names both directories. This record relies on it:
   the store re-applies the path check, on the sign-in context the host passed
   it, before every token write, and ADR 0072's backup, adopt and restore
-  apply ADR 0037's
-  [physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
-  to every directory they walk, so ADR 0072's complete-copy backups never
-  capture a token: a walk refuses a walked root located over a protected
-  directory, a directory with a protected identity and any mount inside the
-  walked tree, a bind-mounted token file included, and, under ADR 0037's
-  [mounts-above rule](0037-host-configuration-and-path-discovery-technical.md#technical-0037-mounts-above)
-  (D21), a FUSE filesystem or an overlay over a protected directory at or
-  above the walked root. A network or virtual filesystem that exports the
-  host's own credential directories back to it is outside this guarantee,
-  as ADR 0037 states. A restore that meets one
-  before its commit is never committed, and one met after its commit leaves
-  the commit standing with cleanup pending. ADR 0051's complete manifest
-  excludes no file.
+  check every root, `BACKUP`, `DESTINATION` and available restore source
+  they will walk against both directories before their first read or write
+  of it, so ADR 0072's complete-copy backups never capture a token from
+  them. By the maintainer's D27 that comparison of resolved paths is the
+  whole rule: no mount is examined, and a mount of any kind that makes
+  credential storage reachable inside a walked tree, or a credential file
+  copied into a root, is outside this guarantee, under ADR 0037's
+  [operator limit](0037-host-configuration-and-path-discovery-technical.md#technical-0037-operator-limit).
+  ADR 0051's complete manifest excludes no file.
 - `auth/` is created with mode `0700`. Every credential-store file in it,
   `*.secret`, `*.json`, `*.floor`, `host-id` and their `*.tmp` siblings, is
   `0600`, owned by the effective user. A reader of one of those files refuses
@@ -1415,7 +1410,7 @@ Concept: [Observable consequences](0073-provider-oauth-sign-in.md#concept-adr-00
 | --- | --- | --- |
 | Another local user reads tokens | Keychain and Secret Service are per user; the file backend requires a `0700` directory, a `0600` file and the same owner, with no symlinks | `root` and anyone with the user's account |
 | A same-user process, including a host-authorized tool job, reads tokens | None structural. Items created through `/usr/bin/security` trust that tool, and any same-user process can run it. Secret Service answers any client on the session bus. The file is readable by the user | Equal to today's ambient API key in the invoking shell. Loopex never injects tokens into jobs, and the local executor environment still excludes credential names. Untrusted workspaces need OS isolation of the hand |
-| Disk theft, home-directory copy or dotfile sync | Keyring backends encrypt at rest. ADR 0037's separation invariant and its physical walk check keep the auth directory, the ADC directory and every state root disjoint, so tokens never enter backups | The file backend is plaintext at rest; `auth login` says so |
+| Disk theft, home-directory copy or dotfile sync | Keyring backends encrypt at rest. ADR 0037's separation invariant keeps the auth directory, the ADC directory and every state root, backup, destination and available restore source disjoint by path, so tokens never enter backups | A mount that makes credential storage reachable inside a state root, backup or destination, or a credential file copied into a root (D27's operator limit). The file backend is plaintext at rest; `auth login` says so |
 | Authorization-code interception | PKCE S256, a fresh `state` and nonce, a listener bound to `127.0.0.1` before the browser opens, an exact path, and one request only | A same-user process racing the port can at most receive a code it cannot redeem without the verifier |
 | Device-code phishing | `verification_uri` shown only for allowlisted provider hosts | — |
 | Endpoint substitution | Compiled HTTPS endpoints per profile. No configuration or environment override; a test-only fake server is injected under `Mix.env() == :test` only | — |

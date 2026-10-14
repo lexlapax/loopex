@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file, stated on 2026-10-14
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file, stated on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), superseding D19, D21 and every mount and walk-identity rule, recorded on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -97,7 +97,7 @@ They are recorded here as decided, not proposed.
    inward. Tests set `HOME` to a temporary directory.
 9. **Sign-in tokens never live inside a state root.** The sign-in directory,
    gcloud's Application Default Credentials directory and every state root
-   stay physically apart, as the
+   stay apart by path, as the
    [separation section](#concept-0037-auth-separation) states.
 
 This record introduces no second role or provider schema and fixes no
@@ -119,105 +119,48 @@ by flag, by `LOOPEX_HOME` or in the configuration. ADR 0072's backups copy
 every file in a root, so a root that held either directory would put a token
 into a backup, and a restore into either would write over credential storage.
 This record makes that impossible by refusing the layout rather than by
-leaving files out of a backup:
+leaving files out of a backup, and it does so by comparing paths:
 
-- After following symbolic links, and recognizing an existing directory
-  reached through a mount alias such as a bind mount, a protected credential
-  directory and a state root may not be the same directory, and neither may
-  contain the other. The same holds for the backup and destination directories the store
-  commands name. It holds for paths that do not exist yet: each is compared
-  from its deepest existing directory. Where separation cannot be proved, as
-  when two not-yet-created names could be one name on a case-insensitive
-  volume, the layout is refused.
-- **On Linux, paths are also compared inside their filesystems.** The
-  maintainer decided on 2026-10-13 that on Linux each of these paths is
-  also located by the kernel's mount table: the filesystem it lies on and
-  its path inside that filesystem. Two paths overlap when they are on the
-  same filesystem and one of those inner paths equals or contains the
-  other. This recognizes a bind mount of any directory or subdirectory of a
-  protected directory, such as a subdirectory of gcloud's directory bound
-  at another path and selected as a state root, which neither the paths
-  nor the directory identities above reveal. A mount table that cannot be
-  read, is too large or is malformed refuses the layout. The comparison runs
-  in the early path check and again, for the walked root, at the start of
-  every backup, adopt and restore walk. On macOS, which has no bind mount,
-  the directory identities decide as before.
-- That path check is the early refusal. A mount can still place part of a
-  root over credential storage with no link between the two paths, and on
-  Linux a single credential file can be bind-mounted into a root. So
-  `store backup`, `store adopt` and `store restore` also compare every
-  directory they walk while copying or verifying a root with the protected
-  directories' physical identities, and refuse any mount inside the walked
-  tree, whatever it holds. On Linux a mount is one the kernel's mount table
-  lists strictly inside the tree: the maintainer decided on 2026-10-13 that
-  an entry which merely reports another device, as files of an overlay
-  filesystem and btrfs subvolumes do, is not refused there, so state roots
-  in overlay filesystems, as containers use, and on btrfs are supported. On
-  macOS an entry on another device than the walked root is refused, as
-  before. Each walk reads the mount table at its start and again before its
-  final manifest, and refuses a mount added, removed or changed at, above or
-  inside the walked root between the two reads. Any of these refusals is
-  `auth_root_overlap` before that walk copies a file. A restore that meets one before its root commit record is
-  published is never committed. One met after that record exists, in the
-  restore's final check of the destination or in claim cleanup, leaves the
-  commit standing and the cleanup pending, with the destination closed,
-  until a later call with the same plan finishes. A state root, backup or
-  destination that contains a mount is therefore refused, and physical
-  separation of every copied root rests on that refusal. A credential file
-  the operator copies into a root is ordinary root content that no walk can
-  recognize.
-- **Mounts at or above a walked root (D21).** A mount whose mount point is
-  the walked root or lies above it is not inside the tree, and an overlay
-  there can still show credential files: its lower, upper and work
-  directories are ordinary directories elsewhere, so an overlay mounted at a
-  root with gcloud's directory as a lower layer serves the ADC file through
-  the root while every device and directory identity differs. The maintainer
-  decided on 2026-10-13 that every backup, adopt and restore walk examines
-  each mount listed at the walked root or above it:
-  - An **overlay** is admitted only when its backing directories can be read
-    from the options the mount table shows and none of them overlaps a
-    protected directory by filesystem location. A backing directory that
-    lies on an overlay is examined the same way, at most eight levels deep.
-    An overlay whose backing directories cannot be read from its options,
-    or that nests deeper, is refused. Ordinary overlays, such as a
-    container's root filesystem, stay admitted.
-  - A **FUSE** filesystem is refused, because a user-space program decides
-    what it shows, whatever device it names, so its source cannot be
-    established. This includes block-backed FUSE such as `ntfs-3g`.
-  - **Network and virtual filesystems** (NFS, SMB, 9p, virtiofs, Ceph,
-    GlusterFS and the like) are admitted. This is an explicit limit the
-    maintainer accepted: a network or virtual filesystem that exports the
-    host's own credential directories back to it is not detected.
-  - A backing directory is the path the overlay's mounter named, read in
-    Loopex's own mount namespace when the walk runs. A container's overlay
-    names paths of the host's namespace that do not exist inside the
-    container, so a missing backing path is compared by name and admitted
-    when it is separate. A backing path that reached credential storage only
-    in another namespace, or through a link changed since the mount was
-    made, is outside what the walk can see, as the network limit is.
-  - On macOS the walk reads the system's mount list and refuses a FUSE
-    filesystem (macFUSE, FUSE-T and the tools built on them, such as
-    `bindfs`) and `nullfs` or `unionfs` at or above the walked root, and
-    admits APFS, HFS and network filesystems under the same limit. A mount
-    list that cannot be read or parsed refuses.
-
-  So the guarantee that no backup copies a token holds for roots on local
-  filesystems, bind mounts and overlays whose backing directories pass this
-  check, with FUSE refused, and not for credential directories that a
-  network or virtual filesystem exports back to the same host.
+- After following symbolic links, a protected credential directory and a
+  state root may not be the same directory, and neither may contain the
+  other. The same holds for the backup and destination directories the store
+  commands name, and for the original root an available restore reads, which
+  the backup names. It holds for paths that do not exist yet: each is
+  compared from its deepest existing directory. Where separation cannot be
+  proved, as when two not-yet-created names could be one name on a
+  case-insensitive volume, the layout is refused.
+- **A path rule only (D27).** The maintainer decided on 2026-10-14 that
+  separation is this comparison of paths and nothing more. Loopex reads no
+  mount table on either host and examines no mount, at, above or inside a
+  root, while it copies or verifies one. D27 supersedes the mount rules this
+  record stated earlier (D19 and D21). The operator-facing limit is: **do not
+  mount credential storage into or over a Loopex state root, backup or
+  restore destination.** A bind mount, an overlay, a FUSE or network
+  filesystem, or a mount inside a root that makes credential storage
+  reachable there is outside the guarantee, and so is a credential file the
+  operator copies into a root, which is ordinary root content.
+- The walk that copies or verifies a root still refuses every symbolic link
+  and every file with a second hard link inside it, as ADR 0051's manifest
+  always has, so a link placed inside a root cannot reach a credential file.
 - The installed host's home module owns the rule and decides which paths each
   command checks. It checks before any token is written, any root is created
   or opened, and before `store adopt`, `store backup`, `store restore`,
-  `config set` and every daemon or service start. Every command also refuses
-  when any directory above a protected credential directory is a marked state
-  root.
+  `config set` and every daemon or service start, before any lock or process.
+  Each store command checks every path it will walk before its first read or
+  write of it: the root, the backup and the destination when its
+  configuration is resolved, and, for a restore with an available source,
+  that source as soon as the restore has read the backup's capture record,
+  before it reads the backup's manifest or the source. Every command also
+  refuses when any directory above a protected credential directory is a
+  marked state root.
 - The home module hands the checked protected directories and the exact roots
   it checked to the sign-in token store and its background refreshers. They
   repeat the same check on those paths immediately before every token write,
-  never find a root of their own, and refuse a filesystem that changed after
-  startup. The same handoff carries the session-bus address the Linux
-  keyring needs, which the home module reads from the environment once, so
-  the store never reads the environment; the separation check ignores it.
+  never find a root of their own, and refuse a path that changed after
+  startup, such as a new symbolic link. The same handoff carries the
+  session-bus address the Linux keyring needs, which the home module reads
+  from the environment once, so the store never reads the environment; the
+  separation check ignores it.
 - A violation is refused as `auth_root_overlap`, naming where the root was
   chosen, before anything is written. A command exits `1`, as every refusal in
   this record does. `loopex daemon` exits with ADR 0071's existing `111`,
@@ -227,7 +170,9 @@ leaving files out of a backup:
   selects a root, is unaffected.
 - No file is excluded from ADR 0051's complete manifest, the ADC file
   included. A backup of a permitted root contains every file of that root,
-  and, within the scope D21 states above, none of them can be a token.
+  and none of them is a token unless the operator mounted or copied
+  credential storage into the root, which the limit above leaves to the
+  operator.
 
 <a id="concept-adr-0037-consequences"></a>
 ### Observable Consequences

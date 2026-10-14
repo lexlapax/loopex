@@ -445,7 +445,7 @@ proves `darwin-arm64`; on a `Linux x86_64` host with Docker it proves
 in its revision of 2026-10-13, runs the full release check once on the
 `Linux x86_64` host `serenity`, with the M8 attempts index whose writer is
 pinned there; that run proves `linux-x86_64` with this lane and also runs
-the `bind_mount`, `secret_service`, `cross_uid` and attended
+the `secret_service`, `cross_uid` and attended
 `real-sign-in-*` lanes. The `Darwin arm64` host runs this lane with
 `--only installed-artifact`, together with `--only macos_keychain` and the
 attended outcome-6 record, `--only m8-operator`, on the same commit, and
