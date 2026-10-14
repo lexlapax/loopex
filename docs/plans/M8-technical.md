@@ -435,8 +435,12 @@ unchanged (`git diff main m8 -- apps scripts` is empty); `matrix.ex` below is
    `FILE.lock` as the writer reads it (`attempt_writer.ex:215-232`), refusing
    `attempt_writer_contention` while another process holds it, and holds it
    until it exits; once the checks below pass, and before it writes
-   anything else, it creates `FILE.ended`, or finds it left by an earlier
-   `--create` killed after creating it. It reads FILE's bytes without
+   anything else, it creates `FILE.ended` exclusively, holding the
+   successor's campaign name, or finds one naming this same campaign, left
+   by an earlier `--create` of it killed after creating it; a `FILE.ended`
+   naming another successor refuses `attempt_campaign_superseded`, writing
+   nothing, so one ended index has at most one successor even before that
+   successor's anchor line is committed. It reads FILE's bytes without
    opening its writer and replays them with the delivered codec, which
    answers an incomplete tail with the last complete record and the tail's
    exact bytes (`attempt_frames.ex:109-110`); the records before a torn tail are replayed and the tail is admitted (D49).
@@ -848,7 +852,11 @@ unchanged (`git diff main m8 -- apps scripts` is empty); `matrix.ex` below is
      not ended refuses `predecessor_not_ended`, and one whose `--concept`
      already carries an `index-head:` line of a later `m8-closure-M` refuses
      `attempt_campaign_superseded`, each writing nothing, `FILE.ended`
-     included. On an index whose campaign has ended but has no successor yet
+     included; a second `--create --predecessor` of the same index under
+     another campaign name, run after the first printed its line and before
+     that line is committed, finds `FILE.ended` naming the first and refuses
+     `attempt_campaign_superseded`, while a rerun of the first after a kill
+     proceeds. On an index whose campaign has ended but has no successor yet
      (no `FILE.ended`), a consumed failure in turn in the `release-matrix` lane, an M7
      conversation lane and `macos-closure` makes every new lane refuse
      `post_head_consumed_case` until its head is committed; then the failed
