@@ -17,7 +17,9 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   and the explicit Secret Service bus specified the same day; the
   maintainer's decision that the model list is part of a `chatgpt:` sign-in
   (D25) recorded on 2026-10-14, and the lock-failure and fail-stop decision
-  (D32) recorded the same day
+  (D32), the lane deferral (D36), the widened host-VM credential audience
+  (D37) and route loss in foreground chat and `ask` (D38) recorded the same
+  day
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -162,8 +164,11 @@ new provider protocol.
    process holds, fails as `sign_in_lock_failed` with the same exit status
    73 and the same no-change behaviour, printing the lock primitive's cause
    so the operator can repair it; and that an unexpected exit of the
-   process holding a route's sign-in stops foreground chat and `ask` as it
-   stops the daemon (exit status 123).
+   process holding a route's sign-in stops the daemon (exit status 123).
+   The maintainer decided the same day (D38) that such an exit stops
+   foreground chat and `ask` with `loopex: sign_in_route_lost` and exit
+   status 1, their lifecycle-failure status; a foreground run is interrupted
+   and resumes later as any interrupted run does.
 9. **Loopex enforces the `chatgpt:` reply ceiling itself.** A plan-billed
    request cannot carry a maximum output length. Loopex ends the reply stream
    once the configured ceiling is reached and records the reply as cut at its
@@ -212,21 +217,19 @@ new provider protocol.
     `chatgpt:` model is
     admitted, when the configuration is composed and when a session switches
     model, only if the recorded list names it. An unlisted model is refused
-    before any call with the route-unavailable refusal an unconfigured
-    provider route already gets, and a refused switch keeps the prior model.
+    before any call with the refusal an unconfigured provider route already
+    gets, and a refused switch keeps the prior model.
     It is a configuration refusal, not a failed model call, so nothing is
     retried.
 15. **Signing out keeps a floor, not a secret.** The maintainer decided on
     2026-10-13 that `auth logout` leaves, beside the home's host identity, a
     small non-secret file per route naming the highest write generation the
-    route has used and the client those generations were written under:
-    the client OpenAI issued, Loopex's Google client, or the client in
-    gcloud's file. The next sign-in reuses that client and writes a
-    generation above every earlier
-    one. A service that is still running, and that the sign-out left without
-    a token, therefore recognizes a later sign-in by the same account and
-    client as newer than anything it held, takes it up without a restart and
-    resumes refreshing.
+    route has used and the client of the sign-in it removed. The next
+    sign-in writes a generation above every earlier one, and the next OpenAI
+    sign-in reuses the client OpenAI issued. A service that is still running,
+    and that the sign-out left without a token, therefore recognizes a later
+    sign-in by the same account and client as newer than anything it held,
+    takes it up without a restart and resumes refreshing.
 
 The maintainer decided items 9 and 10, the daemon exit statuses and the
 outcome numbering on 2026-10-13, and the startup rule of item 7 and the
@@ -321,8 +324,10 @@ disagreeing uses neither as they stand:
 
 Signing out deletes both the secret and the metadata but keeps the route's
 generation floor (decision 15). So a sign-in after a sign-out never reuses a
-generation a running service has already seen, and it presents the same
-issued client that service holds.
+generation a running service has already seen, and an OpenAI sign-in
+presents the same issued client that service holds. A sign-in that moves a
+route to another store or source signs the route out first, so no secret is
+left in a store the metadata no longer names.
 
 <a id="concept-adr-0073-consequences"></a>
 ### Observable Consequences
@@ -384,23 +389,27 @@ byte-for-byte as accepted, and the ADR index records the amendment.
 | ADR | Clause amended | Change |
 | --- | --- | --- |
 | 0048 | Credentialed routes store only named environment references; no keychain or file sources; no live rotation; one fixed binding shape | Adds the `oauth` form and the `vertex` project and location members. A host refresher may rotate the same route's custody to a fresh token for the same account. A different account still needs a restart |
-| 0019 | The sender passes a credential read from the environment | The credential may be a host-held access token. Two new invocations of the same companion, a token exchange and a `chatgpt:` model listing, carry a refresh or access token over the same private channel |
-| 0034 | Custody holds one value bound at composition | Custody's existing rotation and expiry are used by a host refresher; the token, registry and sender rules are unchanged |
-| 0039 | In the ephemeral profile, each hosted provider's key is read from its variable at the model boundary for each call | A sign-in route resolves from custody owned by the composition. A refresh in this profile runs in the host VM, under the same audience the profile already accepts |
-| 0049 | The schema-version-1 configuration file's closed `providers` member; durable chat requires an `env` credential | Adds, inside schema version 1, the `chatgpt`, `vertex` and `claude` provider names, the `oauth` credential form, and the `vertex` `project` and `location` members. Durable chat also accepts an `oauth` binding. The schema version does not change |
+| 0019 | The sender passes a credential read from the environment; the private protocol's closed frames serve one Model request | The credential may be a host-held access token. Two new invocation kinds of the same companion, a token exchange and a `chatgpt:` model listing, carry a refresh or access token, and for `adc` the file's client secret, over the same private channel in closed frames of their own |
+| 0034 | Custody holds one value bound at composition; custody's `:missing` and `:expired` become ADR 0019's generic credential-send failure, and no ADR 0029 terminal gains them | Custody's existing rotation and expiry are used by a host refresher. On a sign-in route `:missing` becomes the public `provider_sign_in_required`; `:expired`, and both answers on other routes, are unchanged. The token, registry and sender rules are unchanged |
+| 0039 | In the ephemeral profile, each hosted provider's key is read from its variable at the model boundary for each call; a proved pre-call refusal is fixed `model_call_failed`; the host-VM audience covers the selected provider credential | A sign-in route resolves from custody owned by the composition, and a proved pre-call refusal for missing sign-in is `provider_sign_in_required`. Refresh tokens, ID tokens and the authorization-code exchange may also live in the host VM (D37) |
+| 0049 | The schema-version-1 configuration file's closed `providers` member; durable chat requires an `env` credential; a failed terminal's `reason` is `model_call_failed` or `unreadable_model_answer` | Adds, inside schema version 1, the `chatgpt`, `vertex` and `claude` provider names, the `oauth` credential form, and the `vertex` `project` and `location` members. Durable chat also accepts an `oauth` binding. A failed terminal's `reason` may also be `provider_sign_in_required`. The schema version does not change |
 | 0029 | A failed model call's public result is the fixed `model_call_failed`; the diagnostic pair stays private | A host refusal before dispatch because a sign-in route needs sign-in is public as `not_dispatched` with `provider_sign_in_required`. Dispatched failures and the private diagnostic pair are unchanged |
-| 0018 | The Model callback returns only `model_call_failed` as an error reason; settlement results carry only `model_call_failed` or `unreadable_model_answer`; its closed valid-combination table | The callback also admits `not_dispatched` with `provider_sign_in_required`. Its settlement records no conversation and no charge and always ends the run, on either attempt |
+| 0018 | The Model callback returns only `model_call_failed` as an error reason; settlement results carry only `model_call_failed` or `unreadable_model_answer`; its closed valid-combination table; an exact not-dispatched result retries once | The callback also admits `not_dispatched` with `provider_sign_in_required`. Its settlement records no conversation and no charge and always ends the run, on either attempt, without a retry |
 | 0021 | The settled-attempt record's model-failure result is exactly `model_call_failed` | The result also admits `provider_sign_in_required` |
 | 0043 | A failed compaction episode's failure is one of a closed set of categories | The set also admits `provider_sign_in_required`, not retryable |
 
-The Proposed ADR 0037's sentence that file, keychain and command credentials
-need a separate future decision is answered by this record, for sign-in tokens
-only. Command credentials stay out. The M8 plan's non-goal "no file, keychain
-or command credential source, and no live rotation" narrows to exclude sign-in
-tokens and their refresh. The integrator edits both.
+The Proposed ADR 0037 leaves only file, keychain and command sources for API
+keys to a separate future decision, and the M8 plan's credential non-goal
+excludes sign-in tokens and their same-account refresh.
 
 The vision already gives the host credential custody, including access
-tokens, rotation and encryption. This record changes no vision principle.
+tokens, rotation and encryption. The maintainer decided on 2026-10-14 (D37)
+that refresh tokens, ID tokens and the authorization-code exchange may live
+in the ephemeral `ask` host VM and in the `auth` command's VM. That widens
+the host-VM credential audience ADR 0039 accepted for the selected provider
+credential, and it is accepted explicitly; AGENTS.md's ADR 0039 statement
+points to it at acceptance. The launcher disables crash dumps for `auth` as
+it does for `ask`.
 
 <a id="concept-adr-0073-compatibility"></a>
 ### Compatibility and Rollback
@@ -415,8 +424,9 @@ unsupported provider, and an `oauth` credential on an existing route as an
 invalid credential binding. No Core callback is
 added; the Model callback admits one more closed reason before dispatch. The committed model already names its route. The one durable and wire
 change is the new failure reason: the settled-attempt record admits its
-category, and the `loopex.experimental/3` and `/4` schemas and vectors list
-it. Before 1.0 only the current contract is kept, so no older reader is
+category, the `loopex.experimental/3` and `/4` schemas and vectors list it,
+and `loopex ask`'s `loopex.ask/1` result reports it as a failed outcome.
+Before 1.0 only the current contract is kept, so no older reader is
 supported.
 
 Removing sign-in removes the `auth` command, the sign-in routes, the token
@@ -450,8 +460,11 @@ Decided on 2026-10-13, and no longer open: the `chatgpt:` reply ceiling
 The sign-in outcome is M8 outcome 8, and its release lanes are
 `real-sign-in-openai`, `real-sign-in-gemini` and `real-sign-in-anthropic`.
 Items 1 to 3 remain maintainer actions with the providers. Closure needs
-positive real sign-in proofs for OpenAI and Google only. The disabled
-`claude:` route is proved by its tested refusal and needs no deferral.
+positive real sign-in proofs for OpenAI and Google only. A lane whose
+provider client is missing is deferred only by the maintainer before the
+closure candidate, and is then left out of that candidate's pinned case
+list (D36). The disabled `claude:` route is proved by its tested refusal and
+needs no deferral.
 
 ## Governance Record
 

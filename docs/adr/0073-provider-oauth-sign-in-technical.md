@@ -50,8 +50,8 @@ exclusive alternative, and the `vertex` route gains two required members:
   host values; no session or remote client can set them.
 - `claude` validates its grammar but refuses at composition and in
   `auth login` with `sign_in_unavailable` while the build's compiled Anthropic
-  profile carries no sanctioned client. Configuration inspection reports the
-  route as configured and unavailable in this build.
+  profile carries no sanctioned client. Configuration inspection shows it as
+  any other binding, by form and source only.
 - Errors keep ADR 0048's form: a stable class and an RFC 6901 pointer, never a
   value. The new classes are `invalid_sign_in_reference`, `sign_in_route_only`,
   `invalid_vertex_project`, `invalid_vertex_location` and
@@ -136,8 +136,8 @@ ends itself at the ceiling, below. It also rejects
     [`chatgpt` model admission](#technical-adr-0073-model-admission)
     specifies. Capability capture uses the route's registered mappings, as
     other routes do. A model the recorded list does not name is refused at
-    composition and at model switch with the existing
-    `provider_route_unavailable`, never as a Model callback result.
+    composition and at model switch as an unconfigured route is, never as a
+    Model callback result.
   - The provider's `subscription_sharing_usage_limit_exceeded` (HTTP 429) and
     `subscription_sharing_usage_unavailable` replies classify under ADR 0029
     as provider failures after dispatch. They are never retried blindly.
@@ -185,15 +185,21 @@ stored.
   beside `host-id`, written under the route's lock with the atomic write
   below. Its closed grammar is the canonical JSON object
   `{"version": 1, "route": "<route>", "generation_floor": N, "client_id":
-  "<id>"}`, where `N` is a positive integer and `client_id` is the client
-  the generations were written under: OpenAI's issued `oaiapp_...` client,
-  the compiled Google client, or for `adc` the ADC file's client. Any other
-  member or value is `credential_store_unsafe`. `auth logout` writes it,
-  before deleting anything, with `N` the largest of the record's, the
-  metadata's and an existing floor's generation, so a floor never
-  decreases. Nothing but the operator removing `auth/` deletes it. The
-  [write protocol](#technical-adr-0073-pairing), `Store.read/2` and `auth
-  login` read it; an absent floor is generation 0.
+  "<id>"}`, where `N` is a positive integer and `client_id` is the
+  `client_id` of the side with the greater generation, the metadata's on a
+  tie. Any other member or value is `credential_store_unsafe`. A sign-out
+  (`SignIn.Store.sign_out/3`, below) writes it, before deleting anything,
+  with `N` the largest of the record's, the metadata's and an existing
+  floor's generation, so a floor never decreases; a sign-out that finds
+  neither side changes nothing. Only the operator deletes a floor. The
+  [write protocol](#technical-adr-0073-pairing), `Store.read/2`, `auth
+  status`, the start precheck and `auth login openai` read it; an absent
+  floor is generation 0. Only `auth login openai` uses its `client_id`.
+  When OpenAI no longer accepts that issued client, the login fails; the
+  operator recovers by `auth logout openai` and deleting
+  `<home>/auth/chatgpt.floor`, and the next login registers anew. A
+  running service then refuses the new client until restarted, as any
+  changed client, so no older generation is ever served.
 - `<home>` is ADR 0037's home. That `auth/`, the ADC directory
   `$HOME/.config/gcloud` and every selected state root are disjoint by path
   is ADR 0037's
@@ -224,7 +230,7 @@ stored.
   :209, :215, :311-312) and hold only owner incarnations, never a secret; the
   `0700` directory already keeps other users out of them. `sign_in_store_test.exs`
   runs a refresh, which creates the lock namespace, and then a `Store.read/2`
-  and `auth status` that both succeed.
+  and `read_metadata/2` that both succeed.
 - The `adc` source has no Loopex record. Its metadata members are specified
   under [the ADC source](#technical-adr-0073-adc).
 
@@ -248,10 +254,22 @@ exposes:
 - `write(context, route, record, metadata)`, which first calls ADR 0037's
   `LoopexComposition.SignIn.Separation.check(context)` and returns its
   `{:error, {:auth_root_overlap, pointer}}` before any backend is touched;
-- `delete(context, route)`.
+- `delete(context, route)`;
+- `sign_out(context, route, revoke)`, the sign-out under the route's lock:
+  it reads the pair, calls `revoke` on the record (`auth logout` passes the
+  in-host revocation, `--local-only` and the `adc` source none), writes the
+  [generation floor](#technical-adr-0073-generation-floor) and calls
+  `delete/2`;
+- `sign_in(context, route, record, metadata)`, a login's write under the
+  route's lock: when the existing pair is `inconsistent` or its metadata
+  names another backend or source, it first signs the route out as
+  `sign_out/3` does without revocation, and then calls `write/4`. A failure of that sign-out fails the login with its
+  class before the login's own pair is written.
 
 `read/2` applies the [pairing rule](#technical-adr-0073-pairing); `write/4`
-follows its write protocol.
+follows its write protocol. `auth login` and `auth logout` call `sign_in/4`
+and `sign_out/3`, and composition tests run those two functions in child OS
+processes, so every store sequence is proved without `loopex_cli`.
 
 *Callers and lifecycle of the context.* `auth login` and `auth logout` build
 the context through `LoopexCli.Home` after selection and pass it to each store
@@ -261,7 +279,20 @@ and the ephemeral composition receive it from their command's row of ADR
 unchanged to each `SignIn.Route` it starts. A composition with an `oauth`
 binding and no context refuses to start with `provider_sign_in_required`; no
 default is computed. The refresher keeps the context for its life and passes
-it to every store call. Backends:
+it to every store call. It also keeps the composition's
+`excluded_env_names`, and `auth` the list its selected configuration's
+bindings give (`LOOPEX_PROVIDER_API_KEY` alone without one): the refresh
+lock's process probe and every keyring child are spawned with each of those
+names unset, as the placement probe is (`placement.ex` :557).
+
+Every keyring child (`security`, `secret-tool` and the wrapper below) is
+bounded at 5,000 ms. At the bound the backend kills the child and every
+process it started, by operating-system process ID, and answers
+`credential_store_unavailable`, so a
+keyring that waits on an unlock prompt never holds the refresh lock beyond
+that bound. A bounded write failure is a store write failure: a refresher
+takes the pending-write path of refresher step 4, and `auth` exits 69.
+Backends:
 
 1. **macOS Keychain.** The backend runs `/usr/bin/security`, by absolute path
    only, in the user's default keychain.
@@ -318,7 +349,7 @@ it to every store call. Backends:
    - Attributes are `application loopex-oauth home <digest> route <route>`.
    - `secret-tool store` reads the secret until end of input. An Erlang port
      cannot half-close standard input, so the backend runs the fixed wrapper
-     `/bin/sh -c 'head -c "$1" | exec /usr/bin/secret-tool store --label="$2" application loopex-oauth home "$3" route "$4"' sh <bytes> <label> <digest> <route>`.
+     `/bin/sh -c '/usr/bin/head -c "$1" | exec /usr/bin/secret-tool store --label="$2" application loopex-oauth home "$3" route "$4"' sh <bytes> <label> <digest> <route>`.
      The byte count comes from the encoded record and the secret arrives on
      the port. Only non-secret values appear in argv.
 3. **File.** The record lives in `<home>/auth/<route>.secret`, mode `0600`.
@@ -331,19 +362,24 @@ it to every store call. Backends:
    - Stale `*.tmp` files older than one hour are removed by the next writer.
    - Metadata uses the same atomic write.
 
-Backend selection: `auth login --store auto` is the default. On macOS, `auto`
+Backend selection: `auth login --store auto` is the default. Over existing
+metadata naming a token backend, `auto` keeps it. Otherwise, on macOS, `auto`
 picks `macos_keychain`. On Linux it picks `secret_service` when available, and
 otherwise `file`, printing `loopex: no keyring available; token stored in
 <path>` on standard error. `--store keychain|secret-service|file` forces one
 backend, and an unavailable forced backend exits `credential_store_unavailable`.
 The selected backend is recorded in metadata, and every later reader uses
-exactly that backend. There is no silent migration between backends.
+exactly that backend. There is no silent migration between backends: a login
+that selects another backend or source signs the route out first
+(`sign_in/4`), so no record is left in a backend the metadata no longer
+names. A cut after that sign-out leaves the route signed out or
+`inconsistent`, and rerunning the login completes it.
 
 **Refresh lock.** `<home>/auth/<route>.lock` uses `LoopexComposition.Placement`'s
 exact algorithm: an `O_EXCL` lock file, owner process incarnation, stale
 reclamation under the directory guard, and an inode-checked owner handle. The
-primitive moves into a shared private module both callers use; no second lock
-algorithm is written. No Loopex-stored refresh token is exchanged without
+primitive moves into a shared private module that every lock user calls; no
+second lock algorithm is written. No Loopex-stored refresh token is exchanged without
 the lock, because OpenAI's
 [token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference)
 rotates it on every refresh and a daemon, a foreground chat, an `ask` and
@@ -373,10 +409,18 @@ rotates it on every refresh and a daemon, a foreground chat, an `ask` and
   is refused as active (:160-162). So `SignIn.Route` traps exits, takes and
   releases the lock inside `try ... after`, runs each exchange in a
   separate linked process, and has a 60,000 ms shutdown timeout, longer
-  than one exchange plus the write. A `SignIn.Route` that exits other than
-  by its composition's stop ends its host: the daemon's
-  `sign_in_route_lost` (123), and foreground chat and `ask` likewise.
-  Residual: a `SignIn.Route` killed while holding the lock, or an
+  than one exchange plus the write. On its composition's stop it finishes
+  an exchange in progress and that exchange's write, starts no other, and
+  exits. The daemon stops its routes in ADR 0071's sign-in route teardown
+  step, first in the daemon's teardown, with its own bounded wait. A
+  `SignIn.Route` that exits other than by its composition's stop ends its
+  host: the daemon exits `sign_in_route_lost` (123); foreground chat and
+  `ask` print `loopex: sign_in_route_lost` on standard error and exit 1,
+  the run interrupted as any interrupted run (D38).
+  Residual: a host that kills a `SignIn.Route` mid-exchange, such as an
+  embedding host whose stop waits less than the route's shutdown timeout,
+  loses a token the provider rotated before the write, and the route then
+  needs `auth login`; a `SignIn.Route` killed while holding the lock, or an
   acquisition worker killed inside the guard, in an embedding VM that
   survives strands the lock or its guard until that VM exits.
 
@@ -387,8 +431,8 @@ step 7's nomination) belongs to the *tuple* it was obtained for: the route,
 `client_id`, `subject_digest` and generation `G` of the pair it came from.
 It is published by this rule only:
 
-1. Take the lock. `sign_in_lock_busy` publishes nothing and changes
-   nothing; the producer retries as it states.
+1. Take the lock. `sign_in_lock_busy` or `sign_in_lock_failed` publishes
+   nothing and changes nothing; the producer retries as it states.
 2. `Store.read/2`, completing a `roll_forward` first and judging the
    completed pair. `Store.read/2` applies the
    [generation floor](#technical-adr-0073-generation-floor) itself, so a
@@ -416,7 +460,7 @@ It is published by this rule only:
 4. Unlock only after custody and any write are done, so the next lock
    holder sees them.
 
-**Exchange executors.** Every token-endpoint exchange posts a fixed form to a
+<a id="technical-adr-0073-exchange"></a>**Exchange executors.** Every token-endpoint exchange posts a fixed form to a
 compiled HTTPS endpoint, with a 30,000 ms bound. That covers code exchange,
 refresh and revocation, and device polling where a provider offers it. The
 reply is at most 196,608 bytes and is validated against the profile. An
@@ -442,12 +486,33 @@ contract:
     [`chatgpt` model admission](#technical-adr-0073-model-admission): the
     access token crosses as the credential frame, and only the bounded,
     validated model list returns.
+  - *Frames.* Both kinds keep ADR 0019's launcher, guard, nonce, bootstrap,
+    readiness and cleanup, with these data frames. Neither is a Model call,
+    so no Control permit, semantic request, staged digest,
+    `dispatch_started` or delta frame exists for them.
+    - Credential: for `token_exchange`, the refresh token and, on an `adc`
+      route, the file's `client_secret` as a second field; for
+      `model_list`, the access token. Each field is 1 to 65,536 bytes.
+    - Invocation: the kind, the route, its source and `client_id`, and for
+      `token_exchange` whether the profile's key set is fetched; no secret.
+    - Terminal: exactly one of the validated token response, with its
+      `id_token` of at most 16,384 bytes and, when fetched, the key set of
+      at most 65,536 bytes; the validated model list; or one closed failure
+      class from the table below.
+    - The invocation deadline is the 30,000 ms request bound, plus 10,000 ms
+      when the key set is fetched, and the guard's cleanup period is the
+      provider configuration's `cleanup_grace_ms`, as for a model
+      invocation.
 - **In-host executor.** The ephemeral profile and the `auth` command use it. A
   `:sensitive` process makes the POST with `Req` and the profile's TLS
   options; retention and tickets are disabled as in ADR 0039. The `auth`
-  command, like `ask`, turns its logger off and disables crash dumps before
-  any exchange. ADR 0039's host-VM audience statement applies to the refresh
-  token and the access token alike.
+  command starts `Req` and `Finch` before its first exchange and, like
+  `ask` (`apps/loopex_cli/lib/loopex_cli.ex` :70-71), turns its logger off
+  first. The launcher disables crash dumps for it as for `ask`: the
+  `ERL_CRASH_DUMP` settings its `case` sets only for `ask|-p` today
+  (`apps/loopex_cli/bin/loopex` :60-66) are also set for `auth` (D37). Under
+  D37 the refresh token, ID token, authorization code and
+  access token may all live in this VM.
 
 Exchange failure classes are closed:
 
@@ -455,17 +520,20 @@ Exchange failure classes are closed:
 | --- | --- |
 | `sign_in_required` | Provider `invalid_grant`, `invalid_client`, or a revoked or expired refresh token |
 | `provider_unreachable` | Transport failure or timeout, or HTTP 5xx |
-| `sign_in_failed` | A malformed or over-bound reply, including an `expires_in` that is absent, not an integer or below 10, an ID token that fails [verification](#technical-adr-0073-id-token), granted scopes missing a required scope, or a subject different from the stored one |
+| `sign_in_failed` | A malformed or over-bound reply, including an `expires_in` that is absent, not an integer or below 10, an ID token that fails [verification](#technical-adr-0073-id-token), or granted scopes missing a required scope |
 
-Only `sign_in_required` changes the stored `state`.
+Of these classes only `sign_in_required` changes the stored `state`. A verified subject
+different from the stored one is not an exchange failure; the host refuses
+it as `sign_in_account_changed`.
 
 **Refresher and custody.** For each `oauth` binding, composition starts one
 owned edge, `LoopexComposition.SignIn.Route`. It is linked like the existing
 registry and custody edges and joins their reverse cleanup.
 
 1. At start it reads the pair through `Store.read/2`. A `roll_forward` result
-   is completed under the lock first; a `sign_in_lock_busy` there starts the
-   route with custody already past its deadline, so resolution returns
+   is completed under the lock first; a `sign_in_lock_busy` or
+   `sign_in_lock_failed` there starts the route with custody already past its
+   deadline, so resolution returns
    `:expired`, and retries the roll-forward on step 5's schedule. An
    `absent` or `inconsistent` result, a
    client ID that does not match the compiled client (Google) or the issued
@@ -489,7 +557,8 @@ registry and custody edges and joins their reverse cleanup.
    nothing, writes nothing, rotates custody to `nil` and names
    `auth_root_overlap` with the pointer, so a provider never rotates a
    refresh token the store would refuse to keep (at start the same refusal
-   fails composition, which the daemon reports as ADR 0037's `111`). It then
+   fails composition, which the daemon reports as ADR 0071's
+   `configuration_invalid`, 111). It then
    takes the lock, rereads the pair and judges it as the
    [fence](#technical-adr-0073-fence) does with its held tuple: a newer pair
    is adopted without contacting the provider, and anything else exchanges
@@ -531,10 +600,10 @@ registry and custody edges and joins their reverse cleanup.
    `auth logout` meanwhile revokes only that stored, already rotated token,
    so it may exit 74 `revocation_unconfirmed`; the pending record is then
    discarded unrevoked, and its grant lapses at the provider.
-5. A transient failure (`provider_unreachable`) retries with delays of 5, 15,
-   30, 60, 120, then every 300 s. The custody keeps the old token until its
-   `expires_at`. After that, resolution returns `:expired` and the sender
-   refuses before dispatch.
+5. A refresh that fails `provider_unreachable` or `sign_in_failed` writes
+   nothing and retries with delays of 5, 15, 30, 60, 120, then every 300 s.
+   The custody keeps the old token until its `expires_at`. After that,
+   resolution returns `:expired` and the sender refuses before dispatch.
 6. On `sign_in_required` it rotates custody to `nil`, so resolution returns
    `:missing`, which a call on the route reports as the public reason
    `provider_sign_in_required`. It writes `state: sign_in_required`, writes one bounded host
@@ -617,12 +686,12 @@ process and the companion; no new trace selector exists.
   response body of at most 1,048,576 bytes. It runs in the route's exchange
   executor: the companion's `model_list` invocation in durable hosts, never
   the durable host VM; the in-host executor in the ephemeral profile and in
-  the `auth` command, under ADR 0039's stated audience. The refresher runs it
+  the `auth` command, under the host-VM audience D37 accepts. The refresher runs it
   after each successful refresh, a pending write's success included, and
   each adoption; `auth login openai`
   runs it once with the newly exchanged access token after ID-token
-  verification and before `Store.write/4`, so the login's first write
-  already carries the list.
+  verification and before `sign_in/4`, so the login's first write already
+  carries the list.
 - *Validation.* The response is one JSON object whose `data` is a list; the
   kept entries are those with `visibility == "list"`. Each kept `id` matches
   `\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\z`, at most 128 bytes; at most 256 ids
@@ -634,7 +703,7 @@ process and the companion; no new trace selector exists.
   timeout or non-2xx status is `provider_unreachable`. No raw body, header or
   error text crosses the private channel or reaches a diagnostic.
 - *Record at login* (D25). The list is part of `auth login openai`. The
-  login's `Store.write/4` writes the metadata with the validated list as
+  login's `sign_in/4` writes the metadata with the validated list as
   `models`. A login whose `model_list` fails writes no token record, no
   metadata and no floor change, and exits with the failure's class: 68
   `sign_in_failed` for a malformed body, an empty list, an invalid id, more
@@ -656,7 +725,7 @@ process and the companion; no new trace selector exists.
   token it presented. Publishing writes the list into the metadata's
   `models` with the atomic metadata write, keeping every other member, and
   updates `SignIn.Route`'s in-memory list. A failure, including
-  `sign_in_lock_busy` at the fence, changes no stored state, custody or
+  a lock refused at the fence, changes no stored state, custody or
   token, keeps the previous list, never `null`, and names
   `sign_in_model_list_stale` in one bounded host diagnostic line,
   `loopex: model list refresh failed for route chatgpt: <class>; keeping
@@ -665,22 +734,24 @@ process and the companion; no new trace selector exists.
   the existing `models` unchanged; only a login and the fence write a list.
   A process killed before the metadata rename leaves the previous list.
 - *Admission.* `SignIn.Route` holds the list it last recorded or read. The
-  configured model and maintenance model are checked when composition
-  resolves routes (`LoopexComposition.DurableOptions`, where an unbound
-  route already refuses at `durable_options.ex` :243, and the ephemeral
-  equivalent), and a model or reasoning switch is checked in ADR 0048's
-  switch admission (`ProviderBindings`'s private `resolve_selection_routes/4`
-  behind `resolve_configuration/3` and `resolve_maintenance_routes/2`, which
-  already refuses at `provider_bindings.ex` :169), before any config commit
-  or dispatch. A `chatgpt:<id>` whose `<id>` is absent from the list refuses
-  with the existing
-  `provider_route_unavailable` and leaves the prior configuration; at
-  service start that refuses composition as an unbound route does today.
-  It is never a Model callback result, so Core sees no failed attempt and
-  nothing retries. Resume keeps ADR 0048's rule of checking only the
-  committed model's route; a committed model the account later stops
-  listing is sent, and the provider's refusal is an ordinary dispatched
-  failure.
+  check runs where the list is held, never in `ProviderBindings`' pure
+  resolution, which configuration inspection, selection and delegation also
+  call without a route. Durable and ephemeral composition check the
+  configured model and maintenance model against each started `chatgpt`
+  route's list before the composition is ready, refusing a miss with
+  `provider_route_unavailable` as an unbound route refuses at
+  `durable_options.ex` :243. A model or reasoning switch is checked in
+  `LoopexComposition.Model.prepare_configuration/5`, after
+  `resolve_configuration_routes/3`, against the lists of the routes named
+  by a `:sign_in_routes` host option, which `Model.reference/2` keeps beside
+  the `:provider_bindings` and `:credential_plane` it keeps today
+  (`model.ex` :41); a miss refuses as an unbound route already does there
+  (`model.ex` :53-87), before any config commit or dispatch, and leaves the
+  prior configuration. It is never a Model callback result, so Core sees no
+  failed attempt and nothing retries. Resume keeps ADR 0048's rule of
+  checking only the committed model's route; a committed model the account
+  later stops listing is sent, and the provider's refusal is an ordinary
+  dispatched failure.
 - *Tests.* `provider_bridge_test.exs` (extended): the `model_list`
   invocation through the real companion boundary, its credential frame, the
   256-id and 128-byte bounds, the 1,048,576-byte body bound, the timeout,
@@ -692,13 +763,13 @@ process and the companion; no new trace selector exists.
   fake server holds refresher R's `GET /v1/models` for generation `G` of
   account A until the test releases it, and answers it with a list distinct
   from every other list the test serves. Before the release, in another OS
-  process, the test runs (a) `auth logout openai`; (b) `auth logout openai`
-  then `auth login openai` for account B; (c) a refresh of A by a second
+  process, the test runs (a) `sign_out/3`; (b) `sign_out/3` then
+  `sign_in/4` writing account B's pair; (c) a refresh of A by a second
   refresher, which writes `G + 1` and its own list, served again to R's
   listing after R adopts `G + 1`. After the release, R's
   list is never written: in (a) `auth/` holds no metadata or record and the
-  floor is the one the logout wrote, in (b) and (c) the metadata and record bytes equal
-  those the other process wrote, and in all three R's in-memory list,
+  floor is the one the sign-out wrote, in (b) and (c) the metadata and
+  record bytes equal those the other process wrote, and in all three R's in-memory list,
   observed through a switch admission, still refuses a model only the
   delayed list names. A fourth case releases the delayed answer with
   nothing changed and sees it written at `G`. A fifth holds the route's
@@ -712,9 +783,11 @@ process and the companion; no new trace selector exists.
   empty `auth/` and over an existing sign-in whose pair and floor stay byte
   for byte. `sign_in_store_test.exs`: a `chatgpt` metadata file without
   `models`, with `models: null`, and a `vertex` file with `models` are each
-  `credential_store_unsafe`. `sign_in_routes_test.exs`: an unlisted model refuses
-  `provider_route_unavailable` at composition and at switch, a refused
-  switch keeps the prior model, and the fake server sees no model request.
+  `credential_store_unsafe`. `sign_in_model_admission_test.exs`
+  (`apps/loopex_composition`): an unlisted model refuses
+  `provider_route_unavailable` at durable and ephemeral composition, a switch
+  to it is refused and keeps the prior model, and the fake server sees no
+  model request; configuration inspection of the same file succeeds.
 
 **Ephemeral profile.** The ephemeral composition starts the same
 `SignIn.Route` edge and custody, owned by the ephemeral composition and
@@ -724,8 +797,13 @@ caller. For a `:sign_in` route it instead calls `CredentialCustody.resolve/1`
 on the route's custody reference. The reference is passed in host-private
 model options next to the binding map, never in a request. `:missing`
 refuses as `not_dispatched` with `provider_sign_in_required`, and `:expired`
-as `not_dispatched` with `model_call_failed`. Everything else in ADR 0039's caller,
-pool, cleanup and selected-value guard is unchanged.
+as `not_dispatched` with `model_call_failed`. The cleanup owner admits the
+new refusal as it admits a pre-adapter `model_call_failed`: its pre-adapter
+match and `valid_result?/1` (`in_process/cleanup_owner.ex` :621-622,
+:669-675) admit only `model_call_failed` today and begin cleanup as
+`:result_refused` for anything else, which would seal the session. Everything
+else in ADR 0039's caller, pool, cleanup and selected-value guard is
+unchanged.
 
 **Daemon and service.**
 
@@ -743,7 +821,7 @@ pool, cleanup and selected-value guard is unchanged.
   (`apps/loopex_daemon/lib/loopex_daemon/exit_status.ex` :12, :81, :85); this
   edit makes all three state `65..125`. With ADRs 0071, 0072 and 0037 the daemon's status set is exactly 65 to 125
   except 114, which ADR 0071 retired: every other integer in that range maps
-  to exactly one class, and `fetch/1` refuses 114. The assertion in
+  to exactly one class, and no class maps to 114. The assertion in
   `apps/loopex_daemon/test/command_test.exs`, which today checks
   `Enum.to_list(65..110)`, becomes `Enum.to_list(65..125) -- [114]`.
 - Under the maintainer's 2026-10-13 decision, a sign-in route that is not
@@ -752,12 +830,16 @@ pool, cleanup and selected-value guard is unchanged.
   `provider_sign_in_required` (120), leaving no socket. A revocation or
   logout while the service runs never stops it: refresher steps 6 and 7 make
   only that route's calls refuse.
-- A transient refresh failure or `sign_in_lock_busy` at startup does not
-  refuse start. The service serves and the route stays unavailable until a
-  refresh succeeds.
-- ADR 0037's start-on-demand presence check reads only the metadata file. It
-  refuses `provider_sign_in_required` when the file is absent or
-  `state != signed_in`, before starting anything.
+- At startup a refresh failing `provider_unreachable` or `sign_in_failed`,
+  or a lock refused `sign_in_lock_busy` or `sign_in_lock_failed`, does not
+  refuse start for a stored `loopex` sign-in. The service serves and the
+  route stays unavailable until a refresh succeeds. An `adc` route starts as
+  [the ADC source](#technical-adr-0073-adc) states.
+- ADR 0037's start-on-demand presence check reads only the metadata file and
+  the [generation floor](#technical-adr-0073-generation-floor). It refuses
+  `provider_sign_in_required` when the metadata is absent, its `state` is not
+  `signed_in`, or its generation is at or below the floor's, before starting
+  anything.
 - Readiness keeps ADR 0037's four states; sign-in state is reported by
   `auth status` and the diagnostic command, not by readiness.
 - The service's environment is not consulted for sign-in routes, and no
@@ -850,16 +932,19 @@ loopex auth logout <provider> [--local-only] [--config FILE]
     `auth` command's in-host executor under its 30,000 ms and 65,536-byte
     bounds. It checks that the project accepts the token as its quota
     project; a failure is reported by class but keeps the sign-in.
-- `status` reads metadata only: no secret, no network, no lock. It prints one
-  line per configured or stored sign-in route: route, state, account label,
-  backend, access and refresh expiry.
-- `logout` takes the lock, reads the record, and revokes the refresh token at
-  the profile's revocation endpoint through the in-host executor. It then
-  writes the [generation floor](#technical-adr-0073-generation-floor) and
-  deletes the secret and the metadata, in that order. The floor survives. `--local-only` skips
-  revocation. A revocation failure still deletes locally and exits
-  `revocation_unconfirmed`. For `adc`, logout writes the floor, deletes only
-  Loopex's metadata and never touches gcloud's file.
+- `status` reads metadata and floors only: no secret, no network, no lock. It
+  prints one line per configured or stored sign-in route: route, state,
+  account label, backend, access and refresh expiry. Metadata whose
+  generation is at or below the route's floor, as a sign-out cut after its
+  floor write leaves, is shown as not signed in, as absent metadata is.
+- `logout` is `SignIn.Store.sign_out/3`: under the lock it reads the
+  record, revokes the refresh token at the profile's revocation endpoint
+  through the in-host executor, writes the
+  [generation floor](#technical-adr-0073-generation-floor), and deletes the
+  secret and the metadata, in that order. The floor survives. `--local-only`
+  skips revocation. A revocation failure still deletes locally and exits
+  `revocation_unconfirmed`. For `adc`, logout revokes nothing, writes the
+  floor, deletes only Loopex's metadata and never touches gcloud's file.
 
 Exit statuses of `loopex auth`, each with `loopex auth: <class>` on standard
 error:
@@ -867,7 +952,7 @@ error:
 | Status | Class |
 | --- | --- |
 | 0 | Success; for `status`, every listed route is `signed_in` |
-| 1 | Command-line refusal, with usage on standard error |
+| 1 | Command-line refusal, with usage on standard error; ADR 0037's `home_unavailable`; ADR 0049's load and validation classes for the selected configuration |
 | 65 | `sign_in_unavailable`: route disabled in this build, or a flow the provider lacks |
 | 66 | `sign_in_denied`: the provider returned `access_denied` |
 | 67 | `sign_in_timed_out` |
@@ -918,16 +1003,22 @@ Concept: [Account binding and recovery](0073-provider-oauth-sign-in.md#concept-a
   metadata exists, so a rebuilt `chatgpt` metadata keeps its existing
   `models`.
 
-**Pairing rule.** `Store.read(context, route)` reads the metadata, the
-record and the floor. When the greater generation of the two sides is at or
+**Pairing rule.** `Store.read(context, route)` reads the metadata, then the
+record, then the floor. That order is an invariant: a writer writes the
+record before the metadata, so a write that lands during an unlocked read,
+such as a startup read, yields `{:ok, _}` or `roll_forward`, never metadata
+ahead of the record. When the greater generation of the two sides is at or
 below the floor's, it returns `:absent` before anything else, because `auth
 logout` writes the floor before it deletes; a logout cut after its floor
 write is therefore never rolled forward or served. A route whose metadata
-names `backend: adc` has no record by design: for it `read/2` returns
-`{:ok, metadata}` when the metadata decodes, `:absent` when there is none,
-and `:inconsistent` only when it does not decode or a record exists beside
-it, and its tuple is the metadata's route, `client_id`, `subject_digest` and
-generation; `write/4` for `adc` writes metadata only. Otherwise it returns
+names `backend: adc` has no record by design. Where no metadata names a
+token backend, as for `adc` or with no metadata, `read/2` looks for a record
+in each of the *host's backends*: the file backend and, when available, the
+keychain on macOS or the Secret Service on Linux. For `adc` it returns
+`{:ok, metadata}` when the metadata decodes and no record is found,
+`:absent` when there is no metadata and no record, and `:inconsistent`
+otherwise; its tuple is the metadata's route, `client_id`, `subject_digest`
+and generation; `write/4` for `adc` writes metadata only. Otherwise it returns
 exactly one of:
 
 | Result | When |
@@ -956,8 +1047,8 @@ shows the classification the last lock holder recorded in metadata.
   `nil` and logs `sign_in_incomplete`. A lock holder that finds an existing
   metadata file in an inconsistent pair sets only its `state` to
   `sign_in_incomplete`, keeping its generation, subject and client; nothing
-  else deletes or overwrites either side. `auth login` repairs it by writing a fresh pair; `auth logout` deletes
-  both sides.
+  else deletes or overwrites either side. `auth login` repairs it by
+  writing a fresh pair; `auth logout` deletes both sides.
 
 **Write protocol.** `Store.write/4` runs only under the route's refresh lock:
 
@@ -978,13 +1069,15 @@ A crash after step 3 and before step 4 leaves the record one generation
 ahead. For the same account and client that is `roll_forward`. For a login
 of a different account over an existing one, it is `inconsistent`: the old
 account's label is never paired with the new account's token, and a service
-still running the old account refuses its next refresh without writing.
+still running the old account refuses its next refresh, writing only `state:
+sign_in_incomplete` into the existing metadata.
 `/usr/bin/security add-generic-password -U` replaces one item, so a killed
 tool leaves either the old or the new record; a Secret Service store cut short
 leaves an undecodable value; the file backend's rename leaves the old or the
-new file. Each is classified by the table above. `delete/2` removes the record
-and then the metadata; a crash between them leaves metadata without a record,
-which is `inconsistent` until `auth logout` is run again.
+new file. Each is classified by the table above. `delete/2` removes the
+route's record from each of the host's backends and then the metadata, and
+runs only after a sign-out's floor write; a crash between them leaves
+metadata at or below the floor, which is `:absent`.
 
 <a id="technical-adr-0073-id-token"></a>
 ### ID-Token Verification
@@ -1048,9 +1141,15 @@ URI, read from the provider's discovery document on 2026-10-13: OpenAI
 `RS256` as the ID-token signing algorithm. A key set from one profile never
 verifies another profile's tokens.
 
-- Retrieval is a credential-free `GET` made in-host with `Req`: HTTPS only,
-  redirects off, 10,000 ms bound, a body of at most 65,536 bytes. A failure is
-  `provider_unreachable`.
+- Retrieval is a credential-free `GET`: HTTPS only, redirects off, 10,000 ms
+  bound, a body of at most 65,536 bytes. A failure is
+  `provider_unreachable`. The `auth` command and the ephemeral profile make
+  it in-host with `Req`. A durable host VM never starts `Req`
+  (`apps/loopex_llm_reqllm/mix.exs` :68-70 declares `req_llm`, `req` and
+  `finch` `runtime: false`), so there the `token_exchange` that needs
+  verification fetches the set in the companion and returns it beside the
+  token, and the cache and refetch rules below do not apply: each such
+  exchange fetches a current set.
 - The set admits at most 16 keys. Only `kty: RSA` keys with `use` absent or
   `sig`, `alg` absent or `RS256`, a 2,048- to 4,096-bit modulus and a public
   exponent of 65,537 are kept; other entries are ignored.
@@ -1122,7 +1221,8 @@ so the service's environment cannot redirect it.
 
 - The final path component is a regular file, not a symlink, owned by the
   effective user, with no group or other write bit; otherwise
-  `credential_store_unsafe`.
+  `credential_store_unsafe`, which a refresh after startup handles as
+  `sign_in_failed`.
 - It is at most 65,536 bytes of UTF-8 JSON: one object, no duplicate keys,
   every value a string.
 - Required: `type` exactly `authorized_user`; `client_id` and
@@ -1146,9 +1246,9 @@ refresh independently. The exchange therefore runs without the route's lock,
 and its access token is published through the
 [fence](#technical-adr-0073-fence) with the tuple of the metadata read
 before the exchange; publishing rotates custody and handles the cases
-below. A `sign_in_lock_busy` drops the token and retries on step 5's
-schedule; nothing is lost, because Loopex never holds the only copy of an
-ADC grant.
+below. A `sign_in_lock_busy` or `sign_in_lock_failed` drops the token and
+retries on step 5's schedule; nothing is lost, because Loopex never holds the
+only copy of an ADC grant.
 
 - **Unchanged grant** (`adc_digest` equals the metadata's): the subject is
   the stored one, and an absent ID token changes nothing.
@@ -1157,14 +1257,19 @@ ADC grant.
   required and verified. The new access token enters custody only after that.
   The same subject writes metadata at the next generation with the new
   `adc_digest`. A different subject is `sign_in_account_changed`: custody
-  stays `nil` and metadata is unchanged. An absent ID token is
-  `sign_in_failed`, with custody `nil`.
+  becomes `nil` and metadata is unchanged. An absent or failing ID token is
+  `sign_in_failed`, handled as refresher step 5 states.
 - **File absent** (as after `gcloud auth application-default revoke`), or
   `invalid_grant`: `state: sign_in_required`, custody `nil`.
 
-**Startup.** A `SignIn.Route` for `adc` reads the metadata and the file and
-refreshes once, because no access token is stored. A transient failure serves
-with the route unavailable, like any other transient refresh failure.
+**Startup.** A `SignIn.Route` for `adc` applies refresher step 1's metadata
+checks, then reads the file and refreshes once, because no access token is
+stored. `provider_unreachable` or
+a lock refused busy or failed serves with the route unavailable, as
+refresher step 5 retries. Every other outcome without a token refuses
+composition (D22): an unsafe file `credential_store_unsafe` (122), and an
+absent file, `invalid_grant`, `adc_invalid`, any other `sign_in_failed` or a
+changed subject `provider_sign_in_required` (120).
 `auth login gemini --source adc` performs the same validation and one
 refresh, requires a verified ID token, and writes metadata. That gcloud's
 default application-default login grants `openid`, so that Google returns an
@@ -1386,6 +1491,23 @@ The generation names stay `loopex.experimental/3` and `/4`. Before 1.0 only
 the current contract is kept. The independent Node client in the release
 check decodes the new vectors.
 
+**Host and client readers.** Each delivered reader that closes the failed
+reason or failure-category set admits the new value beside
+`model_call_failed`; otherwise the refusal would fail the reader instead of
+reaching the operator:
+
+- `LoopexComposition.Ephemeral.SessionOwner`'s `failed_details/2`
+  (`ephemeral/session_owner.ex` :2889-2904);
+- `LoopexCli.AskResult`'s `details!/2` (`ask_result.ex` :209-217), so
+  `loopex.ask/1`'s `failed` details carry the reason, with `ask`'s failed
+  status 2;
+- `LoopexCli.DurableAsk.FollowReader`'s `terminal_details?/2`
+  (`durable_ask/follow_reader.ex` :345-350);
+- the Node client's `clients/node/terminal-outcome.mjs` :49 and
+  `clients/node/compact-result.mjs` :52;
+- the in-process cleanup owner, as [the ephemeral
+  profile](#technical-adr-0073-decision) states.
+
 **Client-visible behavior.**
 
 - Every client receives the terminal outcome `failed` with `reason`
@@ -1415,7 +1537,7 @@ Concept: [Observable consequences](0073-provider-oauth-sign-in.md#concept-adr-00
 | Device-code phishing | `verification_uri` shown only for allowlisted provider hosts | — |
 | Endpoint substitution | Compiled HTTPS endpoints per profile. No configuration or environment override; a test-only fake server is injected under `Mix.env() == :test` only | — |
 | Refresh-token reuse race | Cross-process lock, no exchange of a Loopex-stored refresh token without it, re-read before exchange, generation adoption; a failed record write after a successful exchange keeps the new record in the refresher's `:sensitive` state and retries only the write | A crash after the provider's rotation and before the record write, or a stop while that write is still pending, loses the new token, so the route needs sign-in again; a crash after the record write is recovered by `roll_forward` |
-| Leak into logs, traces or crash dumps | `:sensitive` custody, refresher and exchange processes; `format_status` redaction as in `CredentialCustody`; tracing exclusion; the companion executor in durable hosts; logger off and crash dumps disabled in `auth`; closed failure classes only | ADR 0039's host-VM audience in the ephemeral profile and `auth` |
+| Leak into logs, traces or crash dumps | `:sensitive` custody, refresher and exchange processes; `format_status` redaction as in `CredentialCustody`; tracing exclusion; the companion executor in durable hosts; logger off and crash dumps disabled in `auth`; closed failure classes only | The host-VM audience in the ephemeral profile and `auth`, widened by D37 to refresh tokens, ID tokens and the authorization-code exchange |
 | Provider echoes a token | The existing exact-match echo guard on the access token | Split or encoded echoes, as today |
 | Forged identity token or substituted signing key | `RS256` only, keys only from the issuer's compiled JWKS URI, closed header, bounded rotation refetch | A compromise of the provider's own keys |
 | A delayed result applied to a sign-in it no longer belongs to | One [fence](#technical-adr-0073-fence) publishes every result obtained without the lock (a pending write, an ADC exchange, a model listing, step 7's nomination) only for its own tuple, adopting instead a newer signed-in generation of the same subject and client; a refresh exchange runs and publishes under one lock hold, and custody rotates before unlock | A token already in custody stays usable until the first 30 s poll after a logout's floor write, as the concept states |
@@ -1428,33 +1550,39 @@ Concept: [Observable consequences](0073-provider-oauth-sign-in.md#concept-adr-00
 
 Concept: [Observable consequences](0073-provider-oauth-sign-in.md#concept-adr-0073-consequences).
 
-A test-only fake OAuth and model server, `test/support/fake_oauth_server.ex`
-in `loopex_composition`, serves every flow. It uses `:gen_tcp` with
-fixed-response handlers, like the existing provider fixtures, and can produce
-rotation, `invalid_grant`, `slow_down`, delay and malformed replies. All tests
+A test-only fake OAuth and model server,
+`apps/loopex_llm_reqllm/test/support/fake_oauth_server.ex`, serves every
+flow. The adapter's own tests compile it, and `loopex_composition`,
+`loopex_cli` and `loopex_daemon` tests load it with `Code.require_file`, as
+`loopex_composition`'s test helper already loads `loopex`'s support. It uses
+`:gen_tcp` with fixed-response handlers, like the existing provider fixtures,
+and can produce rotation, `invalid_grant`, `slow_down`, delay and malformed
+replies. All tests
 use temporary homes and never touch a real keyring.
 
 | File | Cases |
 | --- | --- |
 | `apps/loopex_llm_reqllm/test/sign_in_profiles_test.exs` | Compiled endpoints, issuers and JWKS URIs are HTTPS and per profile; no override path outside tests. A source scan finds no `oauth_file`, `auth_file`, `oauth_http_options`, `with_claude_subscription`, `codex_originator`, `openai_codex` or `refresh_oauth_credentials` in Loopex source, and no Codex CLI or Claude Code client ID; no `:req_llm, :google_vertex` application configuration in any `config/` file or app. Token-response validation (issuer, audience, scopes, bounds). `claude` is disabled without a sanctioned profile |
-| `apps/loopex_llm_reqllm/test/sign_in_routes_test.exs` | The binding grammar's alternatives, pointers and classes. `oauth` on existing routes and `env` on sign-in routes refuse. `vertex` project and location vectors. Per-route sealed headers, including the `vertex` request's exact `x-goog-user-project` on the companion and in-process callers, and a `vertex` call with an empty token, project or region refused before ReqLLM is called. `chatgpt` model admission at composition and switch. The `chatgpt` mapping never sends rejected members and always streams with `store: false` |
+| `apps/loopex_llm_reqllm/test/sign_in_routes_test.exs` | The binding grammar's alternatives, pointers and classes. `oauth` on existing routes and `env` on sign-in routes refuse. `vertex` project and location vectors. Per-route sealed headers, including the `vertex` request's exact `x-goog-user-project` on the companion and in-process callers, and a `vertex` call with an empty token, project or region refused before ReqLLM is called. The `chatgpt` mapping never sends rejected members and always streams with `store: false` |
 | `apps/loopex_llm_reqllm/test/sign_in_id_token_test.exs` | Against test RSA keys generated with `:public_key`: a valid RS256 token verifies and yields the subject digest; a forged signature, an altered payload, `alg` `none`, `HS256` signed with the public key as an HMAC secret, `ES256`, and `jku`, `jwk`, `x5u`, `x5c` or `crit` headers are refused; wrong issuer (both Google forms accepted), wrong or multi-member audience, and for the `adc` source an audience equal to the compiled Google desktop client or to any client other than the ADC file's `client_id`, while the file's own `client_id` verifies, expiry, `iat` in the future and nonce mismatch are refused; an unknown `kid` refetches once and verifies after rotation, a still-unknown `kid` is refused, and a second unknown `kid` within 60 s does not refetch; an over-bound or non-RSA key set, a redirect from the JWKS URI and a fetch timeout are refused, the last as `provider_unreachable`; a profile's key set never verifies another profile's token |
-| `apps/loopex_composition/test/sign_in_store_test.exs` | File backend: modes, owner, symlink refusal on `*.secret`, `*.json`, `*.floor` and `host-id`; stale `.tmp` cleanup; a refresh that creates the lock namespace under the process umask followed by a successful `Store.read/2` and `auth status`. Generation floor: its closed grammar, an invalid floor refused `credential_store_unsafe`, logout writing the maximum generation and never lowering it, and the next write's generation above it. The metadata path never reads a secret. The pairing table, every row: metadata ahead of the record; the record ahead by one for the same account (`roll_forward`) and for a different subject or client (`inconsistent`); ahead by two; each side alone; an undecodable record, including a truncated Secret Service value. Write cuts after the record and before the metadata, on the file backend and on each keyring backend through its recording fake executable, for a same-account refresh and for a login of a different account over an existing one; a failed keyring read-back exits `credential_store_write_failed` with the metadata unchanged; `roll_forward` acted on only under the lock. **Separation before backend access:** each case builds the real sign-in context map over real temporary directories, the shape `LoopexCli.Home.sign_in_context/1` returns, with no test-only option or hook in the store; `Separation.check/1` passes on it, and the filesystem is then changed so the auth directory lies inside a listed root (a symbolic link replacing an ancestor of the auth directory) or contains one (the root's path created under it). `write/4` then returns `{:error, {:auth_root_overlap, pointer}}` with that root's pointer; the file backend creates no file, temporary or directory, and the keychain and Secret Service backends' recording fake executables record no invocation. A context of the wrong shape refuses the same way |
-| `apps/loopex_composition/test/sign_in_adc_test.exs` | A gcloud-shaped `authorized_user` fixture: restart rereads the file, refreshes and keeps the subject; an absent ID token on an unchanged grant keeps the subject; a response without `refresh_token` keeps using the file's; malformed files (missing member, wrong `type`, extra member, nested value, over-bound, symlink, other owner, group-writable, another `universe_domain`) are refused; a replaced file for the same account is adopted at the next generation without restart; a replaced file for another account is `sign_in_account_changed` with custody `nil`; a replaced file whose refresh returns no ID token is refused; a deleted file is `sign_in_required`; the refresh posts the file's own `client_id`, and a replaced file's ID token whose `aud` is not that `client_id` is `sign_in_failed` with custody `nil` and metadata unchanged; the refresher, given a sign-in context whose `protected_directories` names a temporary `G` while `HOME` names another directory holding a different ADC file, reads only `<G>/application_default_credentials.json`; `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are ignored; logout leaves gcloud's file untouched. **Delayed exchange:** the fake server holds a refresher's token response until the test releases it while another OS process runs `auth logout gemini`, then an `auth login gemini --source loopex` for another account, then a replaced file already recorded at a greater generation; after the release the first publishes nothing, recreates no metadata and leaves custody `nil`, the second leaves the other account's metadata byte for byte and custody `nil`, and the third writes nothing, leaves custody as it was and refreshes again on step 5's schedule; the released token never resolves from custody after a logout |
+| `apps/loopex_composition/test/sign_in_store_test.exs` | File backend: modes, owner, symlink refusal on `*.secret`, `*.json`, `*.floor` and `host-id`; stale `.tmp` cleanup; a refresh that creates the lock namespace under the process umask followed by a successful `Store.read/2` and `read_metadata/2`. **Read order:** a write completed between a `read/2`'s metadata and record reads, through a test-only gate under `Mix.env() == :test`, yields `roll_forward`. **Keyring bounds:** recording fake `security`, `secret-tool` and wrapper executables that never exit make each read, write, read-back and delete answer `credential_store_unavailable` within 5,000 ms plus scheduling slack, leave no child running and release the lock, and a refresher's write so bounded takes the pending-write path; every recorded child environment lacks each excluded credential name. **Backend or source change:** `sign_in/4` moving a route from `loopex` to `adc`, and from the keychain (or Secret Service) fake to `file`, leaves no record in the previous backend and writes above the floor; killed after its sign-out it leaves the route `:absent`, and killed after its record write `inconsistent`, each repaired by rerunning it with either store, after which no host backend holds another record. An `adc` metadata beside a record in any host backend, and a record with no metadata in any host backend, are `inconsistent`. **Floor:** a sign-out that finds neither side writes no floor; the floor's `client_id` is the greater-generation side's. Generation floor: its closed grammar, an invalid floor refused `credential_store_unsafe`, a sign-out writing the maximum generation and never lowering it, and the next write's generation above it. The metadata path never reads a secret, and `read_metadata/2` with metadata at or below the floor reports the route not signed in. The pairing table, every row: metadata ahead of the record; the record ahead by one for the same account (`roll_forward`) and for a different subject or client (`inconsistent`); ahead by two; each side alone; an undecodable record, including a truncated Secret Service value. Write cuts after the record and before the metadata, on the file backend and on each keyring backend through its recording fake executable, for a same-account refresh and for a login of a different account over an existing one; a failed keyring read-back exits `credential_store_write_failed` with the metadata unchanged; `roll_forward` acted on only under the lock. **Separation before backend access:** each case builds the real sign-in context map over real temporary directories, the shape `LoopexCli.Home.sign_in_context/1` returns, with no test-only option or hook in the store; `Separation.check/1` passes on it, and the filesystem is then changed so the auth directory lies inside a listed root (a symbolic link replacing an ancestor of the auth directory) or contains one (the root's path created under it). `write/4` then returns `{:error, {:auth_root_overlap, pointer}}` with that root's pointer; the file backend creates no file, temporary or directory, and the keychain and Secret Service backends' recording fake executables record no invocation. A context of the wrong shape refuses the same way |
+| `apps/loopex_composition/test/sign_in_adc_test.exs` | A gcloud-shaped `authorized_user` fixture: restart rereads the file, refreshes and keeps the subject; an absent ID token on an unchanged grant keeps the subject; a response without `refresh_token` keeps using the file's; malformed files (missing member, wrong `type`, extra member, nested value, over-bound, symlink, other owner, group-writable, another `universe_domain`) are refused; a replaced file for the same account is adopted at the next generation without restart; a replaced file for another account is `sign_in_account_changed` with custody `nil`; a replaced file whose refresh returns no ID token is refused; a deleted file is `sign_in_required`; the refresh posts the file's own `client_id`, and a replaced file's ID token whose `aud` is not that `client_id` is `sign_in_failed` with custody and metadata unchanged; the refresher, given a sign-in context whose `protected_directories` names a temporary `G` while `HOME` names another directory holding a different ADC file, reads only `<G>/application_default_credentials.json`; `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are ignored; `sign_out/3` leaves gcloud's file untouched. **Startup:** an absent file, `invalid_grant`, an `adc_invalid` file and a replaced file of another subject each refuse composition `provider_sign_in_required`, an unsafe file `credential_store_unsafe`, and an unreachable token endpoint starts with the route unavailable. **Delayed exchange:** the fake server holds a refresher's token response until the test releases it while another OS process runs `sign_out/3`, then `sign_in/4` writing another account's `loopex`-source pair, then a replaced file already recorded at a greater generation; after the release the first publishes nothing, recreates no metadata and leaves custody `nil`, the second leaves the other account's metadata byte for byte and custody `nil`, and the third writes nothing, leaves custody as it was and refreshes again on step 5's schedule; the released token never resolves from custody after a logout |
 | `apps/loopex_composition/test/sign_in_keychain_test.exs` | Tagged `:macos_keychain`, against a temporary keychain named through the test-only `:sign_in_test_keychain` key: round trip, overwrite, delete, and a maximum-size record (262,144 base64url bytes on one `security -i` line); the secret never appears in any spawned argv, checked through an argv-recording wrapper. A source check finds the keychain key read only under `Mix.env() == :test` |
-| `apps/loopex_composition/test/sign_in_secret_service_test.exs` | Tagged `:secret_service`, under `dbus-run-session` with a throwaway keyring: round trip and availability probe with the bus passed only through the context's `secret_service_bus`; a locked collection is unavailable within 5,000 ms. Untagged, a recording fake executable proves the wrapper's argv, standard-input bytes and child `DBUS_SESSION_BUS_ADDRESS` equal to the context value while the test VM's own variable names another address; a `nil` bus is unavailable without spawning; a composition whose metadata names `secret_service` with the backend unavailable refuses `credential_store_unavailable`; `auth login --store auto` over such metadata exits 69 and writes no file |
-| `apps/loopex_composition/test/sign_in_refresh_test.exs` | Refresh at the window, including a short `expires_in`. **Custody deadline**, through the real refresher and `CredentialCustody.resolve/1`: a fresh 30 s token from the fake server resolves `{:ok, _}` as soon as custody starts and is refreshed at 15 s; with the server then unreachable it still resolves until 22,500 ms after `t0` and `:expired` after it; **delayed response**: a 10 s token whose response the fake server delays by more than 7,500 ms after the request reaches it (so verification and the write finish after `t0` + 7,500 ms) enters custody past its deadline, `CredentialCustody.resolve/1` returns `:expired` on the first call, a model call on the route refuses before dispatch with no provider request carrying that token, and the refresher's next refresh is due at once, a repeated delay following step 5's transient schedule; a token with `expires_in` 9 is `sign_in_failed`, at login with nothing written and at refresh with nothing written and custody unchanged. A refresher whose context's auth directory is moved inside a listed root after start exchanges nothing and rotates custody to `nil`; rotation persisted; `invalid_grant` → `sign_in_required` and custody `:missing`; transient retry schedule; expiry while unreachable → `:expired` refusal. Two OS processes on one home perform exactly one exchange, the other adopting. Stale lock reclaim. Account change refused; same-account re-login adopted within 30 s; logout reaches custody `nil`. **Logout cut after its floor:** a running refresher, for a `loopex` route and for an `adc` route, holds a token outside its refresh window; `auth logout --local-only` in another OS process is killed immediately after its floor write, leaving the record and metadata byte for byte unchanged; within one 30 s poll `CredentialCustody.resolve/1` returns `:missing` and a model call on the route refuses `provider_sign_in_required` with no provider request, and the same holds while a third OS process holds the lock across the poll. **Failure written by another process:** a step 7 nomination that finds the held tuple at `state: sign_in_required`, written by another OS process, rotates custody to `nil` and stops the refresh schedule; a nomination refused `sign_in_lock_busy` is repeated at the next poll. **Different-account write cut:** a service running account A; `auth login` for B is killed after its record write; the service's next refresh exchanges nothing, writes nothing and rotates custody to `nil`, B's record bytes are unchanged, a new composition refuses `provider_sign_in_required`, `auth status` shows `sign_in_incomplete`, and rerunning the login repairs it. **Restart before metadata publication:** a refresh at which the fake server rotates and invalidates the old refresh token is killed after its record write; a restarted composition rolls the metadata forward and refreshes with the rotated token; the invalidated token is never presented again. Refresh-response rules: an OpenAI response without `refresh_token` fails with no write; a Google response without `refresh_token` or `id_token` keeps the prior refresh token and subject; a refresh-response ID token is never used for identity. **Write failure after exchange:** with the fake server rotating and invalidating the old refresh token and the store failing its write, custody resolves the new access token, the fake server sees no second exchange while the write is pending, each retry follows step 5's schedule and emits one `sign_in_store_write_pending` line naming the class and no token, the write succeeds once the store recovers at the next generation, and a refresher stopped before that leaves the route needing sign-in with the invalidated token never presented. **Lock busy:** a lock held by another OS process across a delayed 20,000 ms exchange makes the refresher's acquisition fail `sign_in_lock_busy` after 10,000 ms with no exchange, no write and custody unchanged, and its retry adopts the holder's record without contacting the provider. **Logout then login:** a running refresher reaches custody `nil` and stops its schedule after `auth logout`; `auth login` for the same account then writes a generation above the floor under the floor's client; the refresher adopts it within 30 s, resolves the new token and refreshes again at the next window. `chatgpt` model list refreshed after each refresh and adoption; a failed refresh-time listing keeps the previous list, never `null`, and names `sign_in_model_list_stale`; the **delayed listing** cases of [`chatgpt` model admission](#technical-adr-0073-model-admission). **Fenced publication of other delayed results**, each with the competing operation run in another OS process at the named point: a step 7 nomination followed, before the refresher takes the lock, by a logout, by a logout and a different-account login, and by a newer same-account login, adopting only the last and leaving custody `nil` in the first two; a pending write after a store failure followed by a logout, a logout killed after its floor write, a different-account login and a newer same-account login, the pending record discarded in all four, nothing recreated, custody `nil` in the first three and the newer generation adopted in the fourth; a pending write still published at the next generation over a `sign_in_required` state written at `G` by another process, over a Secret Service write of its own cut short (undecodable record, metadata at `G`), and, adopted after `roll_forward`, over its own keychain record left at `G + 1` by a failed read-back; a logout started while a refresher holds the lock across an exchange delayed 5,000 ms, after which custody holds the new token, then `nil` within 30 s, and the logout revokes the new refresh token; and the same with a 15,000 ms delay, where the logout exits 73 and deletes nothing. **Lock owner:** an exchange process that raises while `SignIn.Route` holds the lock leaves no lock, and another composition in the same VM then acquires it; an acquisition whose primitive call outlasts 10,000 ms returns `sign_in_lock_busy` and its late success is released. No retained output or diagnostic line contains a token the fake server issued |
+| `apps/loopex_composition/test/sign_in_secret_service_test.exs` | Tagged `:secret_service`, under `dbus-run-session` with a throwaway keyring: round trip and availability probe with the bus passed only through the context's `secret_service_bus`; a locked collection is unavailable within 5,000 ms. Untagged, a recording fake executable proves the wrapper's argv, standard-input bytes and child `DBUS_SESSION_BUS_ADDRESS` equal to the context value while the test VM's own variable names another address; a `nil` bus is unavailable without spawning; a composition whose metadata names `secret_service` with the backend unavailable refuses `credential_store_unavailable`; the wrapper runs `/usr/bin/head` by absolute path |
+| `apps/loopex_composition/test/sign_in_refresh_test.exs` | Refresh at the window, including a short `expires_in`. **Custody deadline**, through the real refresher and `CredentialCustody.resolve/1`: a fresh 30 s token from the fake server resolves `{:ok, _}` as soon as custody starts and is refreshed at 15 s; with the server then unreachable it still resolves until 22,500 ms after `t0` and `:expired` after it; **delayed response**: a 10 s token whose response the fake server delays by more than 7,500 ms after the request reaches it (so verification and the write finish after `t0` + 7,500 ms) enters custody past its deadline, `CredentialCustody.resolve/1` returns `:expired` on the first call, a model call on the route refuses before dispatch with no provider request carrying that token, and the refresher's next refresh is due at once, a repeated delay following step 5's transient schedule; a refresh answered with `expires_in` 9 is `sign_in_failed` with nothing written and custody unchanged. A refresher whose context's auth directory is moved inside a listed root after start exchanges nothing and rotates custody to `nil`; rotation persisted; `invalid_grant` → `sign_in_required` and custody `:missing`; transient retry schedule; expiry while unreachable → `:expired` refusal. Two OS processes on one home perform exactly one exchange, the other adopting. Stale lock reclaim. Account change refused; same-account re-login adopted within 30 s; logout reaches custody `nil`. **Logout cut after its floor:** a running refresher, for a `loopex` route and for an `adc` route, holds a token outside its refresh window; `sign_out/3` without revocation, in another OS process, is killed immediately after its floor write, leaving the record and metadata byte for byte unchanged; within one 30 s poll `CredentialCustody.resolve/1` returns `:missing` and a model call on the route refuses `provider_sign_in_required` with no provider request, and the same holds while a third OS process holds the lock across the poll. **Failure written by another process:** a step 7 nomination that finds the held tuple at `state: sign_in_required`, written by another OS process, rotates custody to `nil` and stops the refresh schedule; a nomination refused `sign_in_lock_busy` is repeated at the next poll. **Different-account write cut:** a service running account A; `sign_in/4` for B, in another OS process, is killed after its record write; the service's next refresh exchanges nothing, writes only `state: sign_in_incomplete` into A's metadata and rotates custody to `nil`, B's record bytes are unchanged, a new composition refuses `provider_sign_in_required`, `read_metadata/2` shows `sign_in_incomplete`, and rerunning `sign_in/4` repairs it. **Restart before metadata publication:** a refresh at which the fake server rotates and invalidates the old refresh token is killed after its record write; a restarted composition rolls the metadata forward and refreshes with the rotated token; the invalidated token is never presented again. Refresh-response rules: an OpenAI response without `refresh_token` fails with no write; a Google response without `refresh_token` or `id_token` keeps the prior refresh token and subject; a refresh-response ID token is never used for identity. **Write failure after exchange:** with the fake server rotating and invalidating the old refresh token and the store failing its write, custody resolves the new access token, the fake server sees no second exchange while the write is pending, each retry follows step 5's schedule and emits one `sign_in_store_write_pending` line naming the class and no token, the write succeeds once the store recovers at the next generation, and a refresher stopped before that leaves the route needing sign-in with the invalidated token never presented. **Lock busy:** a lock held by another OS process across a delayed 20,000 ms exchange makes the refresher's acquisition fail `sign_in_lock_busy` after 10,000 ms with no exchange, no write and custody unchanged, and its retry adopts the holder's record without contacting the provider. **Logout then login:** a running refresher reaches custody `nil` and stops its schedule after `sign_out/3`; `sign_in/4` for the same account and client then writes a generation above the floor; the refresher adopts it within 30 s, resolves the new token and refreshes again at the next window. `chatgpt` model list refreshed after each refresh and adoption; a failed refresh-time listing keeps the previous list, never `null`, and names `sign_in_model_list_stale`; the **delayed listing** cases of [`chatgpt` model admission](#technical-adr-0073-model-admission). **Fenced publication of other delayed results**, each with the competing operation run in another OS process at the named point, a logout being `sign_out/3` and a login `sign_in/4`: a step 7 nomination followed, before the refresher takes the lock, by a logout, by a logout and a different-account login, and by a newer same-account login, adopting only the last and leaving custody `nil` in the first two; a pending write after a store failure followed by a logout, a logout killed after its floor write, a different-account login and a newer same-account login, the pending record discarded in all four, nothing recreated, custody `nil` in the first three and the newer generation adopted in the fourth; a pending write still published at the next generation over a `sign_in_required` state written at `G` by another process, over a Secret Service write of its own cut short (undecodable record, metadata at `G`), and, adopted after `roll_forward`, over its own keychain record left at `G + 1` by a failed read-back; a logout, revoking through the fake server, started while a refresher holds the lock across an exchange delayed 5,000 ms, after which custody holds the new token, then `nil` within 30 s, and the logout revokes the new refresh token; and the same with a 15,000 ms delay, where the logout returns `sign_in_lock_busy` and deletes nothing. **Stop mid-exchange:** a composition stopped while its route's exchange is delayed 5,000 ms returns only after the write: the store holds the rotated token at the next generation, the lock is free, and a new composition refreshes with that token. **Lock owner:** an exchange process that raises while `SignIn.Route` holds the lock leaves no lock, and another composition in the same VM then acquires it; an acquisition whose primitive call outlasts 10,000 ms returns `sign_in_lock_busy` and its late success is released. No retained output or diagnostic line contains a token the fake server issued |
 | `apps/loopex_cli/test/auth_command_test.exs` (separation) | `auth login` exits 76 before any token write when the auth directory or the ADC directory and a selected state root overlap in either direction, with the context built by `LoopexCli.Home` from a temporary `HOME` and the selected file; a durable composition with an `oauth` binding and no context refuses `provider_sign_in_required` |
 | `apps/loopex_composition/test/credential_plane_test.exs` (extended) | A sign-in route's custody is registered like an `env` route. Two canaries (access and refresh) never appear in journals, public events, progress, diagnostics, traces, executor job environments or resource subprocess environments. An invocation during rotation uses exactly one token |
-| `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` (extended) | The `token_exchange` and `model_list` invocations: credential frame, bounds, closed failure classes, no raw body crossing, cleanup proof. The guardian's custody-phase producer of `provider_sign_in_required` and its `model_call_failed` counterparts, as [producing the reason](#technical-adr-0073-failure-reason) lists. The access-token echo guard withholds a reply containing the token |
-| `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. A login whose ID token fails verification writes nothing. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`, each leaving the floor. A login after logout authorizes under the floor's issued client. A login whose `model_list` fails writes no record, metadata or floor and exits 68 for a malformed, empty or over-bound list and 72 for a transport failure, timeout or non-2xx status (D25). The ADC metadata path |
-| `apps/loopex_cli/test/daemon_sign_in_test.exs` | Statuses 120 to 123, each refused start leaving no socket; a sign-in route absent, inconsistent or `sign_in_required` at startup refuses 120; start-on-demand presence check; revoked mid-service → next call `not_dispatched` with no fallback to another route, other routes still served, and the attached client's terminal outcome is `failed` with `provider_sign_in_required` and the `auth login` hint; re-login adopted and the next turn succeeds without restart; **logout then login** in sequence while the service runs: the next call after logout refuses `provider_sign_in_required`, and after a same-account login the service adopts the new generation within 30 s and the next turn succeeds without restart |
-| `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers exactly `Enum.to_list(65..125) -- [114]`, each status once; `fetch/1` refuses 114 |
+| `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` (extended) | The `token_exchange` and `model_list` invocations: their closed frames, the `adc` credential frame's two fields, bounds, the deadline with and without a key-set fetch, a `token_exchange` returning the fetched key set within its bound, closed failure classes, no raw body crossing, cleanup proof. The guardian's custody-phase producer of `provider_sign_in_required` and its `model_call_failed` counterparts, as [producing the reason](#technical-adr-0073-failure-reason) lists. The access-token echo guard withholds a reply containing the token |
+| `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. A login whose ID token fails verification writes nothing. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`, each leaving the floor. A login after logout authorizes under the floor's issued client. A login answered with `expires_in` 9 exits 68 with nothing written. `--store auto` over metadata naming an unavailable `secret_service`, through the recording fake, exits 69 and writes no file. `status` shows a route whose metadata is at or below its floor as not signed in and exits 75. `auth` runs with the launcher's crash-dump settings, as `ask` does. A login whose `model_list` fails writes no record, metadata or floor and exits 68 for a malformed, empty or over-bound list and 72 for a transport failure, timeout or non-2xx status (D25). The ADC metadata path |
+| `apps/loopex_cli/test/daemon_sign_in_test.exs` | Statuses 120 to 122, each refusing start and leaving no socket; 123 when the route edge exits while serving; a sign-in route absent, inconsistent or `sign_in_required` at startup refuses 120; start-on-demand presence check, including metadata at or below its floor; `loopex service stop` while an exchange is delayed 5,000 ms exits 0 after the rotated token is written, and a restart refreshes with it; revoked mid-service → next call `not_dispatched` with no fallback to another route, other routes still served, and the attached client's terminal outcome is `failed` with `provider_sign_in_required` and the `auth login` hint; re-login adopted and the next turn succeeds without restart; **logout then login** in sequence while the service runs: the next call after logout refuses `provider_sign_in_required`, and after a same-account login the service adopts the new generation within 30 s and the next turn succeeds without restart |
+| `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers exactly `Enum.to_list(65..125) -- [114]`, each status once; no class maps to 114 |
 | `apps/loopex_llm_reqllm/test/chatgpt_reply_ceiling_test.exs` | Through the fake server: a stream longer than the ceiling ends with completion `limit`, text whose `Loopex.Bounds.estimate/1` is at most the ceiling and is a prefix of what the server sent, a cut on a UTF-8 boundary, no tool calls, nil reported usage, and the server observing the connection closed; a stream that completes below the ceiling is unchanged; a ceiling of 1; a cut during a streamed tool call; the request body never contains `max_output_tokens`. Each case runs through both actual callers: the companion worker's `drain/5`, where the halt calls `StreamResponse.close/1` and no `StreamServer` or HTTP task survives the invocation, and the in-process caller through `OneShotHTTP1`, where the halt is followed by the owner's existing tagged-pool teardown proof before the result, and no progress delta is emitted. A source check finds one ceiling implementation, `ReplyCeiling`, called from both. **Raw-byte bound:** a stream longer than the ceiling whose SSE framing reaches 8,388,609 raw bytes while its estimate is still below the ceiling ends the in-process caller with `{:error, {:dispatched_or_unknown, "model_call_failed"}}` after the same teardown proof, while the same stream through the companion caller ends at the ceiling with completion `limit` |
 | `apps/loopex_composition/test/chatgpt_summarizer_test.exs` | A maintenance summary on a `chatgpt:` route through the fake server, with a summary longer than ADR 0043's ceiling, settles as a `limit` reply within the ceiling and is handled as any limit-truncated summary, once through a durable composition (companion caller) and once through an ephemeral composition's maintenance model (in-process caller) |
 | `apps/loopex/test/sign_in_required_settlement_test.exs` | `{:not_dispatched, "provider_sign_in_required"}` settles attempt one as `not_dispatched`, accounting `none`, next `terminal` with no retry; the run ends `failed` with that reason; the record replays. **Route availability changes between attempts:** attempt one settles `not_dispatched`/`model_call_failed` with `retry`, custody then becomes `:missing`, and attempt two settles terminal with `provider_sign_in_required`; the two-attempt history replays to the same terminal. **Termination precedence:** the category settled with an `abort` termination ends the run `cancelled` and with a `deadline` termination `bound_reached`, never `failed` with the reason, and each replays to the same terminal. The category with `dispatched_or_unknown`, accounting other than `none`, `next` other than `terminal`, or a termination other than abort or deadline is invalid history; a maintenance run reports the category |
 | `apps/loopex_protocol/test/sign_in_required_vectors_test.exs` | The new vectors encode and decode on `loopex.experimental/3` and `/4`; the reason with a nonnull `failure`, or as a failure category with `retryable` `true`, is refused; the regenerated manifests and schema proof match |
-| `apps/loopex_cli/test/ask_sign_in_test.exs` | Ephemeral `ask` on a sign-in route through the fake server; refresh in host VM; custody stopped at composition stop |
+| `apps/loopex_cli/test/ask_sign_in_test.exs` | Ephemeral `ask` on a sign-in route through the fake server; refresh in host VM; custody stopped at composition stop. With custody `:missing`, ephemeral `ask` reports `failed` with `provider_sign_in_required` in `loopex.ask/1` and in text with the `auth login` hint, exit 2; the cleanup owner admits the refusal and the session is not sealed. Durable `ask` reports the same through its follow reader |
+| `apps/loopex_cli/test/sign_in_route_lost_test.exs` | Killing the `SignIn.Route` in foreground chat, durable `ask` and ephemeral `ask` prints `loopex: sign_in_route_lost` and exits 1; the interrupted durable runs resume later |
+| `apps/loopex_composition/test/sign_in_model_admission_test.exs` | The admission cases of [`chatgpt` model admission](#technical-adr-0073-model-admission) |
 
 Release lanes for M8 outcome 8, attended, gated on each provider's client
 being available, run with `--only`:
@@ -1463,26 +1591,39 @@ being available, run with `--only`:
   a temporary home, whose model list, fetched before the login's write,
   must be recorded non-empty within its bounds and name the lane's model;
   one real `chatgpt:` conversation through the installed service; a forced
-  refresh; logout with revocation; then a second login under the generation
-  floor, which must authorize under the floor's issued client, write a
-  generation above the floor and record the list again. The lane also
-  records verification items 1 and 11 to 15.
+  refresh, made by stopping the service, setting `access_expires_at` to the
+  current time in both the temporary home's record and metadata with every
+  other byte and the `0600` mode kept, and starting the service, whose
+  startup refresh (refresher step 2) must succeed; logout with revocation;
+  then a second login under the generation floor, which must authorize under
+  the floor's issued client, write a generation above the floor and record
+  the list again. The lane also records verification items 11 to 15.
 - `real-sign-in-gemini`: the same for `vertex:`, `--store file` in a
   temporary home, through both the `loopex`
   and `adc` sources, against a maintainer-owned project. The `adc` part reads
   a file written by a real `gcloud auth application-default login`, and its
   login verifies a real Google ID token whose `aud` is that file's
-  `client_id`.
+  `client_id`; that part also records verification item 7. The lane has one
+  result and passes only when both parts pass. Without Loopex's Google
+  client it is unavailable, never passed by its `adc` part alone.
 - `real-sign-in-anthropic`: defined, and refused as `sign_in_unavailable`
   until a sanctioned registration exists. That tested refusal is the lane's
   complete proof for the disabled `claude:` route; M8 closure needs positive
   lanes for OpenAI and Google only, and no deferral for Anthropic.
 
-No lane names the login keychain or the user's Secret Service: the real
-provider lanes use the file backend in a temporary home, and the keyring
+A lane whose provider client is missing is deferred only by the maintainer
+before the closure candidate and is then left out of that candidate's pinned
+case list (D36); `real-sign-in-anthropic` is always present.
+
+No `real-sign-in-*` lane uses the login keychain or a user's Secret
+Service: they use the file backend in a temporary home, and the keyring
 backends are proved by the tagged `sign_in_keychain_test.exs` case against a
 temporary keychain and the tagged `sign_in_secret_service_test.exs` case
-under `dbus-run-session` with a throwaway keyring.
+under `dbus-run-session` with a throwaway keyring. An installed lane's
+removal step reads them only to prove that no Loopex item remains:
+`security find-generic-password -s loopex-oauth` in the attended
+`m8-operator` account and `secret-tool search application loopex-oauth` in
+the Linux installed lane.
 
 Complete outputs are retained outside the repository, with tokens redacted by
 the existing lane redactor, extended in two ways. It redacts every exact
@@ -1514,20 +1655,46 @@ Concept: [Amendments to accepted decisions](0073-provider-oauth-sign-in.md#conce
   live, and a different subject still needs restart. The compatibility
   section's deferral of "file credentials and live rotation" is narrowed
   accordingly.
-- **ADR 0019, Decision.** The credential sent over the private channel may be
-  a host-held access token. The companion admits two more invocation kinds,
-  `token_exchange` and `model_list`, under the same launch, isolation, bound
-  and cleanup rules. The 65,536-byte bound applies to each token.
-- **ADR 0034, Decision.** Unchanged in mechanism. A `SignIn.Route` edge is an
-  additional host owner that calls the custody's existing `rotate/3`. The
-  token-per-route, resolve-once-per-invocation and sender rules are
-  unchanged.
+- **ADR 0019, Decision and Technical depth, "One invocation, existing
+  authority".** The credential sent over the private channel may be a
+  host-held access token. "The private protocol has one version and closed
+  per-kind fields" gains two invocation kinds, `token_exchange` and
+  `model_list`, under the same launch, isolation and cleanup rules, with the
+  closed frames, bounds, deadline and cleanup period
+  [the companion executor](#technical-adr-0073-exchange) lists; they carry no
+  Control permit or Model request. The 65,536-byte bound applies to each
+  secret field of a credential frame, so an `adc` frame carries its refresh
+  token and client secret as two bounded fields.
+- **ADR 0034, Technical depth, its failure table.** The row "Custody answers
+  `{:error, :missing}` or `{:error, :expired}` | … the guardian maps it to
+  ADR 0019's existing generic credential-send failure and tears the child
+  down. No ADR 0029 terminal or public diagnostic gains the atom" is amended
+  for a `:sign_in` route: the guardian answers `:missing` with
+  `{:error, {:not_dispatched, "provider_sign_in_required"}}` after the same
+  teardown, and the run terminal carries that reason, never the atom.
+  `:expired`, and both answers on any other route, keep the row. Otherwise
+  unchanged in mechanism: a `SignIn.Route` edge is an additional host owner
+  that calls the custody's existing `rotate/3`, and the token-per-route,
+  resolve-once-per-invocation and sender rules are unchanged.
 - **ADR 0039, Decision point 3**, "each hosted provider has its own variable,
   read at the model boundary for each call". Amended: a sign-in route resolves
-  from composition-owned custody at the model boundary for each call. Its
-  refresh runs in the host VM under the profile's stated audience. The
+  from composition-owned custody at the model boundary for each call. The
   in-process caller streams a `chatgpt` reply through the existing one-shot
   adapter and tagged pool, so the profile's cleanup proof is unchanged.
+- **ADR 0039, Concept, "Public Admission and Packaging Contracts", row
+  "Model failure"**, "Proved pre-call refusal is fixed `model_call_failed`
+  with `not_dispatched`", and Technical
+  depth, "Error classes", which counts a missing credential among the clean
+  `{:not_dispatched, "model_call_failed"}` refusals. Amended: on a sign-in
+  route, custody `:missing` is the proved pre-call refusal
+  `{:not_dispatched, "provider_sign_in_required"}`, which the cleanup owner
+  admits as it admits a pre-adapter `model_call_failed`; `:expired` stays
+  `model_call_failed`.
+- **ADR 0039, host-VM credential audience.** By the maintainer's D37,
+  refresh tokens, ID tokens and the authorization-code exchange may also live
+  in this profile's host VM and in the `auth` command's VM, beyond the
+  selected provider credential the profile's vision amendment covers. The
+  launcher disables crash dumps for `auth` as for `ask`.
 - **ADR 0029, Concept, "Purpose and Decision".** "The public Model result
   remains `dispatched_or_unknown` with `"model_call_failed"`." And Technical
   depth, "Core still receives exactly
@@ -1557,6 +1724,12 @@ Concept: [Amendments to accepted decisions](0073-provider-oauth-sign-in.md#conce
   termination or an abort or deadline termination, has conversation `none`,
   accounting source `none` and next `terminal`, never `retry`. Every other
   combination with the category is invalid history.
+- **ADR 0018, Technical depth, "Abort, deadline, and recovery".** "exact
+  not-dispatched retries once then fails uncharged if the second attempt
+  also refuses" stays exact for `model_call_failed`. A `not_dispatched`
+  `provider_sign_in_required`, on either attempt, never retries: it fails
+  the run uncharged with that reason, unless an abort or deadline has
+  already won.
 - **ADR 0021, Technical depth, "Exact schema".** "Normal reply and
   model-failure results remain exactly: … `%{"kind" => "error",
   "category" => "model_call_failed"}`". Amended: the model-failure result is
@@ -1567,6 +1740,10 @@ Concept: [Amendments to accepted decisions](0073-provider-oauth-sign-in.md#conce
   "`{category: "model_call_failed", retryable: false}`" is joined by
   `{category: "provider_sign_in_required", retryable: false}`, for
   run-owned and standalone episodes alike. The other members are unchanged.
+- **ADR 0049, Technical depth, "Closed terminal schema".** "Failure retains
+  exactly the existing alternatives: `reason` is `model_call_failed` or
+  `unreadable_model_answer` with null `failure`" is amended: `reason` may
+  also be `provider_sign_in_required`, with null `failure`.
 - **ADR 0049, Technical, file contract.** The `providers` row, "durable chat
   requires `{"credential":{"env":"NAME"}}`", is amended: durable chat also
   accepts `{"credential":{"oauth":{"source":...}}}` on a sign-in route. Schema
@@ -1574,9 +1751,9 @@ Concept: [Amendments to accepted decisions](0073-provider-oauth-sign-in.md#conce
   `claude`, the `oauth` credential form, and the `vertex` route's `project`
   and `location` members, each under the closed grammar above. The schema
   version stays 1; the closed-object rule is unchanged.
-- **ADR 0037 (Proposed).** "File/keychain/command credentials require a
-  separate future decision" becomes: sign-in tokens follow ADR 0073; file and
-  command API-key sources still need a separate decision.
+- **ADR 0037 (Proposed).** Its concept states that provider sign-in tokens
+  follow this record and that file, keychain and command sources for API
+  keys remain a separate future decision.
 
 <a id="technical-adr-0073-verification"></a>
 ### Research Record and Verification Items
@@ -1626,11 +1803,11 @@ lane that settles it, and the design above does not depend on the answer.
 
 | # | Item | Disposition |
 | --- | --- | --- |
-| 1 | Whether an OpenAI refresh immediately invalidates the previous refresh token | Implementation. The design assumes it does (lock, read-back, `roll_forward`). The `real-sign-in-openai` lane's forced refresh records whether the prior token is then refused; `sign_in_refresh_test.exs` already proves the worst case |
-| 2 | Whether OpenAI requires a partner client ID rather than dynamic registration | Acceptance: the maintainer's confirmation under [open item 1](0073-provider-oauth-sign-in.md#concept-adr-0073-open). A partner client would amend this record |
+| 1 | Whether an OpenAI refresh immediately invalidates the previous refresh token | None needed. The design assumes it does (lock, read-back, `roll_forward`), and `sign_in_refresh_test.exs` proves that worst case; no product path presents a rotated-away token to learn the answer |
+| 2 | Whether OpenAI requires a partner client ID rather than dynamic registration | Implementation, gating `real-sign-in-openai`: the maintainer's confirmation under [open item 1](0073-provider-oauth-sign-in.md#concept-adr-0073-open) precedes that lane. A partner client would amend this record |
 | 3 | A documented allowed-model list for plan usage | Implementation. Only the per-account listing is documented and is what the route uses, through `model_list`; `sign_in_routes_test.exs` refuses an unlisted model with `provider_route_unavailable` |
 | 4 | An official OpenAI statement of the launch date | None needed. No rule depends on the date; it is research context only |
-| 5 | Whether Google classifies `cloud-platform` as sensitive or restricted | Acceptance: decided with [open item 2](0073-provider-oauth-sign-in.md#concept-adr-0073-open). It sets the Google client's verification path, not code; the `adc` source does not depend on it |
+| 5 | Whether Google classifies `cloud-platform` as sensitive or restricted | Implementation, gating `real-sign-in-gemini`: decided with [open item 2](0073-provider-oauth-sign-in.md#concept-adr-0073-open) before that lane. It sets the Google client's verification path, not code; the `adc` source does not depend on it |
 | 6 | Google's stated access-token lifetime | Implementation. The refresher reads `expires_in`, assumes no fixed value and scales the custody skew with it; `sign_in_refresh_test.exs` covers a 30 s lifetime and one below the 10 s minimum |
 | 7 | The ADC `authorized_user` member names, and that gcloud's default login grants `openid` | Implementation. `sign_in_adc_test.exs` fixes the grammar; the `real-sign-in-gemini` lane reads a file written by real gcloud and must pass the grammar and return a verifiable ID token. A difference amends the grammar, never silently widens it |
 | 8 | The regional Vertex host form | Acceptance, checked 2026-10-13: Google's Vertex AI [locations](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) page gives `https://{LOCATION}-aiplatform.googleapis.com` beside the global `https://aiplatform.googleapis.com` |
