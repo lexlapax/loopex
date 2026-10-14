@@ -186,7 +186,7 @@ is one plain map with exactly five members:
   before any write, and is never rebuilt from ambient state. The command
   passes it inward as a host option: `auth` to the store calls it makes;
   foreground chat and durable and ephemeral `ask` to
-  `LoopexComposition.CredentialHost.open/3`, and the daemon to its service,
+  `LoopexComposition.CredentialHost.open/4`, and the daemon to its service,
   which hand it unchanged to each `SignIn.Route` refresher they start. A
   refresher keeps the context it received for
   its whole life. `HOME` and the selected roots cannot change inside a

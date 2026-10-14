@@ -475,7 +475,7 @@ VM holds refresh and ID tokens only in sensitive processes while the
 isolated provider process makes its sign-in requests, that the host's
 sign-in store, not runtime state, keeps sign-in tokens, and that crash dumps
 are disabled for `ask` and `auth`. The maintainer decided the same day
-(D56) that the same acceptance qualifies, together, four related passages
+(D56) that the same acceptance qualifies, together, five related passages
 of the technical vision and the vision's sentence that credentials remain
 host-owned references, which say that credentials are persisted only as
 references and resolved just in time: each gains that the installed host,

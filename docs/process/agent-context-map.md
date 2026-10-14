@@ -8370,4 +8370,21 @@ and M8 remains Open.
    were all skipped counting as the first; D54's `--config` flag on `ask`, a
    malformed discovered file failing `ask` as `command_failed`, and an
    ephemeral `ask` without a usable `HOME` selecting no file; D49's torn
-   bytes recorded by offset and length in the ended index.
+   bytes recorded by offset and length in the ended index; with no
+   `LOOPEX_PROVIDER_API_KEY`, D57 leaving the single-credential bindings
+   out, and ephemeral `ask` adding the reference routes of every compiled
+   provider; D58's hint text and `CredentialHost.open/1` dropping `oauth`
+   bindings; the NUL-joined `adc` credential and its combined-size rule;
+   `:raw` file writes; the route keeper's `try` and link; the test-seam
+   names `LOOPEX_TEST_SIGN_IN_ROUTE_EXIT` and `:sign_in_test_route_module`;
+   `ProviderConfiguration.validate_routes/1` admitting sign-in routes; the
+   111 line `configuration_invalid <subclass> <pointer>`; the daemon's
+   quiesce bounded at the deadline minus the base `teardown_ms`; routes
+   stopped first in startup cleanup, within 5,000 ms; an unusable
+   `--socket` refused `invalid_socket_path` (89); adopt's step 11 refusing
+   `root_changed` when manifest C holds an entry under that ledger's
+   `open/`; the `FILE.ended` marker and `attempt_campaign_superseded`; and
+   `Interrupt.halt_owning_nothing/2`. D58 cannot arise through a selected
+   file for `run`, `resume` or `skill`, which never select one (their
+   `--config` requires `--service`); it holds for a binding reached through
+   composition's `:provider_bindings` (`loopex_cli.ex:1795-1803`).
