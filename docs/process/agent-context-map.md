@@ -8171,3 +8171,39 @@ remains Open.
 5. **Verification count.** The plan names ADR 0073's sixteen verification
    items, and its `real-sign-in-openai` row includes the logout-then-login
    step under the generation floor and the model-list assertion.
+
+<a id="disposition-m8-readiness6-2026-10-14"></a>
+### M8 readiness review 6 answered — 2026-10-14
+
+External readiness review 6 at `7b4293a6` found N17 (P1) and N18 to N22
+(P2); an internal review of the fixes followed. The maintainer decided D27,
+D28 and D29 on 2026-10-14 and kept D18's single serenity writer; the other
+items were fixed without a new decision. All five prerequisite ADRs remain
+Proposed and M8 remains Open.
+
+1. **Separation is a path rule (D27).** It supersedes D19, D21, the walk
+   guard, ADR 0072's third ADR 0051 amendment and every mount, overlay,
+   FUSE and identity rule of the earlier dispositions, which stay true for
+   the revisions they name. N17 is closed by the removal; F4, N7, N15 and
+   N16 are superseded. Mounts and paths changed during a command are a
+   stated operator limit
+   ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)).
+2. **Format numbering (D28).** Any durable shape change needs a new format
+   number in any release; the format is pinned by a committed fixture root
+   decoded by the real codecs, with the residual stated (N22)
+   ([ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept)).
+3. **Job index (D29).** `Restore.restore/2` leaves the disposable helper job
+   index out of its audit index; `restore/3` is dropped.
+4. **Service start (N18).** A daemon-written `log/service-<pid>.id` record,
+   matched to the lock holder's incarnation and socket, replaces the
+   pending files of the [final pass](#disposition-m8-final-pass-2026-10-14)'s
+   items 1 and 4. A failed record write starts the service unrecorded.
+5. **Release evidence (N19).** The macOS lanes are recorded by the
+   `serenity` writer over SSH, joined to the `serenity` matrix; a consumed
+   failure ends the campaign and the next candidate creates a new one.
+6. **Sign-in fences (N20).** One fence rule governs every result published
+   after an unlocked wait.
+7. **Adoption lane (N21).** Offline `sessions` lists the conversation; a
+   read-only audit checks the uncatalogued helper child.
+8. **Delivered defect.** `Placement`'s owner probe runs under `TZ=UTC0`;
+   W1 owns the fix.
