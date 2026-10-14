@@ -89,7 +89,8 @@ other. A violation refuses `auth_root_overlap` before anything is written.
 Separation is how ADR 0072's backups and restores stay token-free: ADR
 0051's complete manifest keeps every file in the root, and nothing is
 excluded from it, the ADC file included. By the maintainer's decision D27 of
-2026-10-14 the comparison of these paths is the whole rule: no mount table is
+2026-10-14 the comparison of these paths, with the marked-ancestor rule
+below, is the whole rule: no mount table is
 read on either host and no walk examines mounts or compares what it meets
 with the protected directories. The
 [operator limit](#technical-0037-operator-limit) states what stays outside.
@@ -251,9 +252,13 @@ under the missing-component rule. Credential storage made reachable inside
 such a path by a mount of any kind (bind, overlay, FUSE, network or virtual
 filesystem, or a mount inside the walked tree) is not detected and is
 outside the guarantee; so is a credential file the operator copies into a
-root, which is ordinary root content. The operator-facing statement of that
-limit is: do not mount credential storage into or over a Loopex state root,
-backup or restore destination.
+root, which is ordinary root content. The check runs when the command
+starts; a path that another process changes while the command runs, for
+example an ancestor replaced by a symbolic link, is concurrent mutation of
+the operator's paths and outside the guarantee in the same way. The
+operator-facing statement of that limit is: do not mount credential storage
+into or over a Loopex state root, backup or restore destination, and do not
+change those paths while a store command runs.
 
 Inside a walked tree the delivered walk refuses links without any separation
 input. ADR 0051's manifest walk, `Restore.IO`'s `manifest_entry/3`
@@ -277,7 +282,7 @@ process of the command:
 | `loopex daemon`, with or without `--config` (`LoopexCli.Daemon`, before `LoopexDaemon.Command` starts the service) | The selected state root | The same |
 | `service start` and every on-demand start (`ServiceStart` `select`) | The selected state root, before `probe` | The same |
 | `config set` and `config unset` (candidate validation) and `init` | The candidate's resolved `paths.state_root` | `/paths/state_root` |
-| `store adopt`, `store backup`, `store restore` | The selected root, `BACKUP` and `DESTINATION`, in the context `LoopexCli.Home` builds when the command's configuration is resolved, before the first read of any of them. Backup's staging directory is a new, empty child of `BACKUP`'s parent and holds no protected directory; it could lie inside one only if `BACKUP` did, which this check refuses. For `store restore --source available`, and for a `--resume` whose retained plan has `source_status` `available`, `StoreAdmin.restore/3` appends the source the capture names and calls `Separation.check/1` again immediately after its check 1 decodes `BACKUP/capture`, before it reads `BACKUP/manifest`, walks `BACKUP/state` or reads any path of the source. A lost source is required absent and is never walked or written, so it is not checked | The root's origin; `/arguments/backup`; `/arguments/destination`; `/capture/source_state_root` |
+| `store adopt`, `store backup`, `store restore` | `store adopt` and `store backup`: the selected root, and `BACKUP`; `store restore`, which selects no configuration: exactly `BACKUP` and `DESTINATION`. Each in the context `LoopexCli.Home` builds when the command starts, before the first read of any of them; `--resume` then requires those paths to equal the retained plan's (ADR 0072). Backup's staging directory is a new, empty child of `BACKUP`'s parent and holds no protected directory; it could lie inside one only if `BACKUP` did, which this check refuses. For `store restore --source available`, and for a `--resume` whose retained plan has `source_status` `available`, `StoreAdmin.restore/3` appends the source the capture names and calls `Separation.check/1` again immediately after its check 1 decodes `BACKUP/capture`, before it reads `BACKUP/manifest`, walks `BACKUP/state` or reads any path of the source. A lost source is required absent and is never walked or written, so it is not checked | The root's origin; `/arguments/backup`; `/arguments/destination`; `/capture/source_state_root` |
 | `auth login`, `auth logout` and every other ADR 0073 command that writes `A` | The state root its own selection names, when a file is selected, else no root; the marked-ancestor rule always | The root's origin, or `/auth` for a marked ancestor |
 | A process that starts an ADR 0073 refresher (foreground chat, durable and ephemeral `ask`, daemon) | Covered by its row above, which builds the sign-in context. The refresher receives that context at start, writes only `A`, and re-runs `Separation.check/1` on it before every exchange and every write | The failing root's pointer; the refresher exchanges and writes nothing |
 | Ephemeral `ask` | Nothing: its root is a fresh temporary directory, never selected | — |

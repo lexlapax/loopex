@@ -142,6 +142,8 @@ leaving files out of a backup, and it does so by comparing paths:
 - The walk that copies or verifies a root still refuses every symbolic link
   and every file with a second hard link inside it, as ADR 0051's manifest
   always has, so a link placed inside a root cannot reach a credential file.
+  The checks run when a command starts; changing those paths while a store
+  command runs is outside the guarantee, like a mount.
 - The installed host's home module owns the rule and decides which paths each
   command checks. It checks before any token is written, any root is created
   or opened, and before `store adopt`, `store backup`, `store restore`,
@@ -155,7 +157,8 @@ leaving files out of a backup, and it does so by comparing paths:
   marked state root.
 - The home module hands the checked protected directories and the exact roots
   it checked to the sign-in token store and its background refreshers. They
-  repeat the same check on those paths immediately before every token write,
+  repeat the same check on those paths immediately before every token
+  exchange and every token write,
   never find a root of their own, and refuse a path that changed after
   startup, such as a new symbolic link. The same handoff carries the
   session-bus address the Linux keyring needs, which the home module reads
