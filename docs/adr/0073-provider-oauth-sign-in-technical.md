@@ -1505,8 +1505,8 @@ reaching the operator:
   (`durable_ask/follow_reader.ex` :345-350);
 - the Node client's `clients/node/terminal-outcome.mjs` :49 and
   `clients/node/compact-result.mjs` :52;
-- the in-process cleanup owner, as [the ephemeral
-  profile](#technical-adr-0073-decision) states.
+- the in-process cleanup owner, as
+  [the ephemeral profile](#technical-adr-0073-decision) states.
 
 **Client-visible behavior.**
 
