@@ -233,8 +233,13 @@ loopex store adopt --old-writer stopped [--config FILE] [--state-root DIR] [--wo
 
 `--old-writer` is required and accepts only `stopped`: the operator's
 statement that no process of the build that wrote the root, typically the M7
-source build, is running or will start until adopt exits. That build does not
-read the marker, so the statement is its only fence. A missing or other value
+source build, is running or will start until adopt exits. The delivered M7
+daemon and CLI hosts take the same `STATE_ROOT/placement.lock`
+(`LoopexDaemon.Service.acquire_placement/1` and `LoopexCli`'s foreground
+starts call `Placement.acquire/2`), so they are excluded while adopt holds
+it. That build does not read the marker, so the statement is its only fence
+once adopt releases the lock, and against an embedded or non-cooperating host
+that takes no lock. A missing or other value
 refuses `attestation_required` before any check, with nothing written. The
 root and workspace are selected exactly as ADR 0037 selects them for the
 service (`--state-root` > `LOOPEX_HOME` > the configuration file's
@@ -305,7 +310,13 @@ releases it on every exit after step 4, success or refusal.
    the lock file, which ADR 0051's `nlink` rule would refuse. Every other
    entry, rule and encoding is ADR 0051's. A includes the `adopting` marker
    entry. The manifest's own caps apply: 65,536 entries and 4 MiB encoded;
-   beyond them refuse `inventory_limit_exceeded`.
+   beyond them refuse `inventory_limit_exceeded`. The walk applies ADR
+   0037's [physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
+   with the protected identities `Separation.identities/1` stats from the
+   command's sign-in context at the start of the walk: a walked directory
+   with the identity of a protected credential directory refuses
+   `auth_root_overlap` with the root's pointer, leaving `adopting` and
+   releasing the lock.
 9. Inventory and audit: `Restore.IO.run({:root_inventory, root, A,
    workspace_ref, :adopt}, limits)`. This runs ADR 0051's
    `Restore.Audit.complete/4` over the live root path with a draft plan whose
@@ -319,8 +330,8 @@ releases it on every exit after step 4, success or refusal.
    generation, marker, open entry and receipt, every artifact use and object,
    every resource record and every helper object and log. It stops at the
    first failure, which refuses with its inventory code.
-10. Final manifest C by the same operation; require C = A byte for byte, else
-    `root_changed`.
+10. Final manifest C by the same operation, with the same identity check;
+    require C = A byte for byte, else `root_changed`.
 11. **Commit.** Write a marker temporary holding the `current` bytes
     (Publication step 2), read the marker and require the exact `adopting`
     bytes (else `root_changed`), then `rename(temporary, marker)`, which
@@ -380,11 +391,16 @@ committed current root. Two adopters overlap only up to step 4: exactly one
 holds the lock, and the other refuses `root_held` or, once the first has
 committed and released, reports `already marked` at step 5.
 
-A process of the build that wrote the root does not read the marker and is
-not bound to this build's placement lock, so `--old-writer stopped` remains
-its only fence. Such a writer during the audit is detected by C ≠ A; one after
-the rename writes to a committed root and is exactly what the statement
-excludes. `doctor` reports `marker: adopting` for every root left in that
+The delivered M7 daemon and CLI hosts take this same placement lock through
+the same `Placement.acquire/2` and lock file, so while adopt holds the lock
+an M7 start is refused `placement_active` like a `0.5.0` start. The
+`--old-writer stopped` statement remains required because the M7 build does
+not read the marker: once adopt releases the lock, after a refusal or kill
+that leaves `adopting` or after the commit, an M7 process can open the root;
+and an embedded or other non-cooperating host, or a lockless M7 path such as
+`cancel`, never takes the lock. Such a writer during the audit is detected by
+C ≠ A; one after the release writes to a root the statement says no old
+process will touch. `doctor` reports `marker: adopting` for every root left in that
 state.
 
 <a id="technical-adr-0072-backup"></a>
@@ -405,8 +421,14 @@ statement excepted). `BACKUP` is required.
 complete manifest; it excludes nothing. Provider sign-in tokens stay out of
 the copy because ADR 0037's
 [separation invariant](0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation)
-keeps the token directory physically outside every state root, not because
-backup filters files. The disposable job-index cache removed at step 6 is
+keeps the protected credential directories, the sign-in directory and
+gcloud's Application Default Credentials directory, physically outside every
+state root, not because backup filters files. ADR 0037's
+[physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
+runs in every walk below: manifest A at step 7, the copy at step 8 and
+manifests B and C at step 9, each comparing every directory it encounters
+with the identities `Separation.identities/1` stats from the command's
+sign-in context at the walk's start. The disposable job-index cache removed at step 6 is
 deleted from the source before the manifest, not left out of the copy.
 
 **Layout.**
@@ -485,7 +507,10 @@ same bytes have distinct cuts.
    the replayed Store. `prior_lineage_sha256` is
    `RestoreCodec.lineage_digest/1` of A's `.loopex-restore` and
    `restore-lineage` entries. The source placement is the root's physical
-   path with `major_device` and `inode` from `File.lstat/1`.
+   path with `major_device` and `inode` from `File.lstat/1`. A walked
+   directory with a protected identity refuses `auth_root_overlap` with the
+   root's pointer here, before the staging directory exists, so no copied
+   file is written.
 8. Stage `BACKUP`'s parent `/.NAME.loopex-backup-HEX32` (mode `0700`) and run
    `Restore.IO.run({:backup_copy, root, STAGING/state, A}, limits)`. It creates
    directories top-down at `0700`, copies each regular entry with the existing
@@ -559,8 +584,11 @@ lost source; ADR 0051 notes that a backup hash does not prove latestness.
 1. Read `BACKUP/capture`; decode and re-encode it exactly
    (`backup_invalid`). Read `BACKUP/manifest`; its SHA-256 must equal the
    capture's (`backup_changed`). Manifest of `BACKUP/state` must equal those
-   bytes (`backup_changed`). `RootFormat.check(BACKUP/state)` must be
-   `:current` (its code otherwise).
+   bytes (`backup_changed`); that walk applies ADR 0037's
+   [physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
+   and a protected identity refuses `auth_root_overlap` with pointer
+   `/arguments/backup`. `RootFormat.check(BACKUP/state)` must be `:current`
+   (its code otherwise).
 2. Destination: absent, or an existing empty directory (`destination_not_empty`);
    parent an existing directory; destination, `BACKUP`, the source path and
    the workspace pairwise distinct and nonnested, with symlink-free existing
@@ -642,7 +670,21 @@ that later work was deliberately discarded; they stay beside the backup.
    `backup_write_failed` and leaves no destination change.
 2. Create `DESTINATION` at `0700` if absent and `fsync` its parent. ADR 0051's
    copy then sets the root's exact backed-up mode.
-3. Call `LoopexComposition.Restore.restore(plan, invocation)` once.
+3. Call `LoopexComposition.Restore.restore(plan, invocation)` once, with
+   the protected identities as a host-private option of the call, outside the
+   plan and invocation maps. ADR 0051's transition passes them to every
+   manifest walk it makes of `BACKUP/state` and `DESTINATION`, including the
+   destination manifest it compares after the copy and before its commit.
+   ADR 0051's closed vocabulary is unchanged: a protected identity stops that
+   walk as an `io_error`, which the transition reports as `not_committed`
+   `inventory_unavailable` before possible intent and as a `commit_unknown`
+   observation with reason `io_error` after it, and in both cases the
+   destination is not committed. On either result the command repeats the
+   identity check read-only over `BACKUP/state` and `DESTINATION` and, when
+   it finds a protected identity, prints `auth_root_overlap` with
+   `/arguments/backup` or `/arguments/destination` before the outcome lines
+   below; the exit status is the table's. A `--resume` repeats the check and
+   refuses again until the mount is gone.
 
 **Output by outcome.**
 
@@ -762,6 +804,7 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `old_writer_running`, `previous_restore_running` | restore | A live holder or earlier restore process | Stop it |
 | `source_absent`, `source_not_absent` | restore | Path contradicts `--source` | State the true branch |
 | `destination_not_empty`, `destination_path_invalid` | restore | Destination rules | Choose a new empty directory |
+| `auth_root_overlap` | backup, adopt, restore | ADR 0037: the root, `BACKUP` or `DESTINATION` overlaps a protected credential directory by path, or a walk met a directory with a protected directory's identity; names the pointer | Select a separate path, or remove the mount that places credential storage in the root |
 | ADR 0051 refusal codes | restore | Passed through verbatim from `{:not_committed, refusal}` | As the operator runbook's outcome table says |
 | `root_changed` | adopt | Root changed between the audit manifest and the final manifest, or a marker appeared at the fence; the marker is left `adopting` or as found | Stop other processes; run `doctor`; rerun adopt |
 
@@ -794,9 +837,9 @@ own manifest.
 | `apps/loopex_cli/test/store_marker_entrypoints_test.exs` | For `run`, `resume`, `cancel`, `skill`, `chat`, durable `ask`, `sessions` and `artifact`: an M7-shaped unmarked root, a root with only `sessions/`, an `adopting` marker, an unknown marker and an unreadable marker each exit 1 with the named code and leave the root unchanged; `sessions` on an absent root creates nothing |
 | `apps/loopex_daemon/test/daemon_root_format_test.exs` | Daemon start exits 116, 117, 118, 119 and 124 for the five codes with the root unchanged, no socket, and the fatal line naming the class |
 | `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` maps every status from 65 to 124 except 114 exactly once and none to 114; its assertion grows from `65..110` to that list (ADR 0071, this record and ADR 0073) |
-| `apps/loopex_composition/test/store_adopt_test.exs` | A root built by the current code with its marker removed is adopted and differs only by the marker; idempotent second run writes nothing; job-index caches tolerated and left; without `--old-writer stopped`, `attestation_required` with no write; refusals with no write for a retired catalogue, a live lock (`root_held`), a writer marker, a helper writer marker and a restore claim, each releasing adopt's lock; a stale lock of a dead incarnation reclaimed at step 4 and the root adopted with no lock left; manifests A and C omit exactly `placement.lock` and the `placement.lock.*` entries and include everything else; audit refusals for a corrupt frame, a torn tail, a session with an unknown record kind (session named), a receipt without its marker, a missing artifact object and a workspace mismatch, each leaving only the `adopting` marker added and the lock released; an old-build writer simulated by a test process that takes no placement lock, appending a valid Store frame and creating a file at a private hook after the `adopting` publication and before manifest A (the write is audited and the root adopted) and after manifest A (`root_changed`, marker `adopting`, lock released); real exclusion at private hooks that pause adopt: `Placement.acquire/2` and a real daemon start attempted immediately after the `adopting` publication are refused (`root_adopting`, daemon exit 124) with the root and the lock unchanged, and attempted immediately after the rename, before the release, are refused `placement_active` (daemon exit 76) and admitted, the daemon serving, only after adopt releases; two adopters started together on one unmarked root, one paused while holding the lock: exactly one reaches the fence and commits, and the other refuses `root_held` with nothing written or, started after the release, reports `already marked`; kill after step 4, after the step 7 link, after manifest A, during the audit, after the rename and before the release: before the rename the root is left `adopting` (or unmarked before the link) with a stale lock, and after it `current`; after every cut whose root is left `adopting`, `admit/1`, `Placement.acquire/2`, `compose/1`, `store backup` and `store restore` with that root as source refuse `root_adopting` with the root unchanged, `report/1` says `adopting`, and a rerun of adopt reclaims the stale lock and repeats the full audit (observed by its decode count) before reaching `current`; after the cut following the rename, the next `Placement.acquire/2` reclaims the stale lock and serves the root, and adopt reports `already marked`; in every successful run the marker becomes `current` only by the rename, while adopt holds the lock and after C = A |
-| `apps/loopex_composition/test/store_backup_test.exs` | Backup of a closed root with sessions, receipts, artifacts, resources, a helper namespace and earlier restore lineage: `state/` equals an independent walk of the source; capture fields equal an independent derivation; refusals for held, stale, writer-marker, helper-marker, claim, unmarked, existing, nested and symlinked targets, a changed workspace and 65,537 entries; a source write during the copy gives `source_changed` and no `BACKUP`; kill during copy, before rename and after rename leave no `BACKUP` or a complete one; job-index removal is the only source change |
-| `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; kill at each ADR 0051 phase, then `--resume` reaching committed with the same plan bytes; `previous_restore_running`; an edited plan file gives `restore_conflict`. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged |
+| `apps/loopex_composition/test/store_adopt_test.exs` | A root built by the current code with its marker removed is adopted and differs only by the marker; idempotent second run writes nothing; job-index caches tolerated and left; without `--old-writer stopped`, `attestation_required` with no write; refusals with no write for a retired catalogue, a live lock (`root_held`), a writer marker, a helper writer marker and a restore claim, each releasing adopt's lock; a stale lock of a dead incarnation reclaimed at step 4 and the root adopted with no lock left; manifests A and C omit exactly `placement.lock` and the `placement.lock.*` entries and include everything else; audit refusals for a corrupt frame, a torn tail, a session with an unknown record kind (session named), a receipt without its marker, a missing artifact object and a workspace mismatch, each leaving only the `adopting` marker added and the lock released; a non-cooperating old-build writer (an embedded host or lockless path, as `--old-writer stopped` covers) simulated by a test process that takes no placement lock, appending a valid Store frame and creating a file at a private hook after the `adopting` publication and before manifest A (the write is audited and the root adopted) and after manifest A (`root_changed`, marker `adopting`, lock released); real exclusion at private hooks that pause adopt: `Placement.acquire/2` and a real daemon start attempted immediately after the `adopting` publication are refused (`root_adopting`, daemon exit 124) with the root and the lock unchanged, and attempted immediately after the rename, before the release, are refused `placement_active` (daemon exit 76) and admitted, the daemon serving, only after adopt releases; two adopters started together on one unmarked root, one paused while holding the lock: exactly one reaches the fence and commits, and the other refuses `root_held` with nothing written or, started after the release, reports `already marked`; kill after step 4, after the step 7 link, after manifest A, during the audit, after the rename and before the release: before the rename the root is left `adopting` (or unmarked before the link) with a stale lock, and after it `current`; after every cut whose root is left `adopting`, `admit/1`, `Placement.acquire/2`, `compose/1`, `store backup` and `store restore` with that root as source refuse `root_adopting` with the root unchanged, `report/1` says `adopting`, and a rerun of adopt reclaims the stale lock and repeats the full audit (observed by its decode count) before reaching `current`; after the cut following the rename, the next `Placement.acquire/2` reclaims the stale lock and serves the root, and adopt reports `already marked`; in every successful run the marker becomes `current` only by the rename, while adopt holds the lock and after C = A; **delivered M7-style lock-taking writer**: a separate OS process running the delivered `Placement.acquire/2` path on the root, as the M7 daemon's `Service.acquire_placement/1` and the M7 CLI do, started while adopt is paused at a private hook holding the lock (before the fence, after it and after the rename), is refused `placement_active` with no write to the root, and the root is adopted only on the audited bytes; a protected credential directory reached inside the root through a subtree mount refuses `auth_root_overlap` at manifest A (ADR 0037's `auth_separation_bind_test.exs`) |
+| `apps/loopex_composition/test/store_backup_test.exs` | Backup of a closed root with sessions, receipts, artifacts, resources, a helper namespace and earlier restore lineage: `state/` equals an independent walk of the source; capture fields equal an independent derivation; refusals for held, stale, writer-marker, helper-marker, claim, unmarked, existing, nested and symlinked targets, a changed workspace and 65,537 entries; a source write during the copy gives `source_changed` and no `BACKUP`; kill during copy, before rename and after rename leave no `BACKUP` or a complete one; job-index removal is the only source change; a walked directory carrying a protected credential directory's identity refuses `auth_root_overlap` at manifest A with no staging directory, with the real-mount case in ADR 0037's `auth_separation_bind_test.exs` |
+| `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; kill at each ADR 0051 phase, then `--resume` reaching committed with the same plan bytes; `previous_restore_running`; an edited plan file gives `restore_conflict`. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged. A protected credential directory's identity met in `BACKUP/state` refuses `auth_root_overlap /arguments/backup` at check 1 with nothing written; one met in `DESTINATION` during ADR 0051's walks leaves the destination uncommitted, the result in ADR 0051's unchanged vocabulary, and the `auth_root_overlap /arguments/destination` line printed |
 | `apps/loopex_executor_local/test/restore_codec_test.exs` (extended) | The discard attestation form round-trips exactly; a form carrying both `discard_later_work` and `latest_cut`, or `discard_later_work` `false`, is refused; the latest form's bytes are unchanged |
 | `apps/loopex_composition/test/restore_workflow_test.exs` (extended) | A plan with the discard form and `source_status` `available` refuses `invalid_plan` before any claim; with `lost` it commits and its receipt equals a latest-form restore's apart from the plan digest |
 | `apps/loopex_cli/test/store_command_test.exs` | Grammar, defaults, exit statuses 0, 1 and 2, exact output lines including both statement forms, the printed ADR 0037 writer command parsed by ADR 0037's own parser to `/paths/state_root` = destination, the `LOOPEX_HOME` precedence note, and the configuration file byte-identical after restore |

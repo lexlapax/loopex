@@ -68,53 +68,68 @@ Concept: [Sign-in directory and state-root separation](0037-host-configuration-a
 
 **Invariant.** Let `A` be the sign-in directory, `<HOME>/.loopex/auth`, which
 [ADR 0073](0073-provider-oauth-sign-in-technical.md#technical-depth) defines
-and fills, computed from this invocation's `HOME` whether or not it exists.
-Let `R` be any state root the invocation selects, by `--state-root`,
-`LOOPEX_HOME` or the file's `paths.state_root`, and any `BACKUP` or
-`DESTINATION` path a store command names. After canonicalization, `A` and
-each `R` must be separate: neither equals, contains, nor is contained by the
-other. A violation refuses `auth_root_overlap` before anything is written.
-Separation is how ADR 0072's backups and restores stay token-free: ADR 0051's
-complete manifest keeps every file in the root, and nothing is excluded from
-it.
+and fills, and `G` the Application Default Credentials directory,
+`<HOME>/.config/gcloud`, whose `application_default_credentials.json` holds
+the refresh token ADR 0073's
+[`adc` source](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-adc)
+reads. ADR 0073 never consults `CLOUDSDK_CONFIG` or
+`GOOGLE_APPLICATION_CREDENTIALS`, so `G` is fixed by `HOME` alone. `A` and `G`
+are the *protected credential directories*, each computed from this
+invocation's `HOME` whether or not it exists. Let `R` be any state root the
+invocation selects, by `--state-root`, `LOOPEX_HOME` or the file's
+`paths.state_root`, and any `BACKUP` or `DESTINATION` path a store command
+names. After canonicalization, each protected directory and each `R` must be
+separate: neither equals, contains, nor is contained by the other. A violation
+refuses `auth_root_overlap` before anything is written. Separation is how ADR
+0072's backups and restores stay token-free: ADR 0051's complete manifest
+keeps every file in the root, and nothing is excluded from it, the ADC file
+included. The path comparison is the early refusal; the
+[physical walk check](#technical-0037-physical-walk) refuses a mount that
+places credential storage inside a root while that root is copied or
+verified.
 
 **Owner.** `LoopexCli.Home` (new), the only module that reads `HOME`, owns
-`Home.auth_directory/1`, the choice of which paths each command checks, and
+`Home.auth_directory/1`, `Home.adc_directory/1`, the choice of which paths each command checks, and
 the construction of the *sign-in context*. The comparison itself is one pure
 function over filesystem metadata, `LoopexComposition.SignIn.Separation.check/1`
 (new, `apps/loopex_composition`), so that the host and the token store run
 the same code; the CLI depends inward on it, and composition imports no CLI
-module. Core, composition and the daemon application never compute `A` and
-never read `HOME`, configuration or the environment to find a root. They
-receive the context from a host that has already checked it.
+module. Core, composition and the daemon application never compute `A` or `G` and
+never read `HOME`, configuration or the environment to find a root or a
+protected directory. They receive the context from a host that has already
+checked it.
 
 **Sign-in context.** The contract between the host and ADR 0073's token store
-is one plain map with exactly three members:
+is one plain map with exactly four members:
 
 ```elixir
 %{
   home: "/Users/u/.loopex",               # absolute; keys the keyring item
   auth_directory: "/Users/u/.loopex/auth", # A, absolute
+  protected_directories: ["/Users/u/.loopex/auth", "/Users/u/.config/gcloud"], # [A, G]
   state_roots: [{"/paths/state_root", "/Users/u/.loopex/state"}]
 }
 ```
 
-- `Home.sign_in_context(selection)` builds it after selection: `home` and
-  `auth_directory` from `HOME`, and `state_roots` holding every state root,
+- `Home.sign_in_context(selection)` builds it after selection: `home`,
+  `auth_directory` and `protected_directories`, exactly `[A, G]`, from
+  `HOME`, and `state_roots` holding every state root,
   `BACKUP` and `DESTINATION` the command selected, each with its refusal
   pointer, in selection order. A command that selects no root, such as
   `auth login` without a configuration file, passes `[]`. It then calls
   `Separation.check(context)` and returns the context only on `:ok`, else
   `{:error, {:auth_root_overlap, pointer}}`.
 - `Separation.check/1` refuses a context that is not exactly this shape, whose
-  paths are not absolute UTF-8 of at most 4,096 bytes, or that holds more
-  than 16 roots, with `{:error, {:auth_root_overlap, "/auth"}}`. For each root
-  in order it applies the comparison below to `auth_directory` and the root;
-  then it applies the *marked-ancestor rule*: an existing directory among
-  `E_A` and its lexical ancestors that holds ADR 0072's `loopex-root-format`
-  marker refuses with pointer `/auth`, because `A` would lie inside a root
-  some other selection names. It reads only metadata of the paths it was
-  given and their ancestors.
+  paths are not absolute UTF-8 of at most 4,096 bytes, whose
+  `protected_directories` is not exactly `[auth_directory, G]` for the
+  context's `home`, or that holds more than 16 roots, with
+  `{:error, {:auth_root_overlap, "/auth"}}`. For each root in order it applies
+  the comparison below to each protected directory, in list order, and the
+  root; then it applies the *marked-ancestor rule* to each protected
+  directory `P`: an existing directory among `E_P` and its lexical ancestors
+  that holds ADR 0072's `loopex-root-format` marker refuses with pointer
+  `/auth`, because `P` would lie inside a root some other selection names. It
+  reads only metadata of the paths it was given and their ancestors.
 - **Lifecycle.** The context is built once per command, after selection and
   before any write, and is never rebuilt from ambient state. The command
   passes it inward as a host option: `auth` to the store calls it makes;
@@ -125,10 +140,11 @@ is one plain map with exactly three members:
   running process, so the context stays the command's selection.
 - **Re-validation.** ADR 0073's store calls `Separation.check/1` on the
   context it was given immediately before every backend write, and the
-  refresher calls it before every exchange, as
+  refresher, the `adc` refresher included, calls it before every exchange, as
   [ADR 0073](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-decision)
   states. A filesystem changed after startup, for example a new symbolic link
-  that moves `A` into a root, is therefore refused before a token reaches it.
+  that moves `A` or `G` into a root, is therefore refused before a token
+  reaches it.
   There is no second resolver: the store never selects a root and never reads
   `HOME`.
 
@@ -166,8 +182,8 @@ reading only metadata:
 
 When `S_Y` is not empty no existing component of `X` below `E_Y` can match
 `S_Y`'s first component, because that name does not exist under `E_Y`; so the
-second case needs equal identities, not a chain lookup. `A` and `R` overlap
-when either lies inside or at the other. Whole components are compared, never
+second case needs equal identities, not a chain lookup. A protected directory
+and `R` overlap when either lies inside or at the other. Whole components are compared, never
 string prefixes, so `/x/state` and `/x/stateful` are separate. For example,
 with `/srv/data` bind-mounted at `/mnt/alias`, `A = /mnt/alias/.loopex/auth`
 and `R = /srv/data/.loopex/auth/state`, neither existing, reduce to
@@ -192,12 +208,42 @@ filesystem equating names by Unicode case folding or Unicode normalization
 could treat as one entry: for two ASCII names both equivalences reduce to
 ASCII lower-casing, and every name with a non-ASCII byte is refused.
 
-**Limit of the check.** The check sees the paths it is given and their
-ancestors. A mount that places part of a root's tree at a path whose
-ancestors do not include that root, for example a bind mount of
-`<root>/sub` at `$HOME/.loopex`, shares no identity with `R` or its
-ancestors and is not detected. Such mounts are host administration; the
-check makes no claim about them.
+<a id="technical-0037-physical-walk"></a>
+**Physical walk check.** The path comparison sees the paths it is given and
+their ancestors. A mount that places part of a root's tree over credential
+storage, for example `<root>/sub` bind-mounted at `$HOME/.loopex` or at
+`$HOME/.config`, shares no identity with `R` or its ancestors, so the path
+comparison admits it. Every walk that copies or verifies a root therefore
+also compares identities, whatever the mount layout:
+
+- At the start of the walk, `LoopexComposition.SignIn.Separation.identities/1`
+  stats each of the context's `protected_directories` with
+  `:file.read_file_info/1` and keeps its `{major_device, inode}`. A protected
+  directory that does not exist (`:enoent`) is skipped; any other stat
+  failure refuses `auth_root_overlap` with pointer `/auth`, because
+  separation cannot be shown.
+- The walk already stats every entry it lists for ADR 0051's manifest. For
+  every directory it encounters, the walked root included, it compares that
+  directory's `{major_device, inode}` with the set. A member stops the walk
+  before its next read or write and refuses `auth_root_overlap` with the
+  walked path's pointer: the root's origin, `/arguments/backup` or
+  `/arguments/destination`. The identities reach `Restore.IO` as a
+  host-private option of the operation, never in a manifest, plan or
+  retained record.
+- The walks are [ADR 0072](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-backup)'s:
+  `store backup`'s manifest A of the root (step 7), taken before its staging
+  directory exists, then its copy and manifests B and C; `store adopt`'s
+  manifests A and C (steps 8 and 10); and `store restore`'s manifest of
+  `BACKUP/state` (check 1), taken before anything is written, then every
+  manifest ADR 0051's transition takes of the backup and of `DESTINATION`,
+  including the destination manifest it compares after the copy and before
+  its commit. ADR 0072 states how the transition reports that refusal.
+
+A mount that aliases credential storage into a root is therefore refused
+before any file is copied from it, and a restore never commits a destination
+through which credential storage is reachable. Physical separation holds for
+every root that is backed up, adopted or restored; the path comparison stays
+as the early refusal before any walk.
 
 **Where it runs.** Every row builds the sign-in context, so every row runs
 the whole of `Separation.check/1`, the marked-ancestor rule included. The
@@ -210,7 +256,7 @@ process of the command:
 | `loopex daemon`, with or without `--config` (`LoopexCli.Daemon`, before `LoopexDaemon.Command` starts the service) | The selected state root | The same |
 | `service start` and every on-demand start (`ServiceStart` `select`) | The selected state root, before `probe` | The same |
 | `config set` and `config unset` (candidate validation) and `init` | The candidate's resolved `paths.state_root` | `/paths/state_root` |
-| `store adopt`, `store backup`, `store restore` | The selected root; `BACKUP`; `DESTINATION` | The root's origin; `/arguments/backup`; `/arguments/destination` |
+| `store adopt`, `store backup`, `store restore` | The selected root; `BACKUP`; `DESTINATION`; then the [physical walk check](#technical-0037-physical-walk) during every manifest and copy of them | The root's origin; `/arguments/backup`; `/arguments/destination` |
 | `auth login`, `auth logout` and every other ADR 0073 command that writes `A` | The state root its own selection names, when a file is selected, else no root; the marked-ancestor rule always | The root's origin, or `/auth` for a marked ancestor |
 | A process that starts an ADR 0073 refresher (foreground chat, durable and ephemeral `ask`, daemon) | Covered by its row above, which builds the sign-in context. The refresher receives that context at start, writes only `A`, and re-runs `Separation.check/1` on it before every exchange and every write | The failing root's pointer; the refresher exchanges and writes nothing |
 | Ephemeral `ask` | Nothing: its root is a fresh temporary directory, never selected | — |
@@ -218,17 +264,18 @@ process of the command:
 `doctor` reports a violation as `configuration: "auth_root_overlap
 <pointer>"` and exits `1`; it writes nothing.
 
-**HOME unusable.** When `HOME` fails `LoopexCli.Home`'s rules, `A` cannot be
+**HOME unusable.** When `HOME` fails `LoopexCli.Home`'s rules, `A` and `G` cannot be
 computed and separation cannot be shown. Every row above then refuses
 `home_unavailable` before any write, including commands given only
 `--config` and `--state-root`. Ephemeral `ask` is the exception. Without
 `HOME`, no sign-in directory exists that the invocation could write. The
 refusal still applies to roots, because another invocation with `HOME` set
-could later create `A` inside the selected root.
+could later create `A` or `G` inside the selected root.
 
 **Statuses.** A CLI command prints `loopex: auth_root_overlap <pointer>` with
-the hint `the sign-in directory <A> and the state root must not contain each
-other; select a different state root` and exits `1`, as every refusal in this
+the hint `the credential directory <P> and the state root must not contain each
+other; select a different state root`, where `<P>` is the protected directory
+that overlapped, and exits `1`, as every refusal in this
 record does; `loopex auth` exits 76 from its own status table in
 [ADR 0073](0073-provider-oauth-sign-in-technical.md#technical-depth). `loopex daemon` exits [ADR 0071](0071-daemon-attached-conversation-technical.md#technical-adr-0071-decision)'s
 `111`, `configuration_invalid`, with class `auth_root_overlap` and the
@@ -541,8 +588,9 @@ classes, `service_and_daemon`, `config_requires_service`,
 | Piece | Module |
 | --- | --- |
 | `HOME`, file selection, layout paths | `LoopexCli.Home` (new) |
-| Sign-in directory, path selection and sign-in context | `LoopexCli.Home` (`auth_directory/1`, `sign_in_context/1`, new), called by every row of its table |
+| Sign-in directory, path selection and sign-in context | `LoopexCli.Home` (`auth_directory/1`, `adc_directory/1`, `sign_in_context/1`, new), called by every row of its table |
 | Separation comparison | `LoopexComposition.SignIn.Separation.check/1` (new), called by `LoopexCli.Home` and, on the context it was given, by ADR 0073's store and refresher |
+| Physical walk check | `LoopexComposition.SignIn.Separation.identities/1` (new) and the identity comparison in `Restore.IO`'s backup-copy, adopt-manifest and manifest walks, given the identities by ADR 0072's `StoreAdmin` as a host-private operation option |
 | `init`, `config set`, `config unset`, lock and atomic write | `LoopexCli.ConfigWriter` (new) |
 | Optional `--config`, selection line | `LoopexCli.ConfigOptions`, `LoopexCli.ConfigInspection` |
 | On-demand machine, spawn, wait | `LoopexCli.ServiceStart` (new) |
@@ -568,10 +616,13 @@ classes, `service_and_daemon`, `config_requires_service`,
   stated; nothing about classification changes.
 - **ADRs 0031 and 0032, reused.** Placement lock, socket placement and the
   stop bound are unchanged.
-- **ADRs 0051, 0072 and 0073, applied.** The separation invariant is what
-  keeps ADR 0073's tokens out of ADR 0072's backups. ADR 0051's complete
-  manifest is unchanged and excludes no file; a root that would hold the
-  sign-in directory is refused instead.
+- **ADRs 0051, 0072 and 0073, applied.** The separation invariant and the
+  physical walk check are what keep ADR 0073's tokens and the ADC refresh
+  token out of ADR 0072's backups and restores. ADR 0051's complete manifest
+  is unchanged and excludes no file; a root that would hold or reach a
+  protected credential directory is refused instead. ADR 0051's refusal
+  vocabulary is unchanged; ADR 0072 maps the walk's refusal inside the
+  transition onto it.
 
 <a id="technical-adr-0037-evidence"></a>
 ### Evidence
@@ -591,7 +642,7 @@ Every case uses a temporary `HOME` and `LOOPEX_HOME`. Test files are in
 | `service_detach_pty_test.exs` | PTY | A service started on demand from a PTY survives `SIGINT` to the foreground group and hangup of the PTY, and stops on `service stop` |
 | `live_service_test.exs` | Real daemon | `run` and `resume --service` start on demand; `attach` and `sessions --service` refuse `service_not_running`; `--daemon` never starts |
 | `apps/loopex_daemon/test/readiness_method_test.exs` | Socket | Each of the four states from helper and runtime seams; the `closed` session and code; project-resource values; schema vectors and the updated digest |
-| `auth_separation_test.exs` | Unit and real filesystem | For each origin (`--state-root`, `LOOPEX_HOME`, the file's `paths.state_root`): the root equal to `A`, containing it, and contained by it each refuse `auth_root_overlap` with that origin's pointer, before any file, lock, log, socket or process; `/x/state` beside `/x/stateful` and the default `<home>/state` beside `<home>/auth` pass; a root selected under one `HOME` and used under another whose `.loopex/auth` lies inside it refuses; a symbolic-link root resolving to an ancestor of `A`, a symbolic-link `HOME` and a symbolic-link `auth` each refuse; a link loop and 41 chained links refuse; **missing-tail aliases**, on real directories on both hosts: with `data` and a symbolic link `alias` to it, `HOME` under `alias` with `.loopex/auth` absent and a root `data/.loopex/auth/state` absent refuse, as do the reverse containment and an equal pair, while `alias/.loopex/auth` beside an absent `data/.loopex/state` passes; a `..` in a missing suffix refuses; **missing-component rule**: an ASCII case variant (`Auth` against `auth`) and any non-ASCII missing component at the same position refuse on both hosts, and `/x/state` beside `/x/stateful` passes; an existing case variant on a case-insensitive `darwin-arm64` volume refuses through identity; **bind mount**: in `auth_separation_bind_test.exs`, tagged `:bind_mount`, the reviewer's example (`/srv/data` bound at `/mnt/alias`, `A = /mnt/alias/.loopex/auth`, `R = /srv/data/.loopex/auth/state`, neither existing) and the same pair with both existing refuse; it runs on `linux-x86_64` inside `unshare --user --map-root-user --mount` in the release check, and when the host refuses that namespace the lane reports the evidence unavailable, never a pass; `darwin-arm64` has no unprivileged bind mount, so there the identity-chain step is proved by the symbolic-link and case-variant cases above; the `Separation.check/1` context grammar (shape, relative or non-UTF-8 path, 17 roots) refuses; an absent or relative `HOME` refuses `home_unavailable` on every row, and an ephemeral `ask` still runs; `config set /paths/state_root` to an overlapping path leaves the earlier bytes; `auth login` refuses when an ancestor of `A` holds a `loopex-root-format` marker; `store adopt`, `store backup` and `store restore` refuse an overlapping root, `BACKUP` and `DESTINATION`; a backup of a separated root holds every file of the root and no file of `A` |
+| `auth_separation_test.exs` | Unit and real filesystem | For each origin (`--state-root`, `LOOPEX_HOME`, the file's `paths.state_root`): the root equal to `A`, containing it, and contained by it each refuse `auth_root_overlap` with that origin's pointer, before any file, lock, log, socket or process; `/x/state` beside `/x/stateful` and the default `<home>/state` beside `<home>/auth` pass; a root selected under one `HOME` and used under another whose `.loopex/auth` lies inside it refuses; a symbolic-link root resolving to an ancestor of `A`, a symbolic-link `HOME` and a symbolic-link `auth` each refuse; a link loop and 41 chained links refuse; **missing-tail aliases**, on real directories on both hosts: with `data` and a symbolic link `alias` to it, `HOME` under `alias` with `.loopex/auth` absent and a root `data/.loopex/auth/state` absent refuse, as do the reverse containment and an equal pair, while `alias/.loopex/auth` beside an absent `data/.loopex/state` passes; a `..` in a missing suffix refuses; **missing-component rule**: an ASCII case variant (`Auth` against `auth`) and any non-ASCII missing component at the same position refuse on both hosts, and `/x/state` beside `/x/stateful` passes; an existing case variant on a case-insensitive `darwin-arm64` volume refuses through identity; **bind mount**: in `auth_separation_bind_test.exs`, tagged `:bind_mount`, the reviewer's example (`/srv/data` bound at `/mnt/alias`, `A = /mnt/alias/.loopex/auth`, `R = /srv/data/.loopex/auth/state`, neither existing) and the same pair with both existing refuse; **subtree mount**: a separated root `R` whose `<R>/sub` is bind-mounted at the protected directory's parent (`<HOME>/.loopex`, and in a second case `<HOME>/.config`) with a credential-shaped canary token file in the protected directory passes the path comparison, and `store backup` then refuses `auth_root_overlap` with the root's pointer at manifest A, before its staging directory exists, so no copied token file is written anywhere; `store adopt` of that root refuses at manifest A with the canary unchanged; and a restore whose `DESTINATION` gains such a mount during ADR 0051's copy, at a private pause hook, is never committed and prints `auth_root_overlap /arguments/destination`; it runs on `linux-x86_64` inside `unshare --user --map-root-user --mount` in the release check, and when the host refuses that namespace the lane reports the evidence unavailable, never a pass; `darwin-arm64` has no unprivileged bind mount, so there the identity-chain step is proved by the symbolic-link and case-variant cases above; the `Separation.check/1` context grammar (shape, relative or non-UTF-8 path, 17 roots) refuses; an absent or relative `HOME` refuses `home_unavailable` on every row, and an ephemeral `ask` still runs; `config set /paths/state_root` to an overlapping path leaves the earlier bytes; `auth login` refuses when an ancestor of `A` holds a `loopex-root-format` marker; `store adopt`, `store backup` and `store restore` refuse an overlapping root, `BACKUP` and `DESTINATION`; a backup of a separated root holds every file of the root and no file of `A`; **ADC directory**, on real directories with a temporary `HOME` and a credential-shaped canary `application_default_credentials.json` (random bytes in the file's grammar, never a real credential) under `<HOME>/.config/gcloud`: for each origin, a state root equal to `<HOME>/.config/gcloud`, containing it (`<HOME>/.config`) and contained by it (`<HOME>/.config/gcloud/state`) refuses `auth_root_overlap` with that origin's pointer, both when `gcloud` exists and when it is absent, before any file, lock, log, socket or process; `store backup` of such a root refuses before `BACKUP` or its staging directory exists, so no copy of the canary is written; `store restore` with `DESTINATION` an empty `<HOME>/.config/gcloud`, or a path under it, refuses before any write and leaves the directory as found, so no restored file lands in or overwrites it; `store adopt` of such a root refuses with the canary's bytes unchanged; the complete manifest of a separated root is unchanged and holds no exclusion; **physical walk check** at the `Restore.IO` boundary, on real directories on both hosts, with the path comparison deliberately not run: the backup copy, adopt manifest and manifest operations given a root that contains a protected directory, or is one, refuse `auth_root_overlap` with the walked path's pointer at the first such directory and write nothing after it, the backup copy creating no copied canary; a protected directory that does not exist is skipped and the walk proceeds |
 | `daemon_configuration_test.exs` (ADR 0071, extended) | Real daemon | `loopex daemon`, with and without `--config`, exits 111 with class `auth_root_overlap` and each origin's pointer, leaving no lock, log entry or socket |
 | `apps/loopex_daemon/test/readiness_slice_test.exs` | Socket, real helper owner | A gated store adapter holds a classification slice open: `daemon.readiness` asked concurrently and repeatedly answers within 1,000 ms each (measured), as `classifying` with the previous slice's counts, `"0"` and `"0"` before the first completes; the row's `sequence` advances at slice start and end; a parent creation held in the owner does not delay readiness; releasing the gate gives `serving`; killing the owner gives `unavailable` with `unexpected`; no readiness path calls the owner |
 | `service_status_test.exs` | Real daemon | The status object has exactly its eight keys in order for `stopped`, `held`, `classifying` and `serving`; `readiness` is the verbatim result or `null`; `activations_used` and `activation_limit` equal `daemon.status`'s and include a helper child after one runs; a service started from another file keeps its own `readiness.configuration_file`; exit statuses 0, 3 and 1, including a socket that answers readiness and not status |

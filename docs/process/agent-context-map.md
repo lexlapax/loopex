@@ -7887,3 +7887,45 @@ already-checked sign-in context passed to the sign-in store and refreshers
 plus missing suffix, refusing ambiguous missing names (ADR 0037); and a
 lifetime-relative custody skew with a 10-second minimum lifetime (ADR 0073).
 All five prerequisite ADRs remain Proposed and M8 remains Open.
+
+<a id="disposition-m8-readiness3-2026-10-13"></a>
+### M8 readiness review 3 answered — 2026-10-13
+
+Readiness review 3 of the M8 planning branch at
+`672923bbd390fcd2784cdbd31801ff96051624e2` found the plan not ready: F4 and N5
+were partly closed, with new findings N6 (P1), N7 and N8 (P2) and N9 and N10
+(P3). The maintainer took one decision and corrected one premise:
+
+1. **Physical detection during the copy (N7).** Backup, adopt and restore fail
+   closed by device and inode: every walk that builds or verifies ADR 0051's
+   manifest, the backup copy included, compares each directory it meets with
+   the identities of the protected credential directories, read at the
+   walk's start and skipped for one that does not exist, and refuses
+   `auth_root_overlap`. Backup refuses at its first manifest, before any file
+   is copied; restore checks the backup it reads and, inside ADR 0051's
+   transition under its unchanged vocabulary, the destination after the copy
+   and before the commit. This replaces ADR 0037's statement that a mount
+   that aliases credential storage into a root is host administration;
+   the path check remains the early refusal
+   ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)).
+2. **Corrected adoption premise (N8).** The delivered M7 daemon and CLI hosts
+   do take the root's placement lock (`LoopexDaemon.Service` and the CLI call
+   `Placement.acquire/2` on `STATE_ROOT/placement.lock`), so they are excluded
+   while adopt holds it. The rationale recorded in D17 and in
+   [the readiness 2 disposition](#disposition-m8-readiness2-2026-10-13), that
+   M7-built processes take no placement lock, was wrong; that record stays as
+   written and this entry corrects it. The `--old-writer stopped` attestation
+   still stands: M7 code does not read the marker once adopt releases the
+   lock, and an embedded or non-cooperating host may take no lock
+   ([ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept)).
+
+N6, N9 and N10 were completed without a new maintainer decision: the
+host-built sign-in context names the protected credential directories, the
+sign-in directory and gcloud's Application Default Credentials directory
+under the home (ADR 0073 never consults `CLOUDSDK_CONFIG`), and the shared
+separation check refuses any overlap with them, with no file excluded from the
+complete manifest (ADRs 0037 and 0073); the plan's root-compatibility summary
+follows D17 and its exit-status evidence names 65 to 124 except 114; and a
+token whose exchange consumes its usable window resolves expired at once and
+is never dispatched (ADR 0073). All five prerequisite ADRs remain Proposed and
+M8 remains Open.

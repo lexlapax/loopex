@@ -7,7 +7,9 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
 - **Date:** 2026-10-13; the maintainer's decisions on the `chatgpt:` reply
   ceiling, the public failure reason, daemon exit statuses and outcome
   numbering recorded the same day; the host-to-store sign-in context and the
-  lifetime-scaled custody deadline specified the same day
+  lifetime-scaled custody deadline specified the same day; the ADC directory's
+  protection and the custody deadline under a slow exchange specified the
+  same day
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0019](0019-host-owned-provider-protection.md#concept),
@@ -86,9 +88,11 @@ new provider protocol.
    login Keychain. Linux uses the Secret Service through libsecret when it is
    available. Without a keyring, as on a headless Linux host, tokens go to a
    private file in the Loopex home, readable only by its owner. The token
-   directory and every selected state root must lie physically apart, under
-   ADR 0037's separation invariant, which refuses an overlapping selection
-   before any token or root write. The installed host checks the paths once
+   directory, gcloud's Application Default Credentials directory that the
+   `adc` source reads, and every selected state root must lie physically
+   apart, under ADR 0037's separation invariant, which refuses an overlapping
+   selection before any token or root write, and whose walk check refuses a
+   backup, adopt or restore that meets either directory through a mount. The installed host checks the paths once
    and hands the token store the checked paths; the store and its refreshers
    repeat that check before every token write and never look for a root
    themselves. So backups never contain tokens. Tokens never enter

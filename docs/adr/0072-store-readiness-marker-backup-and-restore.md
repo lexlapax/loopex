@@ -4,7 +4,7 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added, and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
@@ -159,9 +159,13 @@ Every failure after the fence, and an adopt killed before the rename, leaves
 `adopting`: `root_changed` when the root changed during the audit, and the
 decode refusal when a record cannot be read. An adopt killed after the rename
 leaves a committed current root. Running adopt again redoes the full audit
-from the start and never trusts an earlier run. The `--old-writer stopped`
-statement remains required, because the build that wrote the root neither
-reads the marker nor is bound to this build's lock. `doctor` reports an
+from the start and never trusts an earlier run. The delivered M7 daemon and
+CLI hosts take this same placement lock on the same file, so while adopt holds
+it they are refused like any other start. The `--old-writer stopped`
+statement remains required all the same: the M7 build does not read the
+marker, so once adopt releases the lock, after a refusal or kill that left
+`adopting` or after the commit, an M7 process can open the root again, and an
+embedded or other non-cooperating host may never take the lock at all. `doctor` reports an
 `adopting` root. Running adopt on a root already marked current reports that
 and writes nothing. A root adopt cannot read is recovered the same way as any
 unsupported root: through a backup restored under the build that wrote it.
@@ -180,9 +184,14 @@ the source twice. It audits the copy exactly as restore will, so a backup that
 restore would refuse is never published.
 
 The copy takes every file of the root, under ADR 0051's complete manifest,
-with no exclusion. Provider sign-in tokens never enter it because ADR 0037
-keeps their directory physically separate from every state root, not because
-backup leaves anything out.
+with no exclusion. Provider sign-in tokens and gcloud's Application Default
+Credentials file never enter it because ADR 0037 keeps their directories
+physically separate from every state root, not because backup leaves anything
+out. Besides ADR 0037's path check before anything is written, backup, adopt
+and restore compare every directory they walk with those directories'
+physical identities, so a mount that aliases credential storage into a root
+is refused before any file is copied from it and a restore through such a
+mount is never committed.
 
 The backup directory holds the complete copy, the canonical manifest and a
 capture record carrying everything ADR 0051's plan needs except the
