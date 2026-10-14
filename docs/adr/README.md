@@ -256,9 +256,10 @@ engine experiment; 0036 keeps the engine selection, migration and capacity
 refusal for the M9 draft. The maintainer accepted that split, the M8 plan's
 proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
 `store adopt`, `store backup` and `store restore`, and on acceptance amends
-exactly two clauses of accepted ADR 0051: its statement that no backup CLI is
-added, and its latest-backup-only restriction, which `--discard-later-work`
-relaxes for a lost source. ADR 0051's other decisions, ADR 0070 and the
+exactly three clauses of accepted ADR 0051: its statement that no backup CLI
+is added; its latest-backup-only restriction, which `--discard-later-work`
+relaxes for a lost source; and its manifest walks, which stop on a
+host-supplied credential-directory identity. ADR 0051's other decisions, ADR 0070 and the
 pre-1.0 rule settle the rest.
 
 0073 was proposed on 2026-10-13 when the maintainer added provider sign-in to

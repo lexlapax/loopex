@@ -7907,7 +7907,10 @@ were partly closed, with new findings N6 (P1), N7 and N8 (P2) and N9 and N10
    and before the commit. This replaces ADR 0037's statement that a mount
    that aliases credential storage into a root is host administration;
    the path check remains the early refusal
-   ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)).
+   ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)). The restore walk is
+   recorded as a third clause amending accepted ADR 0051 in
+   [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept-adr-0072-amendment),
+   using ADR 0051's existing outcomes.
 2. **Corrected adoption premise (N8).** The delivered M7 daemon and CLI hosts
    do take the root's placement lock (`LoopexDaemon.Service` and the CLI call
    `Placement.acquire/2` on `STATE_ROOT/placement.lock`), so they are excluded

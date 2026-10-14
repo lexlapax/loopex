@@ -671,7 +671,8 @@ that later work was deliberately discarded; they stay beside the backup.
 2. Create `DESTINATION` at `0700` if absent and `fsync` its parent. ADR 0051's
    copy then sets the root's exact backed-up mode.
 3. Call `LoopexComposition.Restore.restore(plan, invocation)` once, with
-   the protected identities as a host-private option of the call, outside the
+   the protected identities as the host-private option that
+   [amendment clause 3](#technical-adr-0072-amendment) adds, outside the
    plan and invocation maps. ADR 0051's transition passes them to every
    manifest walk it makes of `BACKUP/state` and `DESTINATION`, including the
    destination manifest it compares after the copy and before its commit.
@@ -912,7 +913,7 @@ directory taken by `store backup`, as ADR 0036 states.
 
 Concept: [Amendment of ADR 0051](0072-store-readiness-marker-backup-and-restore.md#concept-adr-0072-amendment).
 
-ADR 0051's accepted files are not edited. The two amended clauses are:
+ADR 0051's accepted files are not edited. The three amended clauses are:
 
 1. **Backup CLI.**
    - ADR 0051 Concept, scope paragraph: "No Runtime command, executor effect
@@ -958,6 +959,19 @@ ADR 0051's accepted files are not edited. The two amended clauses are:
      `available` is `invalid_plan`. The plan stays version 1 and its digest
      rule is unchanged, so a latest-form plan's bytes and digest do not
      change.
+3. **Credential-directory identities in manifest walks.**
+   - ADR 0051's transition walks `BACKUP/state` and the destination with a
+     manifest whose entries are refused only for its stated kinds, modes,
+     links and bounds. Amended: `Restore.restore/2` accepts an optional
+     host-private list of at most two `{device, inode}` identities, outside
+     the plan and invocation maps and never encoded, journaled or digested.
+     Every manifest walk the transition makes stops when it meets a
+     directory with one of those identities. ADR 0051's closed outcome
+     vocabulary is unchanged: the stop is an `io_error`, reported as
+     `not_committed` `inventory_unavailable` before possible intent and as a
+     `commit_unknown` observation with reason `io_error` after it, and the
+     destination is never committed. Without the option the transition
+     behaves exactly as accepted.
    - ADR 0051 Technical depth, "Host attestation is necessary in both source
      branches: no post-cut effects, competing roots or stale snapshot activity
      can be inferred from a manifest." Amended for the discard form: the host

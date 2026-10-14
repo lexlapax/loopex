@@ -6,7 +6,7 @@ Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072
 - **Status:** Proposed
 - **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added, and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
+- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in three clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added; its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source; and its manifest walks, which stop on a host-supplied credential-directory identity. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
 - **Prerequisite for:** M8 outcomes 3 and 7, accepted before any marker, adopt, backup or restore command code is written
 
@@ -300,7 +300,7 @@ wrote it; no other build is promised to read it.
 Technical depth: [ADR 0051 amendment text](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-amendment).
 
 ADR 0051 stays byte-for-byte as accepted. On acceptance this record amends
-exactly two of its clauses, and the ADR index records both:
+exactly three of its clauses, and the ADR index records all three:
 
 1. **Backup CLI.** ADR 0051 says no backup CLI is added. This record adds
    `store backup`, `store restore` and `store adopt` as host commands in front
@@ -313,6 +313,13 @@ exactly two of its clauses, and the ADR index records both:
    Everything else ADR 0051 decides stays: the same machine and workspace, a
    complete idle backup, an empty destination, exclusion of every other copy,
    fresh ledger generations, and never redispatching an uncertain effect.
+3. **Credential-directory identities.** So that no restore can copy provider
+   credentials that a mount has aliased into a backup or destination, every
+   manifest walk of ADR 0051's transition stops when it meets one of the
+   sign-in or Google credential directories the host passes it, decided by
+   the maintainer on 2026-10-13. The stop uses ADR 0051's existing outcomes,
+   never commits the destination, and changes nothing when the host passes
+   no directories.
 
 <a id="concept-adr-0072-open"></a>
 ### Open for the Maintainer
