@@ -14,7 +14,9 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   the maintainer's decisions on startup readiness of a sign-in route and on
   the generation floor that survives sign-out recorded the same day, with
   `chatgpt:` model admission, the store-failure and lock-contention rules
-  and the explicit Secret Service bus specified the same day
+  and the explicit Secret Service bus specified the same day; the
+  maintainer's decision that the model list is part of a `chatgpt:` sign-in
+  (D25) recorded on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -181,13 +183,18 @@ new provider protocol.
     and each successful refresh, Loopex fetches that list through the same
     process that exchanges tokens, which in a durable host is the isolated
     provider companion and never the durable host VM itself. It bounds the
-    list and records it beside the sign-in. A `chatgpt:` model is admitted,
-    when the configuration is composed and when a session switches model,
-    only if the recorded list names it. An unlisted model, or a route with no
-    list yet, is refused before any call with the route-unavailable refusal
-    an unconfigured provider route already gets, and a refused switch keeps
-    the prior model. It is a configuration refusal, not a failed model call,
-    so nothing is retried.
+    list and records it beside the sign-in. The maintainer decided on
+    2026-10-14 (D25) that the list is part of signing in: when the list
+    cannot be fetched or is malformed or too large, `loopex auth login
+    openai` fails by name and keeps nothing, so a signed-in `chatgpt:`
+    route always has a list. A refresh whose listing fails keeps the
+    previous list and says so in a diagnostic. A `chatgpt:` model is
+    admitted, when the configuration is composed and when a session switches
+    model, only if the recorded list names it. An unlisted model is refused
+    before any call with the route-unavailable refusal an unconfigured
+    provider route already gets, and a refused switch keeps the prior model.
+    It is a configuration refusal, not a failed model call, so nothing is
+    retried.
 15. **Signing out keeps a floor, not a secret.** The maintainer decided on
     2026-10-13 that `auth logout` leaves, beside the home's host identity, a
     small non-secret file per route naming the highest write generation the

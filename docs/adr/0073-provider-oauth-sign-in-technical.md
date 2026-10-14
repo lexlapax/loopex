@@ -174,9 +174,13 @@ stored.
   `revocation_unconfirmed`. Only a lock holder that finds the pair
   inconsistent under the [pairing rule](#technical-adr-0073-pairing) writes
   `sign_in_incomplete`.
-- `models` is present on the `chatgpt` route only: `null`, or the bounded
-  list [`chatgpt` model admission](#technical-adr-0073-model-admission)
-  records. It is metadata only and is not part of the pairing comparison.
+- `models` is required on the `chatgpt` route and absent on every other
+  route. It is the bounded list
+  [`chatgpt` model admission](#technical-adr-0073-model-admission) records,
+  never `null`: a `chatgpt` login writes no metadata without it (D25). It is
+  metadata only and is not part of the pairing comparison. A `chatgpt`
+  metadata file without `models`, or another route's file with it, is
+  `credential_store_unsafe` under the closed grammar.
 - <a id="technical-adr-0073-generation-floor"></a>**Generation floor.** `<home>/auth/<route>.floor` is a non-secret file
   beside `host-id`, written under the route's lock with the atomic write
   below. Its closed grammar is the canonical JSON object
@@ -557,22 +561,39 @@ process and the companion; no new trace selector exists.
   the durable host VM; the in-host executor in the ephemeral profile and in
   the `auth` command, under ADR 0039's stated audience. The refresher runs it
   after each successful refresh and each step 7 adoption; `auth login openai`
-  runs it once after its write.
+  runs it once with the newly exchanged access token after ID-token
+  verification and before `Store.write/4`, so the login's first write
+  already carries the list.
 - *Validation.* The response is one JSON object whose `data` is a list; the
   kept entries are those with `visibility == "list"`. Each kept `id` matches
   `\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\z`, at most 128 bytes; at most 256 ids
   are kept, sorted and without duplicates. More than 256 listed ids, an
-  invalid id, or a malformed body is `sign_in_failed`; a transport failure,
+  invalid id, a body over 1,048,576 bytes or a malformed body is
+  `sign_in_failed`; a transport failure,
   timeout or non-2xx status is `provider_unreachable`. No raw body, header or
   error text crosses the private channel or reaches a diagnostic.
-- *Record.* A success writes the list into the metadata's `models` member
-  under the route's lock with the atomic metadata write, keeping the
-  metadata's generation, subject and client, so the pairing is unaffected. A
-  failure changes no stored state, no custody and no token, keeps the
-  previous list, and the next successful refresh retries it. A login whose
-  `model_list` fails still keeps the sign-in, writes `models: null` and
-  prints `loopex: model list unavailable for route chatgpt; it is fetched
-  again at the next refresh`.
+- *Record at login* (D25). The list is part of `auth login openai`. The
+  login's `Store.write/4` writes the metadata with the validated list as
+  `models`. A login whose `model_list` fails writes no token record, no
+  metadata and no floor change, and exits with the failure's class: 68
+  `sign_in_failed` for a malformed body, an invalid id, more than 256
+  listed ids or a body over 1,048,576 bytes, and 72 `provider_unreachable`
+  for a transport failure, the 30,000 ms timeout or a non-2xx status. The
+  exchanged grant is discarded with the `:sensitive` exchange process and is
+  not revoked: the provider-side grant is left to expire or rotate, which is
+  acceptable because no copy of it survives in Loopex. A rerun of the login
+  repeats the whole flow. A re-login over an existing sign-in that fails
+  this way leaves the earlier pair, list included, exactly as it was.
+- *Record at refresh.* A success writes the list into the metadata's
+  `models` member under the route's lock with the atomic metadata write,
+  keeping the metadata's generation, subject and client, so the pairing is
+  unaffected. A failure changes no stored state, no custody and no token,
+  keeps the previous list, which is never replaced by `null` or removed, and
+  names `sign_in_model_list_stale` in one bounded host diagnostic line,
+  `loopex: model list refresh failed for route chatgpt: <class>; keeping
+  the previous list`, where `<class>` is `sign_in_failed` or
+  `provider_unreachable`. The next successful refresh or adoption retries
+  it.
 - *Admission.* `SignIn.Route` holds the list it last recorded or read. The
   configured model and maintenance model are checked when composition
   resolves routes (`LoopexComposition.DurableOptions`, where an unbound
@@ -581,8 +602,8 @@ process and the companion; no new trace selector exists.
   switch admission (`ProviderBindings`'s private `resolve_selection_routes/4`
   behind `resolve_configuration/3` and `resolve_maintenance_routes/2`, which
   already refuses at `provider_bindings.ex` :169), before any config commit
-  or dispatch. A `chatgpt:<id>` whose `<id>` is absent from the list, or a
-  route whose list is `null`, refuses with the existing
+  or dispatch. A `chatgpt:<id>` whose `<id>` is absent from the list refuses
+  with the existing
   `provider_route_unavailable` and leaves the prior configuration; at
   service start that refuses composition as an unbound route does today.
   It is never a Model callback result, so Core sees no failed attempt and
@@ -595,8 +616,15 @@ process and the companion; no new trace selector exists.
   256-id and 128-byte bounds, the 1,048,576-byte body bound, the timeout,
   the closed failure classes and no raw body crossing.
   `sign_in_refresh_test.exs`: the list is refreshed after each refresh and
-  after a re-login adoption, and a failed listing keeps the previous list.
-  `sign_in_routes_test.exs`: an unlisted model and a `null` list refuse
+  after a re-login adoption, and a failed listing keeps the previous list
+  byte for byte, never `null`, and emits one `sign_in_model_list_stale`
+  line. `auth_command_test.exs`: a login whose `model_list` fails, once
+  malformed and once over 256 ids (exit 68) and once timing out and once
+  answering 503 (exit 72), writes no record, metadata or floor, both over an
+  empty `auth/` and over an existing sign-in whose pair and floor stay byte
+  for byte. `sign_in_store_test.exs`: a `chatgpt` metadata file without
+  `models`, with `models: null`, and a `vertex` file with `models` are each
+  `credential_store_unsafe`. `sign_in_routes_test.exs`: an unlisted model refuses
   `provider_route_unavailable` at composition and at switch, a refused
   switch keeps the prior model, and the fake server sees no model request.
 
@@ -796,8 +824,9 @@ Concept: [Account binding and recovery](0073-provider-oauth-sign-in.md#concept-a
 - `generation` is a positive integer; each write uses the next value.
 - The record carries every metadata member except `backend`, `host_id`,
   `account_label`, `models` and `state`, so the metadata of the same account
-  can be rebuilt from it; a rebuilt `chatgpt` metadata keeps the existing
-  `models`, or `null` when none exists.
+  can be rebuilt from it. A rebuild happens only by `roll_forward`, where the
+  metadata exists, so a rebuilt `chatgpt` metadata keeps its existing
+  `models`.
 
 **Pairing rule.** `Store.read(context, route)` reads the metadata and the
 record and returns exactly one of:
@@ -1307,11 +1336,11 @@ use temporary homes and never touch a real keyring.
 | `apps/loopex_composition/test/sign_in_adc_test.exs` | A gcloud-shaped `authorized_user` fixture: restart rereads the file, refreshes and keeps the subject; an absent ID token on an unchanged grant keeps the subject; a response without `refresh_token` keeps using the file's; malformed files (missing member, wrong `type`, extra member, nested value, over-bound, symlink, other owner, group-writable, another `universe_domain`) are refused; a replaced file for the same account is adopted at the next generation without restart; a replaced file for another account is `sign_in_account_changed` with custody `nil`; a replaced file whose refresh returns no ID token is refused; a deleted file is `sign_in_required`; the refresh posts the file's own `client_id`, and a replaced file's ID token whose `aud` is not that `client_id` is `sign_in_failed` with custody `nil` and metadata unchanged; the refresher, given a sign-in context whose `protected_directories` names a temporary `G` while `HOME` names another directory holding a different ADC file, reads only `<G>/application_default_credentials.json`; `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are ignored; logout leaves gcloud's file untouched |
 | `apps/loopex_composition/test/sign_in_keychain_test.exs` | Tagged `:macos_keychain`, against a temporary keychain named through the test-only `:sign_in_test_keychain` key: round trip, overwrite, delete, and a maximum-size record (262,144 base64url bytes on one `security -i` line); the secret never appears in any spawned argv, checked through an argv-recording wrapper. A source check finds the keychain key read only under `Mix.env() == :test` |
 | `apps/loopex_composition/test/sign_in_secret_service_test.exs` | Tagged `:secret_service`, under `dbus-run-session` with a throwaway keyring: round trip and availability probe with the bus passed only through the context's `secret_service_bus`; a locked collection is unavailable within 5,000 ms. Untagged, a recording fake executable proves the wrapper's argv, standard-input bytes and child `DBUS_SESSION_BUS_ADDRESS` equal to the context value while the test VM's own variable names another address; a `nil` bus is unavailable without spawning; a composition whose metadata names `secret_service` with the backend unavailable refuses `credential_store_unavailable`; `auth login --store auto` over such metadata exits 69 and writes no file |
-| `apps/loopex_composition/test/sign_in_refresh_test.exs` | Refresh at the window, including a short `expires_in`. **Custody deadline**, through the real refresher and `CredentialCustody.resolve/1`: a fresh 30 s token from the fake server resolves `{:ok, _}` as soon as custody starts and is refreshed at 15 s; with the server then unreachable it still resolves until 22,500 ms after `t0` and `:expired` after it; **delayed response**: a 10 s token whose response the fake server delays by more than 7,500 ms after the request reaches it (so verification and the write finish after `t0` + 7,500 ms) enters custody past its deadline, `CredentialCustody.resolve/1` returns `:expired` on the first call, a model call on the route refuses before dispatch with no provider request carrying that token, and the refresher's next refresh is due at once, a repeated delay following step 5's transient schedule; a token with `expires_in` 9 is `sign_in_failed`, at login with nothing written and at refresh with nothing written and custody unchanged. A refresher whose context's auth directory is moved inside a listed root after start exchanges nothing and rotates custody to `nil`; rotation persisted; `invalid_grant` → `sign_in_required` and custody `:missing`; transient retry schedule; expiry while unreachable → `:expired` refusal. Two OS processes on one home perform exactly one exchange, the other adopting. Stale lock reclaim. Account change refused; same-account re-login adopted within 30 s; logout reaches custody `nil`. **Different-account write cut:** a service running account A; `auth login` for B is killed after its record write; the service's next refresh exchanges nothing, writes nothing and rotates custody to `nil`, B's record bytes are unchanged, a new composition refuses `provider_sign_in_required`, `auth status` shows `sign_in_incomplete`, and rerunning the login repairs it. **Restart before metadata publication:** a refresh at which the fake server rotates and invalidates the old refresh token is killed after its record write; a restarted composition rolls the metadata forward and refreshes with the rotated token; the invalidated token is never presented again. Refresh-response rules: an OpenAI response without `refresh_token` fails with no write; a Google response without `refresh_token` or `id_token` keeps the prior refresh token and subject; a refresh-response ID token is never used for identity. **Write failure after exchange:** with the fake server rotating and invalidating the old refresh token and the store failing its write, custody resolves the new access token, the fake server sees no second exchange while the write is pending, each retry follows step 5's schedule and emits one `sign_in_store_write_pending` line naming the class and no token, the write succeeds once the store recovers at the next generation, and a refresher stopped before that leaves the route needing sign-in with the invalidated token never presented. **Lock busy:** a lock held by another OS process across a delayed 30,000 ms exchange makes the refresher's acquisition fail `sign_in_lock_busy` after 10,000 ms with no exchange, no write and custody unchanged, and its retry adopts the holder's record without contacting the provider. **Logout then login:** a running refresher reaches custody `nil` and stops its schedule after `auth logout`; `auth login` for the same account then writes a generation above the floor under the floor's client; the refresher adopts it within 30 s, resolves the new token and refreshes again at the next window. `chatgpt` model list refreshed after each refresh and adoption |
+| `apps/loopex_composition/test/sign_in_refresh_test.exs` | Refresh at the window, including a short `expires_in`. **Custody deadline**, through the real refresher and `CredentialCustody.resolve/1`: a fresh 30 s token from the fake server resolves `{:ok, _}` as soon as custody starts and is refreshed at 15 s; with the server then unreachable it still resolves until 22,500 ms after `t0` and `:expired` after it; **delayed response**: a 10 s token whose response the fake server delays by more than 7,500 ms after the request reaches it (so verification and the write finish after `t0` + 7,500 ms) enters custody past its deadline, `CredentialCustody.resolve/1` returns `:expired` on the first call, a model call on the route refuses before dispatch with no provider request carrying that token, and the refresher's next refresh is due at once, a repeated delay following step 5's transient schedule; a token with `expires_in` 9 is `sign_in_failed`, at login with nothing written and at refresh with nothing written and custody unchanged. A refresher whose context's auth directory is moved inside a listed root after start exchanges nothing and rotates custody to `nil`; rotation persisted; `invalid_grant` → `sign_in_required` and custody `:missing`; transient retry schedule; expiry while unreachable → `:expired` refusal. Two OS processes on one home perform exactly one exchange, the other adopting. Stale lock reclaim. Account change refused; same-account re-login adopted within 30 s; logout reaches custody `nil`. **Different-account write cut:** a service running account A; `auth login` for B is killed after its record write; the service's next refresh exchanges nothing, writes nothing and rotates custody to `nil`, B's record bytes are unchanged, a new composition refuses `provider_sign_in_required`, `auth status` shows `sign_in_incomplete`, and rerunning the login repairs it. **Restart before metadata publication:** a refresh at which the fake server rotates and invalidates the old refresh token is killed after its record write; a restarted composition rolls the metadata forward and refreshes with the rotated token; the invalidated token is never presented again. Refresh-response rules: an OpenAI response without `refresh_token` fails with no write; a Google response without `refresh_token` or `id_token` keeps the prior refresh token and subject; a refresh-response ID token is never used for identity. **Write failure after exchange:** with the fake server rotating and invalidating the old refresh token and the store failing its write, custody resolves the new access token, the fake server sees no second exchange while the write is pending, each retry follows step 5's schedule and emits one `sign_in_store_write_pending` line naming the class and no token, the write succeeds once the store recovers at the next generation, and a refresher stopped before that leaves the route needing sign-in with the invalidated token never presented. **Lock busy:** a lock held by another OS process across a delayed 30,000 ms exchange makes the refresher's acquisition fail `sign_in_lock_busy` after 10,000 ms with no exchange, no write and custody unchanged, and its retry adopts the holder's record without contacting the provider. **Logout then login:** a running refresher reaches custody `nil` and stops its schedule after `auth logout`; `auth login` for the same account then writes a generation above the floor under the floor's client; the refresher adopts it within 30 s, resolves the new token and refreshes again at the next window. `chatgpt` model list refreshed after each refresh and adoption; a failed refresh-time listing keeps the previous list, never `null`, and names `sign_in_model_list_stale` |
 | `apps/loopex_cli/test/auth_command_test.exs` (separation) | `auth login` exits 76 before any token write when the auth directory or the ADC directory and a selected state root overlap in either direction, with the context built by `LoopexCli.Home` from a temporary `HOME` and the selected file; a durable composition with an `oauth` binding and no context refuses `provider_sign_in_required` |
 | `apps/loopex_composition/test/credential_plane_test.exs` (extended) | A sign-in route's custody is registered like an `env` route. Two canaries (access and refresh) never appear in journals, public events, progress, diagnostics, traces, executor job environments or resource subprocess environments. An invocation during rotation uses exactly one token |
 | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` (extended) | The `token_exchange` and `model_list` invocations: credential frame, bounds, closed failure classes, no raw body crossing, cleanup proof. The guardian's custody-phase producer of `provider_sign_in_required` and its `model_call_failed` counterparts, as [producing the reason](#technical-adr-0073-failure-reason) lists. The access-token echo guard withholds a reply containing the token |
-| `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. A login whose ID token fails verification writes nothing. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`, each leaving the floor. A login after logout authorizes under the floor's issued client. `model_list` failure at login keeps the sign-in with `models: null`. The ADC metadata path |
+| `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. A login whose ID token fails verification writes nothing. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`, each leaving the floor. A login after logout authorizes under the floor's issued client. A login whose `model_list` fails writes no record, metadata or floor and exits 68 for a malformed or over-bound list and 72 for a transport failure, timeout or non-2xx status (D25). The ADC metadata path |
 | `apps/loopex_cli/test/daemon_sign_in_test.exs` | Statuses 120 to 123, each refused start leaving no socket; a sign-in route absent, inconsistent or `sign_in_required` at startup refuses 120; start-on-demand presence check; revoked mid-service → next call `not_dispatched` with no fallback to another route, other routes still served, and the attached client's terminal outcome is `failed` with `provider_sign_in_required` and the `auth login` hint; re-login adopted and the next turn succeeds without restart; **logout then login** in sequence while the service runs: the next call after logout refuses `provider_sign_in_required`, and after a same-account login the service adopts the new generation within 30 s and the next turn succeeds without restart |
 | `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers exactly `Enum.to_list(65..124) -- [114]`, each status once; `fetch/1` refuses 114 |
 | `apps/loopex_llm_reqllm/test/chatgpt_reply_ceiling_test.exs` | Through the fake server: a stream longer than the ceiling ends with completion `limit`, text whose `Loopex.Bounds.estimate/1` is at most the ceiling and is a prefix of what the server sent, a cut on a UTF-8 boundary, no tool calls, nil reported usage, and the server observing the connection closed; a stream that completes below the ceiling is unchanged; a ceiling of 1; a cut during a streamed tool call; the request body never contains `max_output_tokens`. Each case runs through both actual callers: the companion worker's `drain/5`, where the halt calls `StreamResponse.close/1` and no `StreamServer` or HTTP task survives the invocation, and the in-process caller through `OneShotHTTP1`, where the halt is followed by the owner's existing tagged-pool teardown proof before the result, and no progress delta is emitted. A source check finds one ceiling implementation, `ReplyCeiling`, called from both. **Raw-byte bound:** a stream longer than the ceiling whose SSE framing reaches 8,388,609 raw bytes while its estimate is still below the ceiling ends the in-process caller with `{:error, {:dispatched_or_unknown, "model_call_failed"}}` after the same teardown proof, while the same stream through the companion caller ends at the ceiling with completion `limit` |
@@ -1324,8 +1353,12 @@ Release lanes for M8 outcome 8, attended, gated on each provider's client
 being available, run with `--only`:
 
 - `real-sign-in-openai`: an attended `auth login openai --store file` into
-  a temporary home, one real `chatgpt:` conversation through the installed
-  service, a forced refresh, and logout with revocation. The lane also
+  a temporary home, whose model list, fetched before the login's write,
+  must be recorded non-empty within its bounds and name the lane's model;
+  one real `chatgpt:` conversation through the installed service; a forced
+  refresh; logout with revocation; then a second login under the generation
+  floor, which must authorize under the floor's issued client, write a
+  generation above the floor and record the list again. The lane also
   records verification items 1 and 11 to 15.
 - `real-sign-in-gemini`: the same for `vertex:`, `--store file` in a
   temporary home, through both the `loopex`
@@ -1499,7 +1532,7 @@ lane that settles it, and the design above does not depend on the answer.
 | 11 | That OpenAI's ID token carries `aud` equal to the issued `oaiapp_...` client, and that the callback returns that issued client ID | Implementation. `real-sign-in-openai` verifies the real ID token under check 5 against the client the callback returned; a different audience fails the lane and amends this record |
 | 12 | That OpenAI honors the OIDC `nonce`, and accepts a later authorize under the issued client instead of `dynamic_agent_client` | Implementation. `real-sign-in-openai` verifies check 7 on the real token, then logs out and signs in again under the floor's issued client |
 | 13 | That OpenAI accepts `resource=https://api.openai.com/v1` on refresh | Implementation. The lane's forced refresh sends it and must succeed |
-| 14 | That `GET /v1/models` answers a plan access token with entries carrying `visibility` | Implementation. The lane's `model_list` after login must return a non-empty list within its bounds that names the lane's model |
+| 14 | That `GET /v1/models` answers a plan access token with entries carrying `visibility` | Implementation. The lane's login runs `model_list` before its write and must record a non-empty list within its bounds that names the lane's model; a failure fails the login with nothing written (D25) |
 | 15 | That the plan token's model list fits 256 ids of at most 128 bytes | Implementation. The same lane case; an over-bound real list fails `sign_in_failed` and amends the bound |
 | 16 | That `security -i` accepts one input line of 262,144 bytes, the base64url form of a 196,608-byte record | Implementation. The tagged maximum-size round trip in `sign_in_keychain_test.exs`; a refusal lowers the record bound by amendment |
 

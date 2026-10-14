@@ -8124,3 +8124,50 @@ compatibility table and each real sign-in lane's `--store file`; the macOS
 install creates its directory under a scoped `umask 022`; and the M9 draft
 follows the pre-1.0 current-contract rule. All five prerequisite ADRs remain
 Proposed and M8 remains Open.
+
+<a id="disposition-m8-final-pass-2026-10-14"></a>
+### M8 final internal pass answered — 2026-10-14
+
+A final internal pass of the M8 plan pair and its ADRs found the items below.
+The maintainer decided D25 and D26 on 2026-10-14; the other items were fixed
+without a new decision. All five prerequisite ADRs remain Proposed and M8
+remains Open.
+
+1. **Pending-start probe.** The rule of `3fc1a3d0`, under which a probe that
+   finds a live owner with no answering socket waits when `log/` holds a
+   live start pending file, supersedes the
+   [internal review 2](#disposition-m8-internal-review2-2026-10-13) line that
+   such a start "refuses `root_held` at once"; that line now holds only when
+   no start is in progress
+   ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)).
+2. **Model list at login (D25).** The model list is part of `auth login
+   openai`. A failing listing writes no token record, metadata or floor
+   change and exits `sign_in_failed` (68) for a malformed or over-bound list
+   and `provider_unreachable` (72) for a transport failure, timeout or
+   non-2xx status; the exchanged grant is discarded and left to expire or
+   rotate at the provider. `models` is required on the `chatgpt` route and
+   absent elsewhere, and the `models: null` state is removed. A refresh
+   whose listing fails keeps the previous list and names
+   `sign_in_model_list_stale`
+   ([ADR 0073](../adr/0073-provider-oauth-sign-in.md#concept)).
+3. **Product-path adoption (D26).** The `serenity` full release check gains
+   the unattended `m7-adopt` lane, owned by W4: the `v0.4.0` build writes
+   and stops a root with a conversation and a helper run on a live
+   temporary workspace, using the M7 real-provider credentials the release
+   check already holds because M7 chat has no credential-free provider;
+   the candidate's own `loopex store adopt --old-writer stopped` adopts it
+   with no test seam, and the candidate's `doctor` and offline `sessions`
+   find it current with the conversation intact. The D24 fixture test stays
+   in the fast check as the audit-and-marker proof with the workspace check
+   bypassed
+   ([ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept)).
+4. **Lost placement race.** A starter whose service exits 76 keeps waiting
+   only while `log/` holds a live pending file other than its own;
+   otherwise the winner is a foreground holder and it refuses `root_held`
+   at once with that PID. A command that entered `wait` from `probe` has no
+   exit file and polls only the socket and the pending files, refusing
+   `root_held` once none remains and one further connect fails. A pending
+   file whose modification time is in the future is stale (ADR 0037).
+5. **Verification count.** The plan names ADR 0073's sixteen verification
+   items, and its `real-sign-in-openai` row includes the logout-then-login
+   step under the generation floor and the model-list assertion.

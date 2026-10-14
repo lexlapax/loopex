@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file, stated on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -74,8 +74,11 @@ They are recorded here as decided, not proposed.
    resources and asks, as the daemon does in the foreground today. Concurrent
    starts converge on one service through the existing placement lock. A
    command that finds the root held by a process whose socket does not
-   answer, and that it did not start itself, refuses at once as held, naming
-   that process: it may be a foreground command, which no wait would end.
+   answer waits only while a start is visibly in progress, its own or
+   another command's recent one; otherwise, including when a foreground
+   command took the root just before its own service could, it refuses at
+   once as held, naming that process, because no wait would end a
+   foreground command.
 7. **Readiness is reported as it is.** The running service answers one new
    query, `daemon.readiness`: serving; still classifying helper history, with
    ADR 0046's two counts; closed, with the session whose history could not be
