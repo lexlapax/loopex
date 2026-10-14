@@ -7854,3 +7854,36 @@ except 114, each used once; and the amendment inventories, which now list ADR
 0073's additive ADR 0049 schema-version-1 members and ADR 0071's amendment of
 ADR 0046's refusal order. All five prerequisite ADRs remain Proposed and M8
 remains Open; acceptance remains the maintainer's.
+
+<a id="disposition-m8-readiness2-2026-10-13"></a>
+### M8 readiness review 2 answered — 2026-10-13
+
+Readiness review 2 of the M8 planning branch at
+`95c32ab1d2945b31781e1fbaa6cd41c40d5ba67a` found the plan not ready: F1 to F14
+were closed except F4 and F8, which were partly closed, with new findings N1
+(P1), N2 to N4 (P2) and N5 (P3). The maintainer took three decisions in
+response:
+
+1. **Adoption holds the placement lock (N1, amends D17).** `loopex store
+   adopt` holds the root's placement lock from before it publishes the
+   `adopting` marker through the rename to current, so a concurrent adopt or
+   start is refused. The rename is the commit: nothing is checked after it and
+   the marker never returns to `adopting`. A kill before the rename leaves
+   `adopting`; a kill after it leaves a committed current root.
+   `--old-writer stopped` stays required for M7-built processes, which take no
+   placement lock. This supersedes the post-commit check described in
+   [the readiness 1 disposition](#disposition-m8-readiness1-2026-10-13).
+2. **An unusable `HOME` fails closed.** Every command that opens a state root
+   refuses `home_unavailable` when `HOME` is unusable, even with an explicit
+   `--config` or `--state-root`, because the sign-in directory cannot be
+   placed and separation cannot be shown; ephemeral `ask` is exempt
+   ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)).
+3. **Status 124 (N5, adds to D15).** ADR 0072's `root_adopting` takes daemon
+   exit status 124; the set is every integer from 65 to 124 except 114.
+
+N2 to N4 were completed without a new maintainer decision: a host-built,
+already-checked sign-in context passed to the sign-in store and refreshers
+(ADRs 0037 and 0073); path comparison by deepest existing ancestor identity
+plus missing suffix, refusing ambiguous missing names (ADR 0037); and a
+lifetime-relative custody skew with a 10-second minimum lifetime (ADR 0073).
+All five prerequisite ADRs remain Proposed and M8 remains Open.

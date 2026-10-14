@@ -25,7 +25,7 @@ not before unrelated work. None leaves a value to be fixed at acceptance.
 | [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | 2, 4; the `--service` start for 5 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept): one home-reading exception for `LoopexCli.Home`. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): `--config` optional when a home is selected. Reuses ADRs 0031, 0032 and 0046 | Before `LoopexCli.Home`, the configuration writers, `ServiceStart`, `Service`, `paths`, `doctor` or `daemon.readiness` |
 | [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | 1, 6; the installed refusal and restore step of 7 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept) obligation 4: "no compiler" read as "no build toolchain". Applies [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) and ADR 0034 to the relocated companion unchanged | Before the release definition in the umbrella `mix.exs`, `scripts/release/`, the launcher's installed mode, `loopex-verify`, `--relocatable` or `loopex version` |
 | [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept) | 4 (the service's configuration reader), 5 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): nullable `trace` and `policy` in the status record. [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept): the activation ceiling, which counts helper children as decided on 2026-10-13, with any consequent [ADR 0046](../adr/0046-child-session-tool.md#concept) refusal-order clause ADR 0071 states. [ADR 0055](../adr/0055-remote-session-creation-options.md#concept): creation options on a helper-enabled service. Applies ADRs 0033, 0046, 0056 and 0069 | Before `daemon --config`, `AttachedChat`, `DaemonSession`, `ChatProjection`, the `ExitStatus` block 111 to 115, or any helper-parent creation in the daemon |
-| [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) | 3, 7 | [ADR 0051](../adr/0051-current-format-physical-restore.md#concept), two clauses: the absence of a backup CLI, and the latest-backup-only restriction relaxed by `--discard-later-work` for a lost source. Takes the operator backup and restore work out of Proposed ADR 0036 | Before `RootFormat`, the marker checks in `Placement` and `compose/1`, `StoreAdmin`, `LoopexCli.Store`, the `RestoreCodec` discard form or the `ExitStatus` block 116 to 119 |
+| [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) | 3, 7 | [ADR 0051](../adr/0051-current-format-physical-restore.md#concept), two clauses: the absence of a backup CLI, and the latest-backup-only restriction relaxed by `--discard-later-work` for a lost source. Takes the operator backup and restore work out of Proposed ADR 0036 | Before `RootFormat`, the marker checks in `Placement` and `compose/1`, `StoreAdmin`, `LoopexCli.Store`, the `RestoreCodec` discard form or the `ExitStatus` block 116 to 119 and 124 |
 | [ADR 0073](../adr/0073-provider-oauth-sign-in.md#concept) | 8; the sign-in precheck in 4 and the sign-in hint in 5 | [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept): the host-held access token and the `token_exchange` invocation. [ADR 0029](../adr/0029-bounded-provider-failure-diagnostics.md#concept): the public `provider_sign_in_required` reason. [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept): custody rotation by a host refresher. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept): sign-in routes resolve from composition-owned custody. [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept): the `oauth` form, `vertex` members and same-account live rotation. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): the `oauth` binding form and `vertex` members as additive members of schema version 1. Also one sentence of Proposed ADR 0037 and this plan's credential non-goal | Before any `SignIn.*` module, binding-grammar change, Core category admission, schema or vector change, `loopex auth`, or the `ExitStatus` block 120 to 123 |
 
 Accepted decisions constrain M8 without being reopened beyond those named
@@ -93,10 +93,11 @@ Constraints that hold across workstreams:
 - **One restore.** The restore command calls
   `LoopexComposition.Restore.restore/2` and `lookup/3`. It adds no second copy,
   audit or transition.
-- **One lock algorithm.** The configuration-writer lock (ADR 0037) and the
-  sign-in refresh lock (ADR 0073) use the extracted placement primitive on
-  their own directories, never `Placement.acquire/2`, whose first step admits a
-  state root under ADR 0072 and must not mark a lock directory.
+- **One lock algorithm.** The configuration-writer lock (ADR 0037), the
+  sign-in refresh lock (ADR 0073) and `store adopt`'s hold on the root's
+  `placement.lock` (ADR 0072) use the extracted placement primitive, never
+  `Placement.acquire/2`, whose first step admits a state root under ADR 0072
+  and would refuse the unmarked root adopt is marking or mark a lock directory.
 - **Closed schema.** The M9 capacity option needs a versioned successor to ADR
   0049's closed schema or its explicit amendment. M8 adds no capacity member.
 - **Helper concurrency.** One active helper per parent conversation, with
@@ -271,7 +272,7 @@ any other write, by hard-link publication that never replaces. Every path that
 opens a root checks it before the placement lock and again before composition
 starts a Store. It refuses `root_unmarked`, `root_format_unknown` or
 `root_marker_unreadable` before any lock, writer marker, socket or Store
-repair; the daemon exits 116 to 119.
+repair, and refuses `root_adopting` the same way; the daemon exits 116 to 119, or 124 for `root_adopting`.
 
 A root the M6 or M7 source builds wrote carries no marker and is refused. `loopex
 store adopt`, given `--old-writer stopped`, then adopts it in two phases (D17).

@@ -272,7 +272,8 @@ own client identities. On acceptance it amends named clauses of accepted ADRs
 `provider_sign_in_required` in ADR 0029's bounded vocabulary; adds the `oauth`
 binding form and `vertex` members to ADR 0049's schema version 1 as additive
 members; and amends one sentence of Proposed ADR 0037. M8's daemon exit statuses are 111 to 115 for 0071 (114
-retired), 116 to 119 for 0072 and 120 to 123 for 0073. All five M8
+retired), 116 to 119 and 124 (`root_adopting`) for 0072 and 120 to 123 for
+0073. All five M8
 prerequisites remain Proposed.
 
 0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on
