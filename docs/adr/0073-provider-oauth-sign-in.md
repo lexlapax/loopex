@@ -12,8 +12,9 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   [ADR 0019](0019-host-owned-provider-protection.md#concept),
   [ADR 0029](0029-bounded-provider-failure-diagnostics.md#concept),
   [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept),
-  [ADR 0039](0039-ephemeral-embedded-profile.md#concept) and
-  [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept),
+  [ADR 0039](0039-ephemeral-embedded-profile.md#concept),
+  [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept) and
+  [ADR 0049](0049-explicit-host-configuration.md#concept),
   listed under [amendments](#concept-adr-0073-amendments). It changes one
   sentence of the Proposed [ADR 0037](0037-host-configuration-and-path-discovery.md#concept)
   and one non-goal of the M8 plan.
@@ -31,6 +32,12 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
 ### Context and Decision
 
 Technical depth: [Contract](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-decision).
+
+Technical depth: [ID-token verification](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-id-token).
+
+Technical depth: [Refresh-response rules](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-refresh-merge).
+
+Technical depth: [The ADC source](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-adc).
 
 Today every hosted provider route needs an API key in a named environment
 variable. Many operators instead have a paid plan or a cloud project, and
@@ -77,8 +84,10 @@ new provider protocol.
 5. **The host keeps tokens in the operating system's keyring.** macOS uses the
    login Keychain. Linux uses the Secret Service through libsecret when it is
    available. Without a keyring, as on a headless Linux host, tokens go to a
-   private file in the Loopex home, readable only by its owner. Tokens live
-   outside the state root, so backups never contain them. Tokens never enter
+   private file in the Loopex home, readable only by its owner. The token
+   directory and every selected state root must lie physically apart, under
+   ADR 0037's separation invariant, which refuses an overlapping selection
+   before any token or root write. So backups never contain tokens. Tokens never enter
    journals, public events, progress, diagnostics, traces, fixtures, executor
    jobs or project resources.
 6. **An access token travels exactly like an API key.** For each provider call
@@ -109,6 +118,24 @@ new provider protocol.
     `provider_sign_in_required`, which every client can show. This amends
     accepted ADR 0029's bounded failure vocabulary. See
     [The public failure reason](#concept-adr-0073-failure-reason).
+11. **A stored token belongs to one account and one client.** Each stored
+    token names the account it was issued for, the Loopex client that
+    obtained it, and a write generation. The non-secret metadata that
+    `auth status` reads names the same three. The route uses the token only
+    when both agree. Any disagreement, such as a crash between the two
+    writes, leaves the route signed out until the same account's write is
+    completed or the operator signs in again. A token is never shown or used
+    under another account's name. See
+    [Account binding and recovery](#concept-adr-0073-account-binding).
+12. **Loopex checks the provider's signature before trusting an account.**
+    The account a sign-in names comes from the provider's signed identity
+    token. Loopex verifies that signature against the provider's published
+    keys, with OTP's built-in cryptography and no new library,
+    before it records or compares the account.
+13. **Google's Application Default Credentials stay gcloud's file.** With the
+    `adc` source Loopex stores no token of its own. It reads gcloud's file at
+    each refresh, notices when gcloud replaced it, and confirms the account
+    before using a replaced file's token.
 
 The maintainer decided items 9 and 10, the daemon exit statuses and the
 outcome numbering on 2026-10-13. They are recorded as decided, not proposed.
@@ -137,6 +164,13 @@ shorter than a provider-enforced ceiling would have allowed, never longer by
 that estimate. The summarizer and every other
 role may therefore use `chatgpt:`.
 
+One ceiling implementation serves both ways a call is made: the provider
+companion of the durable hosts, and the in-process caller of the ephemeral
+profile. The in-process caller streams the `chatgpt:` reply through the
+profile's existing single-use connection, so the ephemeral cleanup proof is
+unchanged, and it shows no reply progress while the reply arrives, as it shows
+none for any route today.
+
 <a id="concept-adr-0073-failure-reason"></a>
 ### The Public Failure Reason
 
@@ -146,7 +180,9 @@ When a call is refused before dispatch because its sign-in route has no
 usable sign-in, the run ends as failed with the reason
 `provider_sign_in_required`, not the generic `model_call_failed`. Nothing was
 sent and nothing is owed. Loopex does not retry the call, because a retry
-would meet the same refusal. A maintenance or compaction run reports the same
+would meet the same refusal. The refusal can also arrive on the one retry a
+generic unsent failure earns, when the sign-in was lost between the two
+attempts; it ends the run the same way. A maintenance or compaction run reports the same
 category.
 
 Clients see the reason in the run's terminal outcome on both
@@ -157,6 +193,26 @@ resume uses the route without a restart. Other clients show the reason as
 they show any failed outcome. A token that merely expired while the provider
 was unreachable is not this reason: it stays `model_call_failed`, because
 signing in again would not help.
+
+<a id="concept-adr-0073-account-binding"></a>
+### Account Binding and Recovery
+
+Technical depth: [Token record, pairing rule and recovery](0073-provider-oauth-sign-in-technical.md#technical-adr-0073-pairing).
+
+A sign-in is stored in two places: the secret, in the keyring or the private
+file, and the non-secret metadata beside it. They cannot be written in one
+step. Loopex writes the secret first and the metadata second, and both name
+the account, the client and the generation. A reader that finds them
+disagreeing uses neither as they stand:
+
+- When the secret is exactly one write ahead for the same account and
+  client, the next process that takes the refresh lock completes the
+  metadata write from the secret. A refresh that crashed after the provider
+  rotated the token therefore loses nothing.
+- In every other disagreement, including a secret for a different account,
+  the route is signed out. `auth status` shows that sign-in is incomplete
+  and `auth login` repairs it. A running service keeps the account it
+  started with and never writes over the other account's secret.
 
 <a id="concept-adr-0073-consequences"></a>
 ### Observable Consequences
@@ -208,6 +264,7 @@ byte-for-byte as accepted, and the ADR index records the amendment.
 | 0019 | The sender passes a credential read from the environment | The credential may be a host-held access token. A new token-exchange invocation of the same companion carries a refresh token over the same private channel |
 | 0034 | Custody holds one value bound at composition | Custody's existing rotation and expiry are used by a host refresher; the token, registry and sender rules are unchanged |
 | 0039 | In the ephemeral profile, each hosted provider's key is read from its variable at the model boundary for each call | A sign-in route resolves from custody owned by the composition. A refresh in this profile runs in the host VM, under the same audience the profile already accepts |
+| 0049 | The schema-version-1 configuration file's closed `providers` member; durable chat requires an `env` credential | Adds, inside schema version 1, the `chatgpt`, `vertex` and `claude` provider names, the `oauth` credential form, and the `vertex` `project` and `location` members. Durable chat also accepts an `oauth` binding. The schema version does not change |
 | 0029 | A failed model call's public result is the fixed `model_call_failed`; the diagnostic pair stays private | A host refusal before dispatch because a sign-in route needs sign-in is public as `not_dispatched` with `provider_sign_in_required`. Dispatched failures and the private diagnostic pair are unchanged |
 
 The Proposed ADR 0037's sentence that file, keychain and command credentials
@@ -264,7 +321,9 @@ Decided on 2026-10-13, and no longer open: the `chatgpt:` reply ceiling
 (decision 9), the public failure reason (decision 10), and the numbering.
 The sign-in outcome is M8 outcome 8, and its release lanes are
 `real-sign-in-openai`, `real-sign-in-gemini` and `real-sign-in-anthropic`.
-Items 1 to 3 remain maintainer actions with the providers.
+Items 1 to 3 remain maintainer actions with the providers. Closure needs
+positive real sign-in proofs for OpenAI and Google only. The disabled
+`claude:` route is proved by its tested refusal and needs no deferral.
 
 ## Governance Record
 
