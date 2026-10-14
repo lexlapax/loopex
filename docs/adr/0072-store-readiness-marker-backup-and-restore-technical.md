@@ -158,7 +158,11 @@ whose encoder runs only inside its writer process writes the same input into
 a temporary root instead, and those bytes must equal the vector. Vectors are written once per format number by a test-only generator
 in the same file, run only with `LOOPEX_ROOT_FORMAT_GENERATE=N`, which
 refuses when `N/` exists or `N` is not the number the marker writes; no
-check runs it.
+check runs it. It writes the set into a fresh `.tmp-` sibling and renames
+that to `N/` only while `N/` is absent, so a second generator racing it
+fails at the rename and a killed one leaves only a `.tmp-` directory, which
+it never reuses and which the pin, counting only directories named by
+digits, ignores.
 
 *Completeness check.* The same test reads the source of the five
 applications that write into a root (`loopex`, `loopex_store_local`,
