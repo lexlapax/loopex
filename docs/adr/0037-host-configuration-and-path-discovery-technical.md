@@ -641,8 +641,10 @@ output with keys in the order listed, as `sessions --daemon --status` does.
   never signals it.
 - **`service status`.** Prints the closed status object below and exits `0`
   for `serving`, `3` for any other state, and `1` when it cannot determine
-  one: the file cannot be selected or loaded, or the socket answers
-  `daemon.readiness` but not `daemon.status`. `service start` prints the same
+  one: the file cannot be selected or loaded, the socket answers
+  `daemon.readiness` but not `daemon.status`, or `Placement.live_owner(root)`
+  answers `placement_unverifiable` or `placement_lock_failed`, which it
+  prints as `loopex: <class>` with no object. `service start` prints the same
   object. A live owner whose socket does not answer is `starting` when its
   service record matches under the holder classification, and `held`
   otherwise: a foreground command.
@@ -658,7 +660,10 @@ output with keys in the order listed, as `sessions --daemon --status` does.
   format object, by reference), `service` (the `service status` object) and
   `version`. It reads no credential value and no session record. Exits `0`
   when the file is valid, every reference is present, ADR 0072's check accepts
-  or the root is absent, and the service is `stopped` or `serving`; else `1`.
+  or the root is absent, and the service is `stopped` or `serving`; else `1`,
+  including when the service state cannot be determined, for which its
+  `service` value is `null` and the `live_owner` class is printed on standard
+  error.
 
 #### Service status object
 
@@ -671,7 +676,7 @@ connection, `daemon.readiness` and then `daemon.status`, each bounded at
 
 | Key | Type | Source |
 | --- | --- | --- |
-| `state` | String: `stopped`, `held`, `starting`, `serving`, `classifying`, `closed` or `unavailable` | No live owner: `stopped`. A live owner and no readiness answer: `starting` when its service record matches, else `held`. A readiness answer: its `state` |
+| `state` | String: `stopped`, `held`, `starting`, `serving`, `classifying`, `closed` or `unavailable` | No live owner: `stopped`. A live owner and no readiness answer: `starting` when its service record matches, else `held`. A readiness answer: its `state`. A `live_owner` error: no object, exit `1` |
 | `pid` | Integer or `null` | The live owner's OS process from `Placement.live_owner(root)`; `null` when `stopped` |
 | `socket` | String | `LoopexDaemon.Paths.startup(root, nil).socket_path` from the selection |
 | `state_root` | String | The selection's absolute state root |
