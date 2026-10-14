@@ -8412,8 +8412,30 @@ Proposed and M8 remains Open.
    a scan code outside the three closed codes mapped to readiness
    `{:unavailable, :unexpected}`; the D58 line's pointer
    `/providers/ROUTE/credential/oauth` and its hint naming `loopex ask`; the
-   service record removed only after the placement lock is released, a
-   record left by a fail-stop or an exit 76 pruned later; `config validate`
+   service record removed whenever the placement release answers `:ok`, a
+   lock never taken included, and a record left by a fail-stop pruned later; `config validate`
    refusing a disabled source while `config show` shows it; `Model.reference/2`
    also taking `:sign_in_routes`; a `FILE.ended` marker naming its one
    successor; `predecessor_not_ended`.
+
+<a id="disposition-m8-holistic6-2026-10-14"></a>
+### M8 internal holistic review round 6 answered — 2026-10-14
+
+A sixth internal holistic review round at `ae1ecbe1` found no P1, P3 items
+only in ADRs 0037 and 0071 and in governance, and P2s in a `--resume` against
+an empty destination, sign-in's per-invocation custody start, `ask`'s
+exclusion set and the in-process route table, and campaign creation. The
+maintainer decided D64 on 2026-10-14; the other items were fixed without a
+new decision. All five prerequisite ADRs remain Proposed and M8 remains Open.
+
+1. **OpenAI registration (D64).** A pre-start prerequisite of its lane.
+2. **Replaced fix choices.** In the earlier lists, holistic 3's
+   `CredentialHost.open/3` is now `open/4`; holistic 4's single-credential
+   omission is replaced by D60, its reference routes of every compiled
+   provider by those whose credential kind is not `:sign_in`, and its D58
+   hint by the hint holistic 5 lists. A residual is added for acceptance: a
+   route keeper killed with `:kill` while durable `ask` traps exits is not
+   noticed until the command ends.
+3. **Amendments recorded as consequences of earlier decisions:** ADR 0048's
+   exclusion set and startup resolution for durable `ask` (D60), and ADR
+   0039's in-process provider and route tables for `chatgpt:` and `vertex:`.
