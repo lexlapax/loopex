@@ -4,7 +4,7 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
@@ -131,14 +131,22 @@ never opens a root in a format it does not read; it refuses it by name, and
 roots of an earlier number stay refused until a separately decided migration
 exists.
 
-The format is pinned by golden vectors: bytes the real encoders wrote for
-every record kind, nested shape and limit of format 1, committed under its
-number, which the real decoders must admit and the real encoders must
-reproduce exactly. A codec change that keeps the number fails the fast check,
-and so does a new record kind or version name in the code that no vector
-covers. A change no vector reaches, such as a new branch that writes an
-optional member, is caught by review of any change to a format owner, not by
-the check.
+The check that holds the rule is small and its reach is stated. One
+format-1 root, written once by the real runtime with only the model
+scripted and retained as a repository fixture with a pinned digest, and the
+retained M7-written root are decoded in the fast check by the same full
+audit adopt runs. The codecs that are pure functions of their input must
+also re-encode what they decoded to the exact retained bytes, and a short
+named list of size limits is checked one unit over each limit and, where a
+valid input that large is cheap to build, at it. A change that makes a
+retained record unreadable, or changes a pure codec's bytes or one of those
+limits, therefore fails the fast check. It passes again only with a new
+fixture, which under D28 comes with a new number; the check does not tie
+the two together, and review does. Everything else is review's too: a shape
+no retained record reaches, a change to what a writer process writes when
+the retained bytes still decode, such as a new optional member, and a
+regenerated fixture under an unchanged number are caught, under D28, by
+review of any change to a format owner, not by the check.
 
 <a id="concept-adr-0072-adopt"></a>
 ### Adopting a Root the Source Build Wrote
@@ -205,6 +213,9 @@ the conversation. The M7 build never listed the helper's child session in its
 session catalogue and adopt adds nothing but the marker, so the child's
 journal and terminal record are checked by a read-only audit over the
 delivered decoders, and every record the M7 build wrote stays byte-identical.
+A real provider need not do what the review asks: when the M7 run did not
+leave exactly one helper run whose child was prompted, the lane reports its
+evidence unavailable before adopting, never a failure of the candidate.
 Running adopt on a root already marked current reports that
 and writes nothing. A root adopt cannot read is recovered the same way as any
 unsupported root: through a backup restored under the build that wrote it.
