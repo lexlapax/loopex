@@ -202,17 +202,20 @@ New `LoopexDaemon.ExitStatus` classes, after the delivered 65 to 110:
 | 113 | `provider_credential_absent` | A configured reference is absent; the line adds the pointer |
 | 114 | — | Retired before use: an earlier draft of this record assigned it to a refusal of enabled delegation, which the service now hosts. No class maps to it and the daemon never exits with it |
 | 115 | `trace_start_failed` | The file enables a trace that does not start |
+| 125 | `service_record_write_failed` | Owned by ADR 0037: the daemon could not write its [service record](0037-host-configuration-and-path-discovery-technical.md#technical-0037-service-record) and exits before the placement lock (D31) |
 
 Numbers are kept stable rather than closed up, so no text that already names
 115 changes meaning. ADR 0072's root refusals and ADR 0073's sign-in statuses
 take the statuses after 115, in that order: 116 to 119 and 120 to 123;
-ADR 0072's `root_adopting` takes 124. They land in three blocks so that every
+ADR 0072's `root_adopting` takes 124 and ADR 0037's
+`service_record_write_failed` 125. They land in three blocks so that every
 interim table is gap-free: this record's 111 to 115; then ADR 0072's 116 to
-119; then 120 to 124 together, ADR 0073's four with ADR 0072's 124. At each
-landing `command_test.exs` asserts exactly the cumulative set: 65 to 115,
-then 65 to 119, then 65 to 124, each without 114. The
-module's "every integer from 65 through 110" statement becomes, once all three
-records land, "every integer from 65 through 124 except 114, which is
+119; then 120 to 125 together with ADR 0037's service record, ADR 0073's
+four, ADR 0072's 124 and ADR 0037's 125. At each landing `command_test.exs`
+asserts exactly the cumulative set: 65 to 115, then 65 to 119, then 65 to
+125, each without 114. The
+module's "every integer from 65 through 110" statement becomes, once all four
+records land, "every integer from 65 through 125 except 114, which is
 retired"; `ExitStatus.classes/0` omits 114 and `fetch/1` refuses it. ADR
 0037's separation refusal `auth_root_overlap` reuses 111 (table above) and takes no
 number of its own. A helper role that cannot be captured is `configuration_invalid`

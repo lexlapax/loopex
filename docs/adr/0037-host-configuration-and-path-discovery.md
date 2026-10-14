@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file, stated on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), superseding D19, D21 and every mount and walk-identity rule, recorded on 2026-10-14
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13; the maintainer's rule for overlay, FUSE and network mounts at or above a walked root (D21) decided on 2026-10-13; after the holistic internal review on 2026-10-13, the maintainer's confirmation that an unready sign-in route refuses the start (D22), and the start's immediate `root_held` refusal, the pruning of start exit files, the sign-in context's session-bus member and ADR 0044's method inventory; a probe's wait on another command's start in progress, and the start's handling of a lost placement race and of a clock-skewed pending file, stated on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), superseding D19, D21 and every mount and walk-identity rule, recorded on 2026-10-14; the maintainer's decision that a service that cannot write its service record refuses the start with daemon status 125 (D31), recorded on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -75,7 +75,10 @@ They are recorded here as decided, not proposed.
    starts converge on one service through the existing placement lock. A
    service started from a configuration file alone, as a start runs it,
    records its own process incarnation in that file's log directory before it
-   takes the lock, so the lock's holder shows whether it is a service. A command that finds the root held by a process
+   takes the lock, so the lock's holder shows whether it is a service. A
+   service that cannot write that record refuses to start: it exits with the
+   new status 125, `service_record_write_failed`, before taking the lock, and
+   its starter refuses with that class (D31). A command that finds the root held by a process
    whose socket does not answer waits only when that holder is a service;
    any other holder is a foreground command, and the command refuses at once
    as held, naming that process, because no wait would end a foreground
@@ -167,7 +170,7 @@ leaving files out of a backup, and it does so by comparing paths:
 - A violation is refused as `auth_root_overlap`, naming where the root was
   chosen, before anything is written. A command exits `1`, as every refusal in
   this record does. `loopex daemon` exits with ADR 0071's existing `111`,
-  `configuration_invalid`, so no new exit status is added. A command that
+  `configuration_invalid`, so this refusal adds no exit status. A command that
   cannot read a usable `HOME` cannot check the rule, so it refuses
   `home_unavailable` before touching a root. An ephemeral `ask`, which never
   selects a root, is unaffected.

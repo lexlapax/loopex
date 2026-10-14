@@ -200,10 +200,12 @@ decided on 2026-10-13: helper children count toward the daemon's
 64-activation limit, refused as `helper_activation_limit` when it is reached.
 
 Also decided on 2026-10-13: the M8 records number their daemon exit statuses
-in one sequence, every integer from 65 through 124 except 114: the delivered
+in one sequence, every integer from 65 through 125 except 114: the delivered
 65 to 110, this record's 111 to 115 with 114 retired, ADR 0072's 116 to 119,
-ADR 0073's 120 to 123, and ADR 0072's `root_adopting` at 124. The last two
-land together, 120 to 124, so that no interim table has a gap. ADR 0037's refusal of a state root that overlaps
+ADR 0073's 120 to 123, ADR 0072's `root_adopting` at 124, and ADR 0037's
+`service_record_write_failed` at 125 (D31, 2026-10-14). The last three land
+together, 120 to 125, with ADR 0037's service record, so that no interim
+table has a gap. ADR 0037's refusal of a state root that overlaps
 the sign-in directory reuses this record's 111, `configuration_invalid`.
 Nothing in this record remains open.
 
