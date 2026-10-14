@@ -28,6 +28,26 @@ home: abs}`. Selection reads no file; `ConfigFile.load/2` then reads it under
 ADR 0049's unchanged 256 KiB reader, schema and resolver. No project file,
 XDG directory, `LOOPEX_CONFIG`-style variable or interpolation is consulted.
 
+<a id="technical-0037-ask"></a>
+**`ask` (D54).** `loopex ask`, durable and ephemeral, gains `--config FILE`
+(`AskOptions`) and selects a file by this table, except that with neither
+present it selects none and runs as delivered rather than refusing
+`configuration_not_found`. `Ask.prepare/2` (`ask.ex` :65-80) selects and
+loads the file after its argument, workspace and prompt checks, with ADR
+0049's unchanged reader validating the whole file, and keeps only its
+`providers`. No other member is used: `--state-root` alone still makes
+`ask` durable and names its root, the file's `paths.state_root` is neither
+opened nor checked, and an ephemeral `ask`'s root stays a fresh temporary
+directory. Its sign-in context therefore holds durable `ask`'s root, or no
+root for ephemeral `ask`, and the marked-ancestor rule applies as on every
+row. Without a usable `HOME`, an ephemeral `ask` discovers no file and has
+no sign-in context; with `--config` it still reads the file, and an `oauth`
+binding there refuses `provider_sign_in_required` (ADR 0073). A file that
+cannot be selected, read or validated ends `ask` with status 1 before any
+session, reported as `loopex.ask/1`'s fixed `command_failed`; a disabled
+route reports `sign_in_unavailable` (D52). ADR 0073 states how each `ask`
+host opens the file's bindings.
+
 State-root precedence is ADR 0049's, unchanged: `--state-root` flag >
 `LOOPEX_HOME` > the file's `paths.state_root` (relative to the file's
 directory). No home-derived default is added to the resolver: `init` writes
@@ -159,9 +179,10 @@ is one plain map with exactly five members:
 - **Lifecycle.** The context is built once per command, after selection and
   before any write, and is never rebuilt from ambient state. The command
   passes it inward as a host option: `auth` to the store calls it makes;
-  foreground chat, durable `ask` and the daemon to composition, which hands
-  it unchanged to each `SignIn.Route` refresher it starts; the ephemeral
-  composition the same way. A refresher keeps the context it received for
+  foreground chat and durable and ephemeral `ask` to
+  `LoopexComposition.CredentialHost.open/3`, and the daemon to its service,
+  which hand it unchanged to each `SignIn.Route` refresher they start. A
+  refresher keeps the context it received for
   its whole life. `HOME` and the selected roots cannot change inside a
   running process, so the context stays the command's selection; the bus
   address is the starting command's, which the detached service inherits
@@ -207,7 +228,9 @@ reading only metadata:
 **Physical root.** `LoopexCli.Home` hands every root opener, the `store`
 commands and `loopex daemon` without `--config` included, the selected
 root's physical path, `E` joined with `S`, never the spelling it was given,
-because the Local executor ledger binds
+and, to `store adopt` only, also the selection's `Path.expand/1` spelling,
+which adopt uses solely to classify ledger bindings (ADR 0072 adopt steps 1
+and 6), because the Local executor ledger binds
 `Path.expand/1` of the path it receives (`ledger.ex` :159-162) and ADR 0072's
 backup, adopt and restore derive physical placements; a root selected through
 a symbolic-link ancestor therefore opens, backs up and restores as its
@@ -304,7 +327,7 @@ process of the command:
 | `store adopt`, `store backup`, `store restore` | `store adopt` and `store backup`: the selected root, and `BACKUP`; `store restore`, which selects no configuration: exactly `BACKUP` and `DESTINATION`. Each in the context `LoopexCli.Home` builds when the command starts, before the first read of any of them; `--resume` then requires those paths to equal the retained plan's (ADR 0072). Backup's staging directory is a new, empty child of `BACKUP`'s parent and holds no protected directory; it could lie inside one only if `BACKUP` did, which this check refuses. For `store restore --source available`, and for a `--resume` whose retained plan has `source_status` `available`, `StoreAdmin.restore/3` appends the source the capture names and calls `Separation.check/1` again immediately after its check 1 decodes `BACKUP/capture`, before it reads `BACKUP/manifest`, walks `BACKUP/state` or reads any path of the source. A lost source is required absent and is never walked or written, so it is not checked | The root's origin; `/arguments/backup`; `/arguments/destination`; `/capture/source_state_root` |
 | `auth login`, `auth logout` and every other ADR 0073 command that writes `A` | The state root its own selection names, when a file is selected, else no root; the marked-ancestor rule always | The root's origin, or `/auth` for a marked ancestor |
 | A process that starts an ADR 0073 refresher (foreground chat, durable and ephemeral `ask`, daemon) | Covered by its row above, which builds the sign-in context. The refresher receives that context at start, writes only `A`, and re-runs `Separation.check/1` on it before every exchange and every write | The failing root's pointer; the refresher exchanges and writes nothing |
-| Ephemeral `ask` | Nothing: its root is a fresh temporary directory, never selected | — |
+| Ephemeral `ask` | Nothing: its root is a fresh temporary directory, never selected, and a selected file's `paths.state_root` is not used ([`ask`](#technical-0037-ask)) | — |
 
 `doctor` reports a violation as `configuration: "auth_root_overlap
 <pointer>"` and exits `1`; it writes nothing.

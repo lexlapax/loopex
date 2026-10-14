@@ -462,7 +462,9 @@ rotates it on every refresh and a daemon, a foreground chat, an `ask` and
   is refused as active (:160-162). So `SignIn.Route` traps exits, takes and
   releases the lock inside `try ... after`, and runs each exchange in a
   separate linked process. Sent `:shutdown`, it finishes an exchange in
-  progress and that exchange's write, starts no other, and exits; its
+  progress and that exchange's write, starts no other, and exits with
+  reason `:shutdown`, which ADR 0071's `:sign_in_routes` step counts as
+  stopped; its
   opener waits up to 60,000 ms for that before `:kill`, as
   [route owners](#technical-adr-0073-route-owners) states. That covers one
   exchange and its write under the default 5,000 ms cleanup period
@@ -630,11 +632,25 @@ does, and reports the route's class.
   which gives each edge 1,000 ms before `:kill` (`runtime_owner.ex`
   :265-283), and its exit handling, which turns any owned edge's exit into
   `:runtime_stopped` (:105-108), stay as delivered.
-- Durable `ask` already borrows `CredentialHost`'s plane
-  (`durable_ask.ex` :71-73, :96-121). It opens the host with `open/3` and
-  calls `close/1` after it releases the plane (:119).
-- Ephemeral `ask` opens `open/3` with only its sign-in bindings, so no
-  `env` route enters custody, passes the plane's `sign_in_routes`, below, to
+- `ask`, durable and ephemeral, takes its bindings from the `providers` of
+  the file ADR 0037 selects ([ADR 0037's `ask`](0037-host-configuration-and-path-discovery-technical.md#technical-0037-ask),
+  D54), and with no file from the delivered sources below.
+- Durable `ask` already borrows `CredentialHost`'s plane through
+  `LoopexCli.CredentialCache.host/0` (`durable_ask.ex` :71-73, :96-121),
+  which opens `open/0`'s single-credential `env` bindings
+  (`credential_cache.ex` :22-35). It instead passes `CredentialCache` the
+  selected file's `providers`, or with no file those same bindings, and its
+  sign-in context; `CredentialCache` opens them with `open/3` where it
+  calls `open/0` and `open/1` today (:22-56), and `ask` calls `close/1`
+  after it releases the plane (`durable_ask.ex` :119).
+- Ephemeral `ask` passes the selected file's `providers` to
+  `Ephemeral.start_session/1` as `:provider_bindings`; with no file it
+  passes none, as today (`ephemeral_ask.ex` :129-135), and the model
+  provider's reference route applies. `Ask` still discards
+  `LOOPEX_PROVIDER_API_KEY` before the ephemeral profile starts (`ask.ex`
+  :125-132), so a file binding naming that variable finds it unset there.
+  Ephemeral `ask` opens `open/3` with only that map's sign-in bindings, so
+  no `env` route enters custody, passes the plane's `sign_in_routes`, below, to
   `Ephemeral.start_session/1` as the host option `:sign_in_routes`, and
   calls `close/1` after `Ephemeral.stop_session/1` returns. That stop request
   keeps its 11,000 ms bound (`ephemeral.ex` :22, :338-354); the route's
@@ -976,8 +992,8 @@ unchanged.
   `fatal:sign_in_route_lost` it broadcasts is the reason
   `loopex.experimental/4`'s closed `daemon.stopping` set gains (D42;
   [protocol](#technical-adr-0073-failure-reason)).
-  ADR 0071's other serving-time fail-stops, a helper owner's exit and a
-  helper quiesce call that times out, use `runtime_lost`, already admitted,
+  ADR 0071's other serving-time fail-stops, a helper owner's exit, the
+  slice task's abnormal exit and a helper quiesce call that times out, use `runtime_lost`, already admitted,
   and its catalog refusal (111) is a startup failure before the listener, so
   no other M8 class reaches a client. A disabled source has no status of
   its own: it is 111 at configuration selection (D52).
@@ -1814,7 +1830,7 @@ use temporary homes and never touch a real keyring.
 | `apps/loopex/test/sign_in_required_settlement_test.exs` | `{:not_dispatched, "provider_sign_in_required"}` settles attempt one as `not_dispatched`, accounting `none`, next `terminal` with no retry; the run ends `failed` with that reason; the record replays. **Route availability changes between attempts:** attempt one settles `not_dispatched`/`model_call_failed` with `retry`, custody then becomes `:missing`, and attempt two settles terminal with `provider_sign_in_required`; the two-attempt history replays to the same terminal. **Termination precedence:** the category settled with an `abort` termination ends the run `cancelled` and with a `deadline` termination `bound_reached`, never `failed` with the reason, and each replays to the same terminal. The category with `dispatched_or_unknown`, accounting other than `none`, `next` other than `terminal`, or a termination other than abort or deadline is invalid history; a maintenance run reports the category |
 | `apps/loopex_protocol/test/session_v2_schema_test.exs` (extended) | The `daemon.stopping` reason list includes `fatal:sign_in_route_lost` with its literal vector (D42) |
 | `apps/loopex_protocol/test/sign_in_required_vectors_test.exs` | The new vectors encode and decode on `loopex.experimental/3` and `/4`; the reason with a nonnull `failure`, or as a failure category with `retryable` `true`, is refused; the regenerated manifests and schema proof match |
-| `apps/loopex_cli/test/ask_sign_in_test.exs` | Ephemeral `ask` on a sign-in route through the fake server; refresh in host VM; every route stopped by `close/1` before the command returns. **Lost during the run:** a 10 s token whose refresh, due 5 s after start, the fake server answers `invalid_grant` while it holds the run's first model reply, a tool call, for 6 s; the second model call meets custody `:missing`, and ephemeral `ask` reports `failed` with `provider_sign_in_required` in `loopex.ask/1` and in text with the `auth login` hint, exit 2; the cleanup owner admits the refusal and the session is not sealed. Durable `ask` reports the same through its follow reader. **Foreground refusals (D50):** each `ask` over an absent, inconsistent and `sign_in_required` pair, and an ephemeral `ask` with an `oauth` binding and no usable `HOME`, reports status 1 `provider_sign_in_required` with the hint; a disabled source reports status 1 `sign_in_unavailable`; an unavailable and an unsafe store report status 1 `composition_unavailable`; none writes standard output, and the fake server sees no model request; chat refuses each with its startup line and exit 1 |
+| `apps/loopex_cli/test/ask_sign_in_test.exs` | Ephemeral `ask` on a sign-in route through the fake server; refresh in host VM; every route stopped by `close/1` before the command returns. **Lost during the run:** a 10 s token whose refresh, due 5 s after start, the fake server answers `invalid_grant` while it holds the run's first model reply, a tool call, for 6 s; the second model call meets custody `:missing`, and ephemeral `ask` reports `failed` with `provider_sign_in_required` in `loopex.ask/1` and in text with the `auth login` hint, exit 2; the cleanup owner admits the refusal and the session is not sealed. Durable `ask` reports the same through its follow reader. **Foreground refusals (D50):** each `ask` over an absent, inconsistent and `sign_in_required` pair, and an ephemeral `ask` with an `oauth` binding and no usable `HOME`, reports status 1 `provider_sign_in_required` with the hint; a disabled source reports status 1 `sign_in_unavailable`; an unavailable and an unsafe store report status 1 `composition_unavailable`; none writes standard output, and the fake server sees no model request; chat refuses each with its startup line and exit 1. **Selected file (D54):** durable and ephemeral `ask` with no `--config` use the `oauth` binding of the home's `config.json`, and with `--config` that file's, the file's `paths.state_root` left uncreated; with no file each uses its delivered environment route; an invalid selected file reports status 1 `command_failed` with no session started |
 | `apps/loopex_cli/test/sign_in_route_lost_test.exs` | Through the built command in a child OS process, killing the `SignIn.Route` while a run is in progress in foreground chat, durable `ask` and ephemeral `ask` prints `loopex: sign_in_route_lost` and exits 1, with no process group the command started left running, `ask` writing no standard output in text or JSON mode; each durable run has no terminal and a later resume recovers it; ephemeral `ask`'s temporary root is left. **Normal exit during an exchange (D41):** chat ending at end of input, and each `ask` finishing its run, while the route's exchange is delayed 5,000 ms, exit only after the write, ephemeral `ask`'s stop request having returned within its 11,000 ms, and a newly started route refreshes with the rotated token. **Interrupt during an exchange:** an interrupt while the exchange is delayed past the backstop exits at the backstop, and the rotated token is lost, a later start refusing `provider_sign_in_required` (D51), the documented residual |
 | `apps/loopex_composition/test/sign_in_model_admission_test.exs` | The admission cases of [`chatgpt` model admission](#technical-adr-0073-model-admission). A switch made while the route waits for its lock, held by another OS process, and while a recording fake keyring child of the route never exits, is admitted or refused within 100 ms from the route's table |
 

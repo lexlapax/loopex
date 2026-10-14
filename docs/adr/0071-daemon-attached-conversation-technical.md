@@ -389,7 +389,7 @@ classifying or creating a child after `:collaboration` stopped would exit
 and turn a clean stop into `runtime_lost`. M8 adds three steps:
 
 1. `:sign_in_routes`, first: the service removes every `SignIn.Route` the
-   composition started from its components, unlinks and monitors it, and
+   service started in `start_binding_plane/1` from its components, unlinks and monitors it, and
    sends each `Process.exit(route, :shutdown)` at once, ADR 0073's route
    shutdown, so a refresh in progress writes its rotated token. A route
    whose `DOWN` reason is `:shutdown` has stopped: unlike
@@ -398,8 +398,8 @@ and turn a clean stop into `runtime_lost`. M8 adds three steps:
    `:shutdown`. A route still alive at the smaller of 60,000 ms and the
    teardown deadline is killed, and it, or a route that exits with any other
    reason, ends the stop as `sign_in_route_lost`, as a late component ends
-   any step. Composition owns each route's custody and `SignIn.Route` only
-   rotates it (ADR 0073), so the delivered `:custody` step later stops every
+   any step. The service starts each route's custody before the route, and
+   `SignIn.Route` only rotates it (ADR 0073), so the delivered `:custody` step later stops every
    custody as before and sees no loss. While the service runs, a route that
    exits is a fail-stop: the route edges join the running classes
    (`service.ex` :104-115) as `sign_in_route: :sign_in_route_lost` (123,

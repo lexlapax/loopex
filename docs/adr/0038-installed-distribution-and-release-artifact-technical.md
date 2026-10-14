@@ -541,8 +541,9 @@ macOS user account whose shell profile loads no mise or Homebrew.
    `loopex auth status` lists, delete the install directory, and prove the
    home's configuration and roots are intact and, on macOS, that no Loopex
    keychain item remains, by the read-only query
-   `security find-generic-password -s loopex-oauth` over the lane's
-   keychains. The Linux lane signs in to nothing, and its container has no
+   `security find-generic-password -s loopex-oauth -a <home-digest>:<route>`
+   for each of `chatgpt`, `vertex` and `claude`, each exiting 44, so an item
+   of another home never fails the lane. The Linux lane signs in to nothing, and its container has no
    `secret-tool` or session bus, so it makes no keyring query. A before-and-after
    inventory proves that nothing was written outside the home, the workspace,
    the lane's temporary directory and the provider's transient `/tmp/lxp-*`

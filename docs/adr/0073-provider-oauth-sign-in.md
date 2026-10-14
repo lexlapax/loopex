@@ -23,7 +23,8 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   foreground stop during a refresh (D41), the daemon's stopping reason
   (D42) and the disabled route of a deferred lane (D43), and after them the
   foreground refusals (D50), a startup refresh the provider rejects (D51)
-  and the refusal of a disabled route at configuration selection (D52)
+  and the refusal of a disabled route at configuration selection (D52),
+  and `ask`'s use of the selected configuration file's `providers` (D54)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -74,7 +75,11 @@ new provider protocol.
 1. **Sign-in is a credential form.** A provider binding may name `oauth` as its
    credential, beside the existing `env` and `none` forms. The binding still
    names one route per provider. Model output, roles, saved defaults and
-   remote clients still cannot select or create a credential.
+   remote clients still cannot select or create a credential. The
+   maintainer decided on 2026-10-14 (D54) that `loopex ask`, durable and
+   ephemeral, takes the bindings of the configuration file ADR 0037
+   selects, and nothing else from it, so a signed-in route works in `ask`
+   as in chat; without a file `ask` keeps its environment routes.
 2. **A plan-billed or cloud-billed route is its own provider route.** A
    request billed to a ChatGPT plan accepts different models and request
    members than an API-key request. A Gemini request billed to a Google Cloud
