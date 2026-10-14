@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -51,6 +51,10 @@ They are recorded here as decided, not proposed.
    status` manage the service; `loopex paths` and `loopex doctor` inspect the
    home. All of them select the home the same way and pass the selected file to
    `loopex daemon --config` under ADR 0071, which adds no second reader.
+   `service status` prints one closed object: the service's state, process,
+   socket, state root and selected file, the service's whole readiness answer
+   kept intact, and the activations it has used out of its 64, helper
+   children included.
 5. **The service is asked for by name.** `--service` on `chat`, `run`,
    `resume`, `attach` and `sessions` names the selected home's service. The
    conversation, `run` and `resume` start it on demand; `attach` and
@@ -71,17 +75,55 @@ They are recorded here as decided, not proposed.
    ADR 0046's two counts; closed, with the session whose history could not be
    read; or unavailable, with a code and no session, which the service retries.
    The same answer carries the service's workspace, its project-resource
-   admission and its version. A command that starts the service waits at most
-   75 seconds for it to serve and otherwise reports the state it found.
+   admission and its version. Readiness answers within one second even while
+   the service is busy classifying or creating a session. It reads what the
+   helper owner last published about itself and never waits for that owner.
+   A command that starts the service waits at most 75 seconds for it to serve
+   and otherwise reports the state it found.
 8. **The ADR 0003 amendment is one module.** Only the installed reference
    host's home-discovery code reads `HOME`, and it passes absolute paths
    inward. Tests set `HOME` to a temporary directory.
+9. **Sign-in tokens never live inside a state root.** The sign-in directory
+   and every state root stay physically apart, as the
+   [separation section](#concept-0037-auth-separation) states.
 
 This record introduces no second role or provider schema and fixes no
 session's model at process launch. ADRs 0044, 0048 and 0049 govern committed
 selection, custody and explicit configuration. Provider sign-in tokens are
 decided by [ADR 0073](0073-provider-oauth-sign-in.md#concept); file, keychain
 and command sources for API keys remain a separate future decision.
+
+<a id="concept-0037-auth-separation"></a>
+### Sign-in Directory and State-Root Separation
+
+Technical depth: [Sign-in directory and state-root separation](0037-host-configuration-and-path-discovery-technical.md#technical-0037-auth-separation).
+
+ADR 0073 keeps provider sign-in tokens in `auth` under the home. The state
+root can be chosen separately, by flag, by `LOOPEX_HOME` or in the
+configuration. ADR 0072's backups copy every file in a root, so a root that
+held the sign-in directory would put tokens into a backup. This record makes
+that impossible by refusing the layout rather than by leaving files out of a
+backup:
+
+- After following symbolic links and other aliases, the sign-in directory and
+  a state root may not be the same directory, and neither may contain the
+  other. The same holds for the backup and destination directories the store
+  commands name.
+- The installed host's home module owns the rule. It checks before any token
+  is written, any root is created or opened, and before `store adopt`, `store
+  backup`, `store restore`, `config set` and every daemon or service start.
+  `auth login` also refuses when any directory above the sign-in directory is
+  a marked state root.
+- A violation is refused as `auth_root_overlap`, naming where the root was
+  chosen, before anything is written. A command exits `1`, as every refusal in
+  this record does. `loopex daemon` exits with ADR 0071's existing `111`,
+  `configuration_invalid`, so no new exit status is added. A command that
+  cannot read a usable `HOME` cannot check the rule, so it refuses
+  `home_unavailable` before touching a root. An ephemeral `ask`, which never
+  selects a root, is unaffected.
+- No file is excluded from ADR 0051's complete manifest. A backup of a
+  permitted root contains every file of that root, and none of them can be a
+  token.
 
 <a id="concept-adr-0037-consequences"></a>
 ### Observable Consequences

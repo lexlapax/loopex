@@ -61,6 +61,91 @@ and `log/` live in the selected file's directory. Nothing is ever written
 inside the state root by these commands; the root is created only by the first
 command that opens it, under ADR 0072's marker rule.
 
+<a id="technical-0037-auth-separation"></a>
+#### Sign-in directory and state-root separation
+
+Concept: [Sign-in directory and state-root separation](0037-host-configuration-and-path-discovery.md#concept-0037-auth-separation).
+
+**Invariant.** Let `A` be the sign-in directory, `<HOME>/.loopex/auth`, which
+[ADR 0073](0073-provider-oauth-sign-in-technical.md#technical-depth) defines
+and fills, computed from this invocation's `HOME` whether or not it exists.
+Let `R` be any state root the invocation selects, by `--state-root`,
+`LOOPEX_HOME` or the file's `paths.state_root`, and any `BACKUP` or
+`DESTINATION` path a store command names. After canonicalization, `A` and
+each `R` must be separate: neither equals, contains, nor is contained by the
+other. A violation refuses `auth_root_overlap` before anything is written.
+Separation is how ADR 0072's backups and restores stay token-free: ADR 0051's
+complete manifest keeps every file in the root, and nothing is excluded from
+it.
+
+**Owner.** `LoopexCli.Home` (new), the only module that reads `HOME`, owns
+`Home.auth_directory/1` and `Home.separate(auth_directory, [{pointer,
+path}])`. It returns `:ok` or `{:error, {:auth_root_overlap, pointer}}`.
+Core, composition and the daemon application never compute `A`. They receive
+absolute paths from a host that has already checked them.
+
+**Canonical form.** Each path is canonicalized independently, reading only
+metadata:
+
+1. Start from the absolute path the resolver produced (`Path.absname`
+   against the invocation directory for a flag or argument, ADR 0049's
+   file-relative rule for `paths.state_root`).
+2. Walk its components from `/`. For each component that exists,
+   `:file.read_link_info/1` decides. A symbolic link is replaced by its
+   `:file.read_link_all/1` target, resolved against the already-canonical
+   parent, and the walk restarts from that point. A `..` after a resolved
+   component removes the canonical parent physically, as `realpath(3)` does.
+   More than 40 link expansions, an unreadable component or a non-UTF-8
+   target refuses `auth_root_overlap`, because separation cannot be shown.
+3. At the first component that does not exist, the remainder is appended
+   lexically, with `.` removed and `..` applied to the lexical result.
+
+The result is a list of components. `A` and `R` overlap when either list is
+a prefix of the other, comparing whole components and never string prefixes,
+so `/x/state` and `/x/stateful` are separate. On `darwin-arm64` the comparison
+also folds ASCII case, because the default APFS volume is case-insensitive;
+this can refuse a pair that is separate on a case-sensitive volume, and never
+admits an overlapping pair. Paths can also alias through mounts or
+filesystem links that leave no symbolic link to follow. To catch those, the
+`{major_device, inode}` identity of `A`, when `A` exists, is compared with
+the identity of every existing ancestor-or-self of `R`. The identity of `R`,
+when `R` exists, is compared with every existing ancestor-or-self of `A`. A
+match is an overlap. A path that does not yet exist takes part only through
+the lexical test.
+
+**Where it runs.** Every check runs after selection and before the first
+write, lock, socket or process of the command:
+
+| Command or path | Paths checked | Pointer on refusal |
+| --- | --- | --- |
+| `run`, `resume`, `skill`, `chat` (foreground), durable `ask`, `cancel`, offline `sessions`, `artifact` | The selected state root, before `Placement.acquire/2` or composition | The state root's origin: `/flags/state-root`, `/env/LOOPEX_HOME` or `/paths/state_root` |
+| `loopex daemon`, with or without `--config` (`LoopexCli.Daemon`, before `LoopexDaemon.Command` starts the service) | The selected state root | The same |
+| `service start` and every on-demand start (`ServiceStart` `select`) | The selected state root, before `probe` | The same |
+| `config set` and `config unset` (candidate validation) and `init` | The candidate's resolved `paths.state_root` | `/paths/state_root` |
+| `store adopt`, `store backup`, `store restore` | The selected root; `BACKUP`; `DESTINATION` | The root's origin; `/arguments/backup`; `/arguments/destination` |
+| `auth login`, `auth logout` and every other ADR 0073 command that writes `A` | The state root its own selection names, when a file is selected, and every existing ancestor of canonical `A`: a directory holding ADR 0072's `loopex-root-format` marker refuses | The root's origin, or `/auth` for a marked ancestor |
+| A process that starts an ADR 0073 refresher (foreground chat, daemon) | Covered by its row above. The refresher writes only `A` and only in a process whose start passed the check; `HOME` cannot change inside a running process | — |
+| Ephemeral `ask` | Nothing: its root is a fresh temporary directory, never selected | — |
+
+`doctor` reports a violation as `configuration: "auth_root_overlap
+<pointer>"` and exits `1`; it writes nothing.
+
+**HOME unusable.** When `HOME` fails `LoopexCli.Home`'s rules, `A` cannot be
+computed and separation cannot be shown. Every row above then refuses
+`home_unavailable` before any write, including commands given only
+`--config` and `--state-root`. Ephemeral `ask` is the exception. Without
+`HOME`, no sign-in directory exists that the invocation could write. The
+refusal still applies to roots, because another invocation with `HOME` set
+could later create `A` inside the selected root.
+
+**Statuses.** A CLI command prints `loopex: auth_root_overlap <pointer>` with
+the hint `the sign-in directory <A> and the state root must not contain each
+other; select a different state root` and exits `1`, as every refusal in this
+record does. `loopex daemon` exits [ADR 0071](0071-daemon-attached-conversation-technical.md#technical-adr-0071-decision)'s
+`111`, `configuration_invalid`, with class `auth_root_overlap` and the
+pointer on its diagnostic line. No new daemon status is assigned. The M8 set
+stays every integer from 65 through 123 except 114, which ADR 0071 retires.
+
 #### Command grammar
 
 ```text
@@ -220,21 +305,63 @@ attachment and no lease. Its `result` has exactly these members:
 | `version` | The `VERSION` the service was compiled from, as in its `daemon_ready` line |
 
 `LoopexDaemon.ServiceReadiness` (new, `apps/loopex_daemon`) computes it
-within one 1,000 ms read: `Loopex.creation_startup_status(runtime, 1_000)`
-not ready is `unavailable`/`runtime_unavailable`; with no helper owner, ready
-is `serving`; otherwise the helper owner's bounded status decides:
-`:complete` is `serving`; an incomplete pass with a named session is
-`closed`; budget exhaustion or a still pending pass is `classifying`; an
-incomplete pass carrying a code is `unavailable`. The helper's incomplete
-value, today `{:incomplete, covered, enumerated, failed}`, gains its reason so
-the code can be reported; that value is composition-private. While a pass is
-incomplete without a named session, the service runs a further 60,000 ms
-`Helper.classify/2` slice from a linked task one second after the last one
-ends, as ADR 0046 requires of a resident host. The schema addition updates
-`loopex-experimental-4.json` (method list, `initialized.supported_methods`,
-result definition), its vectors, the pinned digest in
-`LoopexCli.DaemonClient` and `clients/node/contract-manifest.mjs`, and
-`clients/node/daemon-client.mjs`.
+within one 1,000 ms read and never calls the helper owner. `Helper.status/1`,
+`Helper.classify/2` and `Helper.create_parent/2` are `:infinity` calls to one
+serial owner, and a classification slice holds that owner for up to 60,000 ms
+before it replies, as does a parent creation up to Core's creation cutoff, so
+no readiness answer may wait on it.
+
+*Readiness source.* The helper owner publishes its classification state to a
+`:protected` ETS table it creates in `init/1` with `read_concurrency: true`.
+The owner is the table's only writer; the table is unnamed, so it is
+per-runtime and never global, and its identifier reaches the service in the
+handle `Delegation.host/4` returns, so obtaining it calls nothing. The table
+holds one row, `{:readiness, sequence, classified, slice}`:
+
+| Field | Value |
+| --- | --- |
+| `sequence` | A positive integer the owner increments on every write |
+| `classified` | The owner's `classified` value after the last completed slice: `:pending` before the first slice ends, `:complete`, or the incomplete value, which gains its reason as `{:incomplete, covered, enumerated, failed, reason}` with `reason` `nil`, `{:closed, session_id, code}` or `{:unavailable, code}`; that value stays composition-private |
+| `slice` | `:idle`, or `{:classifying, started_ms}` with the owner's monotonic start |
+
+The owner writes the row in the same callback that changes the state it
+describes, before it begins any work the row announces and before it replies
+to the call that ends it: `{:classifying, started_ms}` as the first step of
+`handle_call({:classify, ...})`, before `classify_root/2`; `classified` and
+`:idle` together as the last step, before the reply; the initial row with
+`:pending` and `:idle` before `init/1` returns. Parent creation, helper jobs
+and status reads do not write it, because they do not change classification.
+No other process writes helper truth: the row is a projection the owner
+already holds, and the slice task, the service and readiness only read it.
+
+*Mapping.* `Loopex.creation_startup_status(runtime, remaining)` is asked with
+the read's remaining budget; not ready is `unavailable`/`runtime_unavailable`.
+With no helper owner, ready is `serving`. Otherwise one `:ets.lookup/2` of the
+row decides, in this order:
+
+| Row | `state` | Counts and code |
+| --- | --- | --- |
+| `classified: :complete` | `serving` | `null` |
+| `classified` incomplete with `{:closed, session_id, code}` | `closed` | `session_id`, `code`, `recovery` |
+| `classified` incomplete with `{:unavailable, code}` and `slice: :idle` | `unavailable` | `code` |
+| `slice: {:classifying, _}`, or `classified` `:pending`, or incomplete with reason `nil` | `classifying` | `covered` and `enumerated` from the last completed slice, `"0"` and `"0"` while `:pending` |
+| The table is gone (the owner exited) | `unavailable` | `unexpected`; the service is already failing stop as `runtime_lost` |
+
+*Freshness.* The row is exact at the instant of the read: the single writer
+updates it at every transition, so readiness reports `classifying` for the
+whole of a slice and the counts of the slice before it, never counts it has
+not completed. A slice that outlives its own budget is still `classifying`;
+`Helper.classify/2` enforces the budget, readiness does not infer one.
+Readiness reads no `sequence` across calls; the field lets a test prove that a
+later read saw a later write.
+
+While a pass is incomplete without a named session, the service runs
+a further 60,000 ms `Helper.classify/2` slice from a linked task one second
+after the last one ends, as ADR 0046 requires of a resident host. The schema
+addition updates `loopex-experimental-4.json` (method list,
+`initialized.supported_methods`, result definition), its vectors, the pinned
+digest in `LoopexCli.DaemonClient` and `clients/node/contract-manifest.mjs`,
+and `clients/node/daemon-client.mjs`.
 
 #### Lifecycle and diagnostic commands
 
@@ -263,12 +390,13 @@ output with keys in the order listed, as `sessions --daemon --status` does.
   `stop_unconfirmed` and the log path. A live owner whose socket does not answer is a foreground
   command or a service still starting: it refuses `root_held` with the PID and
   never signals it.
-- **`service status`.** Keys: `state` (`stopped`, `held`, or a readiness
-  state), `pid`, `socket`, `state_root`, `configuration_file`, then the
-  readiness members (`null` when nothing answers). A live owner whose socket
-  does not answer is `held`: a service still starting or a foreground command;
-  only a starter, which knows it spawned one, reports `starting`. Exits `0` for `serving`, `3` for any other state, `1` when it cannot
-  determine one.
+- **`service status`.** Prints the closed status object below and exits `0`
+  for `serving`, `3` for any other state, and `1` when it cannot determine
+  one: the file cannot be selected or loaded, or the socket answers
+  `daemon.readiness` but not `daemon.status`. `service start` prints the same
+  object. A live owner whose socket does not answer is `held`: a service still
+  starting or a foreground command; only a starter, which knows it spawned
+  one, reports `starting`.
 - **`paths`.** Keys: `home`, `configuration_file`, `selected_by` (`flag` or
   `home`), `state_root`, `workspace`, `socket`, `log_directory`. Exits `1`
   only when the file cannot be loaded.
@@ -283,6 +411,30 @@ output with keys in the order listed, as `sessions --daemon --status` does.
   when the file is valid, every reference is present, ADR 0072's check accepts
   or the root is absent, and the service is `stopped` or `serving`; else `1`.
 
+#### Service status object
+
+Exactly these eight keys, in this order; no other key is ever printed. The
+command reads, in order: the selection (`Home.select`, `ConfigFile.load`,
+`ConfigSelection.compose` with no overrides); `Placement.live_owner(root)`;
+one `DaemonClient.connect(socket, timeout: 1_000)`; and, on that one
+connection, `daemon.readiness` and then `daemon.status`, each bounded at
+1,000 ms.
+
+| Key | Type | Source |
+| --- | --- | --- |
+| `state` | String: `stopped`, `held`, `starting`, `serving`, `classifying`, `closed` or `unavailable` | No live owner: `stopped`. A live owner and no readiness answer: `held`, or `starting` from a starter. A readiness answer: its `state` |
+| `pid` | Integer or `null` | The live owner's OS process from `Placement.live_owner(root)`; `null` when `stopped` |
+| `socket` | String | `LoopexDaemon.Paths.startup(root, nil).socket_path` from the selection |
+| `state_root` | String | The selection's absolute state root |
+| `configuration_file` | String | The file this command selected, by `--config` or as the default home |
+| `readiness` | Object or `null` | The `daemon.readiness` result verbatim, with exactly its ten members above; `null` when nothing answered. Its own `configuration_file` is the file the service was started with and may differ from the top-level one; its `state` equals the top-level `state` |
+| `activations_used` | Integer or `null` | `daemon.status`'s `activations_used`, which under [ADR 0071](0071-daemon-attached-conversation-technical.md#technical-adr-0071-decision) includes helper children and held helper permits; `null` when nothing answered |
+| `activation_limit` | Integer or `null` | `daemon.status`'s `activation_limit`, `64`; `null` when nothing answered |
+
+Nesting the readiness result keeps its `state` and `configuration_file` from
+overlapping the command's own keys, and no readiness member is renamed or
+flattened. `doctor`'s `service` member is this object.
+
 #### Refusals
 
 Command refusals print `loopex: <class> [<pointer>]` and a fixed hint on
@@ -292,7 +444,7 @@ standard error and exit `1`: `home_unavailable`, `configuration_not_found`,
 classes, `service_and_daemon`, `config_requires_service`,
 `service_not_running`, `provider_credential_absent`,
 `service_command_unavailable`, `service_not_ready`, `service_closed`,
-`service_not_serving`, `root_held`, `stop_unconfirmed`, and a daemon start refusal under its
+`service_not_serving`, `root_held`, `stop_unconfirmed`, `auth_root_overlap`, and a daemon start refusal under its
 `LoopexDaemon.ExitStatus` class name.
 
 #### Ownership
@@ -300,13 +452,15 @@ classes, `service_and_daemon`, `config_requires_service`,
 | Piece | Module |
 | --- | --- |
 | `HOME`, file selection, layout paths | `LoopexCli.Home` (new) |
+| Sign-in directory and state-root separation | `LoopexCli.Home` (`auth_directory/1`, `separate/2`, new), called by every row of its table |
 | `init`, `config set`, `config unset`, lock and atomic write | `LoopexCli.ConfigWriter` (new) |
 | Optional `--config`, selection line | `LoopexCli.ConfigOptions`, `LoopexCli.ConfigInspection` |
 | On-demand machine, spawn, wait | `LoopexCli.ServiceStart` (new) |
 | `service`, `paths`, `doctor` | `LoopexCli.Service` (new); dispatch in `LoopexCli` |
 | `--service` on live forms | `LoopexCli.Live` |
 | `--config`, `--admit-project-resources` | `LoopexCli.Daemon`, `LoopexDaemon.Command` (ADR 0071) |
-| `daemon.readiness` and the slice loop | `LoopexDaemon.ServiceReadiness` (new), `LoopexDaemon.Service`, `Request`, `SocketConnection`, `WireRecords`; `LoopexComposition.Delegation.Helper` |
+| `daemon.readiness` and the slice loop | `LoopexDaemon.ServiceReadiness` (new), `LoopexDaemon.Service`, `Request`, `SocketConnection`, `WireRecords`; `LoopexComposition.Delegation.Helper` (the readiness table and its single writer), `LoopexComposition.Delegation` (`host/4` handle carries the table) |
+| `service status` object | `LoopexCli.Service` |
 
 #### Accepted text this record touches
 
@@ -324,6 +478,10 @@ classes, `service_and_daemon`, `config_requires_service`,
   stated; nothing about classification changes.
 - **ADRs 0031 and 0032, reused.** Placement lock, socket placement and the
   stop bound are unchanged.
+- **ADRs 0051, 0072 and 0073, applied.** The separation invariant is what
+  keeps ADR 0073's tokens out of ADR 0072's backups. ADR 0051's complete
+  manifest is unchanged and excludes no file; a root that would hold the
+  sign-in directory is refused instead.
 
 <a id="technical-adr-0037-evidence"></a>
 ### Evidence
@@ -343,6 +501,10 @@ Every case uses a temporary `HOME` and `LOOPEX_HOME`. Test files are in
 | `service_detach_pty_test.exs` | PTY | A service started on demand from a PTY survives `SIGINT` to the foreground group and hangup of the PTY, and stops on `service stop` |
 | `live_service_test.exs` | Real daemon | `run` and `resume --service` start on demand; `attach` and `sessions --service` refuse `service_not_running`; `--daemon` never starts |
 | `apps/loopex_daemon/test/readiness_method_test.exs` | Socket | Each of the four states from helper and runtime seams; the `closed` session and code; project-resource values; schema vectors and the updated digest |
+| `auth_separation_test.exs` | Unit and real filesystem | For each origin (`--state-root`, `LOOPEX_HOME`, the file's `paths.state_root`): the root equal to `A`, containing it, and contained by it each refuse `auth_root_overlap` with that origin's pointer, before any file, lock, log, socket or process; `/x/state` beside `/x/stateful` and the default `<home>/state` beside `<home>/auth` pass; a root selected under one `HOME` and used under another whose `.loopex/auth` lies inside it refuses; a symbolic-link root resolving to an ancestor of `A`, a symbolic-link `HOME` and a symbolic-link `auth` each refuse; a link loop and 41 chained links refuse; a nonexistent root and a nonexistent `A` are compared lexically; a case-variant path refuses on `darwin-arm64`; a bind-mount or hard-identity alias, where the platform allows one, refuses through the identity test; an absent or relative `HOME` refuses `home_unavailable` on every row, and an ephemeral `ask` still runs; `config set /paths/state_root` to an overlapping path leaves the earlier bytes; `auth login` refuses when an ancestor of `A` holds a `loopex-root-format` marker; `store adopt`, `store backup` and `store restore` refuse an overlapping root, `BACKUP` and `DESTINATION`; a backup of a separated root holds every file of the root and no file of `A` |
+| `daemon_configuration_test.exs` (ADR 0071, extended) | Real daemon | `loopex daemon`, with and without `--config`, exits 111 with class `auth_root_overlap` and each origin's pointer, leaving no lock, log entry or socket |
+| `apps/loopex_daemon/test/readiness_slice_test.exs` | Socket, real helper owner | A gated store adapter holds a classification slice open: `daemon.readiness` asked concurrently and repeatedly answers within 1,000 ms each (measured), as `classifying` with the previous slice's counts, `"0"` and `"0"` before the first completes; the row's `sequence` advances at slice start and end; a parent creation held in the owner does not delay readiness; releasing the gate gives `serving`; killing the owner gives `unavailable` with `unexpected`; no readiness path calls the owner |
+| `service_status_test.exs` | Real daemon | The status object has exactly its eight keys in order for `stopped`, `held`, `classifying` and `serving`; `readiness` is the verbatim result or `null`; `activations_used` and `activation_limit` equal `daemon.status`'s and include a helper child after one runs; a service started from another file keeps its own `readiness.configuration_file`; exit statuses 0, 3 and 1, including a socket that answers readiness and not status |
 | `clients/node` contract lane (extended) | Independent client | `daemon.readiness` decoded from the schema by the Node client |
 
 The installed demonstration under ADR 0038 runs `init`, `chat --service`,

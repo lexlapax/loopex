@@ -4,7 +4,7 @@
 Technical depth: [Attached conversation mapping, service configuration and evidence](0071-daemon-attached-conversation-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service-hosted helpers designed on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service-hosted helpers designed on 2026-10-13; helper activation permits specified on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; it applies [ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept) and [ADR 0033](0033-collaboration-controller-lease-and-takeover.md#concept) to the conversation command, extends the daemon's startup inputs with [ADR 0049](0049-explicit-host-configuration.md#concept)'s file, and applies [ADR 0046](0046-child-session-tool.md#concept), [ADR 0056](0056-host-helper-ledger-recipe.md#concept) and [ADR 0069](0069-helper-run-evidence-and-route-guard.md#concept) to the service. It narrowly amends ADR 0049's conversation status record so a service-owned value can be absent, ADR 0032's activation ceiling so it also counts helper children, [ADR 0046](0046-child-session-tool.md#concept)'s fixed refusal order with one new refusal, `helper_activation_limit`, and [ADR 0055](0055-remote-session-creation-options.md#concept)'s creation options on a helper-enabled service
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept) and `loopex.experimental/4`, the daemon generation [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) introduced, both delivered by M7; ADRs 0046, 0056 and 0069 as delivered by M7; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the home, the on-demand start and `daemon.readiness`
@@ -141,8 +141,11 @@ back. When none is left, the parent's `task` call is refused as
 sees the refusal as its tool result, the attached conversation shows it in the
 transcript, and the parent keeps working. Children the service stops while
 recovering from a restart are counted too but are never refused, because
-stopping them cannot wait for capacity. `loopex service status` reports the
-activations used, children included.
+stopping them cannot wait for capacity. A child whose creation outcome the
+service cannot yet know keeps its activation charged until recovery settles
+it, and a parent whose creation started a session that its helper binding then
+failed still spends the activation that session took. `loopex service status`
+reports the activations used, children included.
 
 With helpers enabled, the attached conversation shows the parent's `task`
 calls and their results as the foreground does: the role, model, child
@@ -194,8 +197,11 @@ decided on 2026-10-13: helper children count toward the daemon's
 64-activation limit, refused as `helper_activation_limit` when it is reached.
 
 Also decided on 2026-10-13: the M8 records number their daemon exit statuses
-in one sequence. This record uses 111 to 115 with 114 retired, ADR 0072 uses
-116 to 119, and ADR 0073 uses 120 to 123. Nothing in this record remains open.
+in one sequence, every integer from 65 through 123 except 114: the delivered
+65 to 110, this record's 111 to 115 with 114 retired, ADR 0072's 116 to 119,
+and ADR 0073's 120 to 123. ADR 0037's refusal of a state root that overlaps
+the sign-in directory reuses this record's 111, `configuration_invalid`.
+Nothing in this record remains open.
 
 ## Governance Record
 
