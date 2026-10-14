@@ -15,7 +15,8 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   scoped install umask; on 2026-10-14 the escript-build statement corrected,
   the fast-check refusal proofs named and the `auth` crash-dump case added
   (D37), then the NIF library modes, the fast-check seams, the attended
-  record's restore step and the Linux lane's removal query corrected
+  record's restore step and the Linux lane's removal query corrected, and
+  the uninstall keychain query limited to the operator's own home
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and

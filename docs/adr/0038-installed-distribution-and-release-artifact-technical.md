@@ -435,9 +435,12 @@ command can remove its own sign-in tokens: it deletes each route's token from
 the keychain, the Secret Service or the owner-only file and revokes it where
 ADR 0073 says the provider allows; a keychain item left behind would outlive
 the program that can read it. After deleting the install, the operator can
-confirm that no Loopex item remains: on macOS
-`security find-generic-password -s loopex-oauth` finds none, and
-on Linux `secret-tool search application loopex-oauth` lists none.
+confirm that no Loopex item of this home remains: on macOS
+`security find-generic-password -s loopex-oauth -a <home-digest>:<route>`
+exits 44 for each of `chatgpt`, `vertex` and `claude`, and on Linux
+`secret-tool search application loopex-oauth home <home-digest>` lists
+none, `<home-digest>` being the first 16 hexadecimal characters of the
+SHA-256 of the home's canonical path (ADR 0073).
 
 **Never touched.** No install, upgrade or uninstall step reads or writes a
 state root, any workspace or any backup. The only home write is uninstall's
@@ -543,7 +546,10 @@ macOS user account whose shell profile loads no mise or Homebrew.
    keychain item remains, by the read-only query
    `security find-generic-password -s loopex-oauth -a <home-digest>:<route>`
    for each of `chatgpt`, `vertex` and `claude`, each exiting 44, so an item
-   of another home never fails the lane. The Linux lane signs in to nothing, and its container has no
+   of another home never fails the lane. Under the lane's temporary `HOME`
+   nothing was signed in, so the query cannot fail: it is a smoke of the
+   removal procedure, and the keychain backend's proof is the
+   `macos_keychain` lane. The Linux lane signs in to nothing, and its container has no
    `secret-tool` or session bus, so it makes no keyring query. A before-and-after
    inventory proves that nothing was written outside the home, the workspace,
    the lane's temporary directory and the provider's transient `/tmp/lxp-*`
@@ -727,7 +733,8 @@ Concept: [The compiler clarification of ADR 0003](0038-installed-distribution-an
 
 **ADR 0019 and ADR 0034.** The companion remains a separate OS process behind
 the Port and OS guard; the credential still crosses the private channel; the
-composition-bound token resolved through host custody is unchanged. Only the
+composition-bound token resolved through host custody is unchanged by this
+ADR; ADR 0073 amends sign-in custody. Only the
 path resolution changes, and the digest verification before launch is kept.
 
 **Recovery.** Before 1.0 there is no binary rollback or older-root upgrade,
