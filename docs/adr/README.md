@@ -281,7 +281,8 @@ own client identities, except that its `adc` source presents the client of
 gcloud's Application Default Credentials file. On acceptance it amends named
 clauses of accepted ADRs 0018, 0019, 0021, 0029, 0034, 0039, 0043, 0048 and
 0049, including ADR 0019's closed private-protocol kinds, ADR 0034's
-custody-refusal row, ADR 0039's pre-call refusal and, by D37, its host-VM
+custody-refusal row and `:expired` reason, ADR 0039's pre-call refusal, `ask`
+status-1 diagnostics and, by D37, its host-VM
 credential audience, whose one common exception text replaces at acceptance the seven copies ADR 0039 requires in the vision pair and `AGENTS.md` (D40), ADR 0048's ephemeral clause, ADR 0049's closed terminal schema and durable chat's `env`-only credential, the new public failure reason `provider_sign_in_required` in ADR
 0029's bounded vocabulary, ADR 0018's Model callback boundary, settlement
 categories and valid-combination table and terminal precedence, ADR 0021's settled-attempt result
