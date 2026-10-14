@@ -7932,3 +7932,39 @@ follows D17 and its exit-status evidence names 65 to 124 except 114; and a
 token whose exchange consumes its usable window resolves expired at once and
 is never dispatched (ADR 0073). All five prerequisite ADRs remain Proposed and
 M8 remains Open.
+
+<a id="disposition-m8-readiness4-2026-10-13"></a>
+### M8 readiness review 4 answered — 2026-10-13
+
+Readiness review 4 of the M8 planning branch at
+`f5ecea3ebaaa689417a5158d104e2af038ed6530` found the plan not ready: F4 and N7
+were partly closed, with new findings N11 (P2), N12 (P1), N13 (P2) and N14
+(P3). No new maintainer decision was taken; each finding was completed within
+the decisions already recorded:
+
+1. **Mounts inside a walked tree (N12).** A Linux bind mount of a single
+   credential file, or of a replaced token file's old inode, escapes a
+   directory identity check. Within the
+   [readiness 3](#disposition-m8-readiness3-2026-10-13) fail-closed decision,
+   every backup, adopt and restore walk now also refuses `auth_root_overlap`
+   when any mount point lies strictly inside the walked tree: an entry whose
+   device differs from the walked root's on every host, and on Linux a mount
+   point listed in a bounded read of `/proc/self/mountinfo`. The directory
+   identity comparison stays for mounts at or above the walked root
+   ([ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept)).
+2. **Restore guard entry point (N11).** The host passes the walk guard
+   through `LoopexComposition.Restore.restore/3`, beside the unchanged
+   `restore/2`, validated at the facade and carried by the original worker
+   through every continuation path, as
+   [ADR 0072's amendment clause 3](../adr/0072-store-readiness-marker-backup-and-restore.md#concept-adr-0072-amendment)
+   records.
+3. **Stops after the commit (N13) and wording (N14).** A walk stop before
+   the root `committed` record leaves the destination uncommitted; a stop in
+   the claim cleanup after it leaves the commit standing with cleanup
+   pending, reported through ADR 0051's existing `commit_unknown` outcome and
+   `lookup/3`'s `claim_release` answer
+   ([ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept)).
+   The plan names three ADR 0051 amendments and the new `restore/3`
+   ([M8 plan](../plans/M8.md#concept)).
+
+All five prerequisite ADRs remain Proposed and M8 remains Open.

@@ -150,8 +150,9 @@ stored.
   apply ADR 0037's
   [physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
   to every directory they walk, so ADR 0072's complete-copy backups never
-  capture a token, even through a mount that aliases credential storage into
-  a root, and restore never commits over one. ADR 0051's complete manifest
+  capture a token: a walk refuses a directory with a protected identity and
+  any mount inside the walked tree, a bind-mounted token file included, and
+  a restore that meets either before its commit is never committed. ADR 0051's complete manifest
   excludes no file.
 - `auth/` is created with mode `0700`. Every file in it is `0600`, owned by
   the effective user. A reader refuses a symlink anywhere on the path, a

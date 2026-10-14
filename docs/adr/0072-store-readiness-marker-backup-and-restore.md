@@ -4,9 +4,9 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in three clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added; its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source; and its manifest walks, which stop on a host-supplied credential-directory identity. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
+- **Supersedes:** nothing. It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in three clauses only, listed under [Amendment of ADR 0051](#concept-adr-0072-amendment): its statement that no backup CLI is added; its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source; and its manifest walks, which stop on a host-supplied credential-directory identity or on any mount inside the walked tree, through a new `restore/3` entry point. It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the configuration writer, `doctor` and the readiness report
 - **Prerequisite for:** M8 outcomes 3 and 7, accepted before any marker, adopt, backup or restore command code is written
 
@@ -189,9 +189,10 @@ Credentials file never enter it because ADR 0037 keeps their directories
 physically separate from every state root, not because backup leaves anything
 out. Besides ADR 0037's path check before anything is written, backup, adopt
 and restore compare every directory they walk with those directories'
-physical identities, so a mount that aliases credential storage into a root
-is refused before any file is copied from it and a restore through such a
-mount is never committed.
+physical identities and refuse any mount inside the walked tree, whatever it
+holds. A root, backup or destination containing a mount is therefore refused
+before that walk copies a file, and a restore that meets one before its
+commit is never committed.
 
 The backup directory holds the complete copy, the canonical manifest and a
 capture record carrying everything ADR 0051's plan needs except the
@@ -313,13 +314,21 @@ exactly three of its clauses, and the ADR index records all three:
    Everything else ADR 0051 decides stays: the same machine and workspace, a
    complete idle backup, an empty destination, exclusion of every other copy,
    fresh ledger generations, and never redispatching an uncertain effect.
-3. **Credential-directory identities.** So that no restore can copy provider
-   credentials that a mount has aliased into a backup or destination, every
-   manifest walk of ADR 0051's transition stops when it meets one of the
-   sign-in or Google credential directories the host passes it, decided by
-   the maintainer on 2026-10-13. The stop uses ADR 0051's existing outcomes,
-   never commits the destination, and changes nothing when the host passes
-   no directories.
+3. **Credential-directory identities and mounts.** So that no restore can
+   copy provider credentials that a mount has aliased into a backup or
+   destination, every manifest walk of ADR 0051's transition stops when it
+   meets one of the sign-in or Google credential directories the host passes
+   it, or any mount inside the walked tree. The maintainer decided on
+   2026-10-13 that these walks fail closed by device and inode; refusing
+   every mount inside a walked tree applies that decision to a bind-mounted
+   single file, which no directory identity reveals. The host passes the
+   directories as a guard to a new entry point, `restore/3`, beside the
+   accepted `restore/2`, which stays, behaves exactly as accepted, and runs
+   no such check. The stop uses ADR 0051's existing outcomes. A stop before
+   the commit never commits the destination. A stop in the claim cleanup
+   that follows a commit leaves the commit standing and the cleanup pending,
+   as ADR 0051 already leaves an interrupted cleanup, until a later call
+   with the same plan finishes it.
 
 <a id="concept-adr-0072-open"></a>
 ### Open for the Maintainer

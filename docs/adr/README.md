@@ -259,7 +259,8 @@ proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
 exactly three clauses of accepted ADR 0051: its statement that no backup CLI
 is added; its latest-backup-only restriction, which `--discard-later-work`
 relaxes for a lost source; and its manifest walks, which stop on a
-host-supplied credential-directory identity. ADR 0051's other decisions, ADR 0070 and the
+host-supplied credential-directory identity or on any mount inside the walked
+tree, through a new `restore/3` beside the unchanged `restore/2`. ADR 0051's other decisions, ADR 0070 and the
 pre-1.0 rule settle the rest.
 
 0073 was proposed on 2026-10-13 when the maintainer added provider sign-in to

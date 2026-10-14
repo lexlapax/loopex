@@ -92,7 +92,8 @@ new provider protocol.
    `adc` source reads, and every selected state root must lie physically
    apart, under ADR 0037's separation invariant, which refuses an overlapping
    selection before any token or root write, and whose walk check refuses a
-   backup, adopt or restore that meets either directory through a mount. The installed host checks the paths once
+   backup, adopt or restore that meets either directory, or any mount,
+   inside the tree it walks. The installed host checks the paths once
    and hands the token store the checked paths; the store and its refreshers
    repeat that check before every token write and never look for a root
    themselves. So backups never contain tokens. Tokens never enter

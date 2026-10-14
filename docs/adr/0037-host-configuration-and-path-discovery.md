@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -118,13 +118,17 @@ leaving files out of a backup:
   when two not-yet-created names could be one name on a case-insensitive
   volume, the layout is refused.
 - That path check is the early refusal. A mount can still place part of a
-  root over credential storage with no link between the two paths, so
+  root over credential storage with no link between the two paths, and on
+  Linux a single credential file can be bind-mounted into a root. So
   `store backup`, `store adopt` and `store restore` also compare every
   directory they walk while copying or verifying a root with the protected
-  directories' physical identities. Meeting one refuses `auth_root_overlap`
-  before any file is copied from it, and a restore that meets one is never
-  committed. Physical separation therefore holds for every root that is
-  copied, whatever the mount layout.
+  directories' physical identities, and refuse any mount point inside the
+  walked tree, whatever it holds. Either refuses `auth_root_overlap` before
+  that walk copies a file, and a restore that meets one before its commit
+  is never committed. A state root, backup or destination that contains a
+  mount is therefore refused, and physical separation of every copied root
+  rests on that refusal. A credential file the operator copies into a root
+  is ordinary root content that no walk can recognize.
 - The installed host's home module owns the rule and decides which paths each
   command checks. It checks before any token is written, any root is created
   or opened, and before `store adopt`, `store backup`, `store restore`,
