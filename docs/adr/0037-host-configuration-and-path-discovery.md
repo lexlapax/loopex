@@ -163,6 +163,8 @@ leaving files out of a backup, and it does so by comparing paths:
   always has, so a link placed inside a root cannot reach a credential file.
   The checks run when a command starts; changing those paths while a store
   command runs is outside the guarantee, like a mount.
+- A root selected through a symbolic link is opened, backed up and restored
+  as its physical path, so the same root under two spellings is one root.
 - The installed host's home module owns the rule and decides which paths each
   command checks. It checks before any token is written, any root is created
   or opened, and before `store adopt`, `store backup`, `store restore`,
