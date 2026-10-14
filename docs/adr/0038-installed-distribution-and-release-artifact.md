@@ -14,7 +14,8 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   before uninstall, the retained M7 root in the refusal step (D24) and the
   scoped install umask; on 2026-10-14 the escript-build statement corrected,
   the fast-check refusal proofs named and the `auth` crash-dump case added
-  (D37)
+  (D37), then the NIF library modes, the fast-check seams, the attended
+  record's restore step and the Linux lane's removal query corrected
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
@@ -25,7 +26,7 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   no compiler" is read as "carries no build toolchain", so the OTP `compiler`
   application ships as a runtime dependency (see
   [The compiler clarification](#concept-adr-0038-compiler))
-- **Depends on:** [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for installed initialization and configuration discovery, [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the current-format marker and the backup and restore commands, and accepted [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition they use
+- **Depends on:** [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for installed initialization and configuration discovery, [ADR 0071](0071-daemon-attached-conversation.md#concept) for `chat --service`, `m8.service-review` and the service's configuration-only credentials, [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the current-format marker and the backup and restore commands, [ADR 0073](0073-provider-oauth-sign-in.md#concept) for uninstall's `auth status` and `auth logout`, the `loopex-oauth` keychain item and the `auth` crash-dump case, and accepted [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition they use
 - **Prerequisite for:** M8 outcomes 1, 6 and 7 (this was M6 before the maintainer's reframing of 2026-09-26), accepted before any release
   build, manifest or install script is written
 
@@ -87,8 +88,9 @@ minimal runtime distribution carries no compiler.
    extracts to one directory. `bin/loopex` is the launcher. When a manifest
    sits beside it, it runs the CLI escript with the bundled runtime, with the
    same interrupt forwarding as today. There is no second command, no wrapper
-   generated per installation and no single native executable. The source
-   tree's launcher behavior is unchanged.
+   generated per installation and no single native executable. From a
+   source tree the launcher still runs the checkout's escript; it now also
+   resolves a symbolic link to itself.
 4. **The provider companion stays a separate protected process inside the
    release.** Its launch configuration names the companion and its
    interpreter by paths relative to the release root. The CLI resolves them
@@ -145,8 +147,8 @@ toolchain": no Mix, no Hex, no `erlc`, no `elixirc`, and no source or
 dependency tree. The OTP `compiler` application ships as a runtime dependency
 of Elixir, and nothing in the archive calls it to build or load code. This is
 a clarifying amendment of ADR 0003's text. ADR 0003's accepted bytes are not
-edited, and its other obligations are unchanged. The release check proves the
-archive starts nothing but the two escripts.
+edited, and its other obligations are unchanged. The release layout check
+refuses any build tool or source file in the archive.
 
 <a id="concept-adr-0038-consequences"></a>
 ### Observable Consequences
@@ -174,9 +176,9 @@ roles through the service, a detach and reconnect while a helper runs, and a
 service stop during a helper followed by the stop-only result after restart.
 
 The same source archive M5 produces still builds the escript pair from source
-on either supported toolchain pair. The source tree keeps working exactly as
-before: the ordinary escript build and the launcher's checkout mode are
-unchanged.
+on either supported toolchain pair. The source tree keeps working as before:
+the ordinary escript build is unchanged, and the launcher's checkout mode
+still runs the checkout's escript.
 
 <a id="concept-adr-0038-compatibility"></a>
 ### Compatibility and Rollback

@@ -156,9 +156,10 @@ Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technic
 #### Governed extension runtime — version unselected
 
 The closed M7 coding-agent proof, the M8 installed operation plan, Open for
-planning, and the M9 store migration draft precede this M10 draft. M8's and M9's acceptance and eventual
-release versions remain separate decisions; the later numeric candidates are illustrative capability labels and
-do not reserve the next source version.
+planning, and the M9 store migration draft precede this M10 draft. M8's label
+`0.5.0` is selected; its acceptance and publication, and M9's acceptance and
+release version, remain separate decisions. The later numeric candidates are
+illustrative capability labels and do not reserve the next source version.
 
 Can reviewed and promoted trusted behavior evolve without changing session
 truth, weakening authority, or pretending executable code is runtime-local?

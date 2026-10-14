@@ -17,7 +17,9 @@ directory `loopex-<label>-<platform>/`. Its checksum file is
 `<64 lowercase hex><two spaces>loopex-<label>-<platform>.tar.gz<LF>`.
 
 **Layout of the extracted archive.** Exactly these entries; every directory
-is mode `0755`, every file `0755` or `0644`, owner and group recorded as `0`.
+is mode `0755`, every file under `bin/`, `libexec/` and `erts-*/bin/` `0755`
+and every other file, the two NIF libraries included, `0644`, owner and
+group recorded as `0`.
 
 ```text
 loopex-0.5.0-<platform>/
@@ -57,7 +59,7 @@ D37, ADR 0073), it changes in two places.
    directory with `pwd -P`, so a link from a `PATH` directory works.
 2. Command selection: `LOOPEX_ESCRIPT` when set, as today; otherwise, when
    `$here/../MANIFEST` is a regular file, the installed mode; otherwise the
-   checkout mode, unchanged. The installed mode sets
+   checkout mode, which runs `$here/../loopex` as today. The installed mode sets
    `root=$(cd "$here/.." && pwd -P)`, requires exactly one
    `$root/erts-*/bin/escript` and an executable `$root/libexec/loopex`, unsets
    `ERL_LIBS ERL_ROOTDIR ESCRIPT_EMULATOR ERL_FLAGS ERL_AFLAGS ERL_ZFLAGS`,
@@ -74,10 +76,13 @@ file with `worker_path: "libexec/loopex_provider"` and
 `interpreter_path: "erts-<:erlang.system_info(:version)>/bin/escript"`, both
 relative, and the unchanged `worker_sha256` and `build_manifest_sha256`. The
 CLI embeds that file at compilation as today. `LoopexCli.ProviderLaunch.options/0`
-returns it with both paths joined to the release root,
-`Path.expand(:escript.script_name())` with two directory levels removed, when
-both paths are relative; it returns absolute paths unchanged; a mixed pair is
-returned unchanged and `ProviderConfiguration.validate/1` refuses it. The
+returns `options/2` applied to that embedded configuration and
+`Path.expand(:escript.script_name())`; `options/2` is the test seam, since
+under ExUnit the script name is not the escript. It returns the
+configuration with both paths joined to the release root, the escript path
+with two directory levels removed, when both paths are relative; it returns
+absolute paths unchanged; a mixed pair is returned unchanged and
+`ProviderConfiguration.validate/1` refuses it. The
 root therefore comes from the location of the code already running, never
 from the environment. `ProviderConfiguration` is unchanged: it still requires
 absolute paths, and `verify_artifact/1` still checks the companion's digest
@@ -98,7 +103,9 @@ only the release step uses that build.
 mode it prints one line from the manifest header,
 `loopex <release> <platform> commit <source-commit> elixir <v> otp <v> openssl <v>`,
 and exits `0`, or exits `1` with `manifest_unreadable`. From a checkout it
-prints `loopex <VERSION> source`. It verifies nothing; the verifier does.
+prints `loopex <VERSION> source`. It reads the root through a function that
+takes the escript path, which `version_command_test.exs` calls with a
+temporary tree. It verifies nothing; the verifier does.
 
 **Manifest.** `MANIFEST` is ASCII text, one LF-terminated line per entry,
 fields separated by one space:
@@ -247,7 +254,9 @@ arguments. `installed_layout/1` is a private function in the umbrella
    `apps/loopex_cli/bin/loopex-verify` to `bin/`, `apps/loopex_cli/loopex`
    and `<build path>/loopex_provider` to `libexec/`, and `SOURCE_IDENTITY` and
    `LICENSE` to the root;
-5. setting directory modes to `0755` and file modes to `0755` or `0644`, and
+5. setting directory modes to `0755`, file modes under `bin/`, `libexec/`
+   and `erts-*/bin/` to `0755`, and every other file's, the NIF libraries
+   under `lib/*/priv/lib` included, to `0644`, and
    running `scripts/release/check-layout.sh <tree>`, raising
    `release_layout_unexpected: <path>` with the path it prints for a symbolic
    link, a path outside the manifest character set, an executable file
@@ -478,7 +487,8 @@ the host's certificate bundle bind-mounted read-only at
 `/etc/ssl/certs/ca-certificates.crt` (installing `ca-certificates` would pull
 in an OpenSSL), and the same two credential variables passed by name alone,
 `docker run --env ANTHROPIC_API_KEY --env OPENAI_API_KEY`, so no value
-enters argv. It asserts the
+enters argv, and the retained M7 root's archive that step 5 uses
+bind-mounted read-only. It asserts the
 same absent commands, records `dpkg -l`, and finds no `beam.smp` or `erl`
 outside the install. The attended outcome-6 record on macOS uses a separate
 macOS user account whose shell profile loads no mise or Homebrew.
@@ -517,8 +527,8 @@ macOS user account whose shell profile loads no mise or Homebrew.
    `loopex store restore`, point the home at the restored root, start the
    service and list its sessions. Extract ADR 0072's
    [retained M7 root](0072-store-readiness-marker-backup-and-restore-technical.md#technical-adr-0072-m7-fixture),
-   written by the `v0.4.0` build (D24), from the fresh-source extraction
-   after checking its pinned digest, point the installed command at it, and
+   written by the `v0.4.0` build (D24), from the fresh-source extraction (on
+   Linux, from its read-only mount) after checking its pinned digest, point the installed command at it, and
    prove ADR 0072's named `root_unmarked` refusal and a byte-identical root.
 6. **Replace and remove.** Run the verifier again: it passes, proving that
    nothing wrote into the install. Stop the service, replace the install
@@ -526,16 +536,20 @@ macOS user account whose shell profile loads no mise or Homebrew.
    sequence, start it and list the same sessions. Remove it by the uninstall
    sequence: stop it, run `loopex auth logout` for each provider
    `loopex auth status` lists, delete the install directory, and prove the
-   home's configuration and roots are intact and that no Loopex keychain
-   item (macOS, `security find-generic-password -s loopex-oauth` over the
-   lane's keychains) or Secret Service item (Linux,
-   `secret-tool search application loopex-oauth` where a session bus
-   exists) remains; both are read-only queries. A before-and-after
+   home's configuration and roots are intact and, on macOS, that no Loopex
+   keychain item remains, by the read-only query
+   `security find-generic-password -s loopex-oauth` over the lane's
+   keychains. The Linux lane signs in to nothing, and its container has no
+   `secret-tool` or session bus, so it makes no keyring query. A before-and-after
    inventory proves that nothing was written outside the home, the workspace,
    the lane's temporary directory and the provider's transient `/tmp/lxp-*`
    namespaces, which must be gone. On Linux the inventory is `find / -xdev`
    in the container less `/proc`, `/sys` and `/dev`; on macOS it is the
    invoking user's home, `/private/tmp`, `$TMPDIR` and `/Users/Shared`.
+
+Only after step 6 passes does `smoke.sh` print its last line,
+`installed-artifact: PASS steps=6`, the line the release runner's
+script-lane judge requires.
 
 **Attended record.** M8 outcome 6's attended record runs on `darwin-arm64`
 in the separate macOS user account above, from a verified extraction of the
@@ -560,9 +574,11 @@ After steps 1 to 3 it runs:
    `loopex service status` reports `classifying` or `serving`, never a session
    admitted before classification completes.
 
-It then completes steps 5 and 6, whose removal runs `loopex auth logout`
-for every route the account signed in and then asserts that no Loopex item
-remains in that account's keychains, by the same read-only query. The record names the operator, the
+It then completes step 5's backup and restore, without the retained-root
+refusal, which the lane's own step 5 proves, and step 6, whose removal runs
+`loopex auth logout` for every route the account signed in and then
+asserts that no Loopex item remains in that account's keychains, by the
+same read-only query. The record names the operator, the
 archive digest, both providers and each session identifier. The release
 runner's `m8-operator` lane hands the account the verified archive and
 retains the record's transcript, checking that it names that archive's
@@ -612,7 +628,9 @@ Concept: [Context and decision](0038-installed-distribution-and-release-artifact
 release build has a named test:
 
 - `scripts/test/release-artifact-test.sh`, a `scripts/check.sh` step, on
-  trees it writes with `write-manifest.sh`: the verifier's `PASS`, usage exit
+  trees it writes with `write-manifest.sh`: the verifier's `PASS` on a
+  supported host (`Darwin arm64` or `Linux x86_64`; elsewhere that case
+  expects `platform_mismatch`), usage exit
   `2`, `--inventory` equal to the writer's records, and each of
   `platform_mismatch` and `platform_minimum_unmet` (a manifest naming the
   other platform or a minimum above the host's), `manifest_unreadable`
@@ -622,14 +640,18 @@ release build has a named test:
   `check-layout.sh`'s `release_layout_unexpected` for each listed case;
   `assert-linkage.sh`'s `linkage_outside_base`, `linkage_search_path` and
   `linkage_minimum_exceeded` on retained `otool` and `objdump` outputs under
-  `scripts/fixtures/release/`; and the launcher: installed-mode selection,
+  `scripts/fixtures/release/`, which stubs named `otool`, `lipo`,
+  `codesign`, `objdump`, `readelf` and `ldd`, placed first on the `PATH`
+  the test gives `assert-linkage.sh`, print; and the launcher: installed-mode selection,
   `$0` reached through a relative and an absolute symbolic link, the
   variables it unsets, `install_incomplete` exit `127` with no `escript`,
-  two, or a non-executable `libexec/loopex`, and checkout mode unchanged.
-- `apps/loopex_cli/test/provider_launch_test.exs`: `options/0` joins a
-  relative pair to the root two levels above the running escript, returns an
-  absolute pair unchanged, and returns a mixed pair that
-  `ProviderConfiguration.validate/1` refuses `invalid_provider_configuration`.
+  two, or a non-executable `libexec/loopex`, and checkout mode still
+  running `../loopex`.
+- `apps/loopex_cli/test/provider_launch_test.exs`, through `options/2`
+  with a path in a temporary tree: a relative pair is joined to the root
+  two levels above that escript path, an absolute pair is returned
+  unchanged, and a mixed pair is returned unchanged and
+  `ProviderConfiguration.validate/1` refuses it `invalid_provider_configuration`.
 - `apps/loopex_llm_reqllm/test/provider_build_test.exs` (extended):
   `--relocatable` writes the relative pair with unchanged digests, and a
   relocatable CLI run from a checkout refuses
@@ -665,8 +687,7 @@ vision's rule.
 `elixirc`, `rebar3`, source or dependency tree, and nothing that fetches,
 builds or loads an extension. The Erlang `compiler` library and Elixir's own
 modules ship because the Elixir application declares and loads them. The
-clarifying amendment below, decided by the maintainer, governs that reading,
-and the release check proves the archive starts nothing but the two escripts.
+clarifying amendment below, decided by the maintainer, governs that reading.
 Extension acquisition and installation remain deferred.
 
 <a id="technical-adr-0038-compiler"></a>
@@ -695,9 +716,8 @@ Concept: [The compiler clarification of ADR 0003](0038-installed-distribution-an
 - **Proof.** The release layout check (step 5 of the release definition above)
   also raises `release_layout_unexpected` for any file named `mix`, `hex`,
   `erlc`, `elixirc` or `rebar3` and for any `.ex`, `.exs`, `.erl` or `.hrl`
-  file, so no build toolchain or source enters the manifest. The installed
-  smoke proves that only the two escripts start. The `compiler` application's
-  presence is expected, not refused.
+  file, so no build toolchain or source enters the manifest. The `compiler`
+  application's presence is expected, not refused.
 
 **ADR 0019 and ADR 0034.** The companion remains a separate OS process behind
 the Port and OS guard; the credential still crosses the private channel; the
