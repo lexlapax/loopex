@@ -192,7 +192,8 @@ stored.
   before deleting anything, with `N` the largest of the record's, the
   metadata's and an existing floor's generation, so a floor never
   decreases. Nothing but the operator removing `auth/` deletes it. The
-  [write protocol](#technical-adr-0073-pairing) and `auth login` read it.
+  [write protocol](#technical-adr-0073-pairing), `Store.read/2` and `auth
+  login` read it; an absent floor is generation 0.
 - `<home>` is ADR 0037's home. That `auth/`, the ADC directory
   `$HOME/.config/gcloud` and every selected state root are disjoint by path
   is ADR 0037's
@@ -356,10 +357,14 @@ rotates it on every refresh and a daemon, a foreground chat, an `ask` and
   the caller gives up with `sign_in_lock_busy`. The primitive's call can
   itself outlast that (up to 2,000 guard attempts, each `ps` probe bounded
   at 5,000 ms, `placement.ex` :287, :513), so it runs in a worker the caller
-  stops waiting for at the deadline; a late success is released at once,
-  and the worker is never killed inside the guard. `placement_unverifiable`
-  and `placement_lock_failed`, a permanent malformed guard included
-  (:344-348), are `sign_in_lock_busy` too. It exits 73 in `auth`; a
+  stops waiting for at the deadline. The worker is spawned unlinked and
+  monitored, owns its own release, and is not stopped by the route's
+  shutdown, so it is never killed inside the guard and a late success is
+  released at once. `placement_unverifiable` and `placement_lock_failed`, a
+  permanent malformed guard included (:344-348), are not busy: they are
+  `sign_in_lock_failed`, with the same no-write behaviour and the same exit
+  73, and the printed line or diagnostic names the primitive's cause so the
+  operator can repair it. Either class exits 73 in `auth`; a
   refresher exchanges nothing, writes nothing, leaves custody as it was and
   retries on step 5's schedule, and step 7 at its next poll.
 - *Owner.* The primitive's owner is the operating-system process
@@ -371,8 +376,9 @@ rotates it on every refresh and a daemon, a foreground chat, an `ask` and
   than one exchange plus the write. A `SignIn.Route` that exits other than
   by its composition's stop ends its host: the daemon's
   `sign_in_route_lost` (123), and foreground chat and `ask` likewise.
-  Residual: a `SignIn.Route` killed while holding the lock in an embedding
-  VM that survives strands the lock until that VM exits.
+  Residual: a `SignIn.Route` killed while holding the lock, or an
+  acquisition worker killed inside the guard, in an embedding VM that
+  survives strands the lock or its guard until that VM exits.
 
 <a id="technical-adr-0073-fence"></a>
 **Fence.** A result obtained without the route's lock (a pending write's
@@ -384,17 +390,20 @@ It is published by this rule only:
 1. Take the lock. `sign_in_lock_busy` publishes nothing and changes
    nothing; the producer retries as it states.
 2. `Store.read/2`, completing a `roll_forward` first and judging the
-   completed pair. A pair at or below the
-   [generation floor](#technical-adr-0073-generation-floor) is judged
-   `:absent`, because `auth logout` writes the floor before it deletes.
+   completed pair. `Store.read/2` applies the
+   [generation floor](#technical-adr-0073-generation-floor) itself, so a
+   pair a logout has already floored is `:absent` and is never rolled
+   forward.
 3. The *same tuple*, in any `state`, publishes the result. A consistent
    *newer* pair, at a greater generation with the same subject and client
    and `state: signed_in`, is adopted and the result discarded: custody
    rotates to its token, a stopped refresh schedule restarts from step 4,
    and for `chatgpt` one `model_list` runs under this fence; an `adc` pair
    stores no token, so its adoption takes the newer tuple and refreshes
-   again on step 5's schedule. *Anything else* discards the result, writes
-   nothing and rotates custody to `nil`: `:absent` also stops the refresh
+   again on step 5's schedule. *Anything else* discards the result, stores
+   nothing it obtained and rotates custody to `nil`, the only write being
+   the [recovery rule](#technical-adr-0073-pairing)'s `state:
+   sign_in_incomplete` on an inconsistent pair's existing metadata: `:absent` also stops the refresh
    schedule, `inconsistent` names `sign_in_incomplete`, another subject or
    client `sign_in_account_changed`, and a newer pair not `signed_in`
    stops refreshing as step 6 does.
@@ -849,7 +858,7 @@ error:
 | 70 | `credential_store_unsafe` |
 | 71 | `credential_store_write_failed` |
 | 72 | `provider_unreachable` |
-| 73 | `sign_in_lock_busy` |
+| 73 | `sign_in_lock_busy`, or `sign_in_lock_failed` naming the lock primitive's cause |
 | 74 | `revocation_unconfirmed` |
 | 75 | `sign_in_required`: `status` found a listed route not signed in, including one shown `sign_in_incomplete` |
 | 76 | ADR 0037's auth-separation refusal: a protected credential directory (the auth directory or the ADC directory) and a selected state root overlap; the printed class is the one ADR 0037 defines |
@@ -891,8 +900,17 @@ Concept: [Account binding and recovery](0073-provider-oauth-sign-in.md#concept-a
   metadata exists, so a rebuilt `chatgpt` metadata keeps its existing
   `models`.
 
-**Pairing rule.** `Store.read(context, route)` reads the metadata and the
-record and returns exactly one of:
+**Pairing rule.** `Store.read(context, route)` reads the metadata, the
+record and the floor. When the greater generation of the two sides is at or
+below the floor's, it returns `:absent` before anything else, because `auth
+logout` writes the floor before it deletes; a logout cut after its floor
+write is therefore never rolled forward or served. A route whose metadata
+names `backend: adc` has no record by design: for it `read/2` returns
+`{:ok, metadata}` when the metadata decodes, `:absent` when there is none,
+and `:inconsistent` only when it does not decode or a record exists beside
+it, and its tuple is the metadata's route, `client_id`, `subject_digest` and
+generation; `write/4` for `adc` writes metadata only. Otherwise it returns
+exactly one of:
 
 | Result | When |
 | --- | --- |
@@ -1410,7 +1428,7 @@ use temporary homes and never touch a real keyring.
 | `apps/loopex_cli/test/auth_command_test.exs` (separation) | `auth login` exits 76 before any token write when the auth directory or the ADC directory and a selected state root overlap in either direction, with the context built by `LoopexCli.Home` from a temporary `HOME` and the selected file; a durable composition with an `oauth` binding and no context refuses `provider_sign_in_required` |
 | `apps/loopex_composition/test/credential_plane_test.exs` (extended) | A sign-in route's custody is registered like an `env` route. Two canaries (access and refresh) never appear in journals, public events, progress, diagnostics, traces, executor job environments or resource subprocess environments. An invocation during rotation uses exactly one token |
 | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` (extended) | The `token_exchange` and `model_list` invocations: credential frame, bounds, closed failure classes, no raw body crossing, cleanup proof. The guardian's custody-phase producer of `provider_sign_in_required` and its `model_call_failed` counterparts, as [producing the reason](#technical-adr-0073-failure-reason) lists. The access-token echo guard withholds a reply containing the token |
-| `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. A login whose ID token fails verification writes nothing. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`, each leaving the floor. A login after logout authorizes under the floor's issued client. A login whose `model_list` fails writes no record, metadata or floor and exits 68 for a malformed or over-bound list and 72 for a transport failure, timeout or non-2xx status (D25). The ADC metadata path |
+| `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. A login whose ID token fails verification writes nothing. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`, each leaving the floor. A login after logout authorizes under the floor's issued client. A login whose `model_list` fails writes no record, metadata or floor and exits 68 for a malformed, empty or over-bound list and 72 for a transport failure, timeout or non-2xx status (D25). The ADC metadata path |
 | `apps/loopex_cli/test/daemon_sign_in_test.exs` | Statuses 120 to 123, each refused start leaving no socket; a sign-in route absent, inconsistent or `sign_in_required` at startup refuses 120; start-on-demand presence check; revoked mid-service → next call `not_dispatched` with no fallback to another route, other routes still served, and the attached client's terminal outcome is `failed` with `provider_sign_in_required` and the `auth login` hint; re-login adopted and the next turn succeeds without restart; **logout then login** in sequence while the service runs: the next call after logout refuses `provider_sign_in_required`, and after a same-account login the service adopts the new generation within 30 s and the next turn succeeds without restart |
 | `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers exactly `Enum.to_list(65..124) -- [114]`, each status once; `fetch/1` refuses 114 |
 | `apps/loopex_llm_reqllm/test/chatgpt_reply_ceiling_test.exs` | Through the fake server: a stream longer than the ceiling ends with completion `limit`, text whose `Loopex.Bounds.estimate/1` is at most the ceiling and is a prefix of what the server sent, a cut on a UTF-8 boundary, no tool calls, nil reported usage, and the server observing the connection closed; a stream that completes below the ceiling is unchanged; a ceiling of 1; a cut during a streamed tool call; the request body never contains `max_output_tokens`. Each case runs through both actual callers: the companion worker's `drain/5`, where the halt calls `StreamResponse.close/1` and no `StreamServer` or HTTP task survives the invocation, and the in-process caller through `OneShotHTTP1`, where the halt is followed by the owner's existing tagged-pool teardown proof before the result, and no progress delta is emitted. A source check finds one ceiling implementation, `ReplyCeiling`, called from both. **Raw-byte bound:** a stream longer than the ceiling whose SSE framing reaches 8,388,609 raw bytes while its estimate is still below the ceiling ends the in-process caller with `{:error, {:dispatched_or_unknown, "model_call_failed"}}` after the same teardown proof, while the same stream through the companion caller ends at the ceiling with completion `limit` |

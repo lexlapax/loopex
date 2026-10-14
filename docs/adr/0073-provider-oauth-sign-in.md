@@ -134,8 +134,8 @@ new provider protocol.
    token from gcloud's file, passes one recheck under the lock: it is used
    only if the stored sign-in is still the one it was obtained for. A
    newer sign-in of the same account and client is taken up in its place,
-   and anything else leaves the route without a token and changes nothing
-   stored. A provider
+   and anything else leaves the route without a token and stores nothing
+   it obtained. A provider
    that rejects the refresh token leaves the route unusable. Its calls are
    then refused before dispatch, by name: sign-in required. Nothing falls back
    to another route or to an API key. The maintainer decided on 2026-10-13
