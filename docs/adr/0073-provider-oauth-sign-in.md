@@ -24,7 +24,10 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   (D42) and the disabled route of a deferred lane (D43), and after them the
   foreground refusals (D50), a startup refresh the provider rejects (D51)
   and the refusal of a disabled route at configuration selection (D52),
-  and `ask`'s use of the selected configuration file's `providers` (D54)
+  and `ask`'s use of the selected configuration file's `providers` (D54),
+  and after them the vision passages qualified with D40 (D56), `ask`'s
+  environment routes beside the file's (D57) and the refusal of a sign-in
+  route by the commands that open none (D58)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -76,10 +79,14 @@ new provider protocol.
    credential, beside the existing `env` and `none` forms. The binding still
    names one route per provider. Model output, roles, saved defaults and
    remote clients still cannot select or create a credential. The
-   maintainer decided on 2026-10-14 (D54) that `loopex ask`, durable and
-   ephemeral, takes the bindings of the configuration file ADR 0037
-   selects, and nothing else from it, so a signed-in route works in `ask`
-   as in chat; without a file `ask` keeps its environment routes.
+   maintainer decided on 2026-10-14 (D54, D57) that `loopex ask`, durable
+   and ephemeral, takes from the configuration file ADR 0037 selects only
+   its bindings, for the providers they name, so a signed-in route works in
+   `ask` as in chat; every other provider, and every provider without a
+   file, keeps `ask`'s environment routes. The commands that open no
+   sign-in route, `run`, `resume` and `skill` without `--service`, refuse a
+   selected sign-in route by name, `sign_in_unavailable`, pointing to
+   `loopex chat` or `--service` (D58).
 2. **A plan-billed or cloud-billed route is its own provider route.** A
    request billed to a ChatGPT plan accepts different models and request
    members than an API-key request. A Gemini request billed to a Google Cloud
@@ -115,7 +122,8 @@ new provider protocol.
      registration exists, Anthropic is API-key only. The maintainer decided
      on 2026-10-14 that a configuration naming a disabled sign-in is
      refused by name, `sign_in_unavailable`, as soon as a command or the
-     service selects it (D52).
+     service selects it (D52). `auth logout` alone still runs, so a
+     sign-in stored before its route was disabled can be removed.
 5. **The host keeps tokens in the operating system's keyring.** macOS uses the
    login Keychain. Linux uses the Secret Service through libsecret when it is
    available. Without a keyring, as on a headless Linux host, tokens go to a
@@ -435,8 +443,8 @@ byte-for-byte as accepted, and the ADR index records the amendment.
 | ADR | Clause amended | Change |
 | --- | --- | --- |
 | 0048 | Credentialed routes store only named environment references; no keychain or file sources; no live rotation; one fixed binding shape; ephemeral composition resolves values only in the caller and never shares the durable custody loader | Adds the `oauth` form and the `vertex` project and location members. A host refresher may rotate the same route's custody to a fresh token for the same account. A different account still needs a restart. In the ephemeral profile a sign-in route resolves from custody its host opened, which holds its access token while the host's routes run; `env` routes keep caller-only resolution and never enter that custody |
-| 0019 | The sender passes a credential read from the environment; the private protocol's closed frames serve one Model request | The credential may be a host-held access token. Two new invocation kinds of the same companion, a token exchange and a `chatgpt:` model listing, carry a refresh or access token, and for `adc` the file's client secret, over the same private channel in closed frames of their own |
-| 0034 | Its failure-table row: custody's `:missing` and `:expired` become ADR 0019's generic credential-send failure, and no ADR 0029 terminal gains them; its reason table: custody answers `:expired` only when it holds a value | On a sign-in route `:missing` becomes the public `provider_sign_in_required`; `:expired`, and both answers on other routes, are unchanged. Custody also answers `:expired` when it holds no value and its deadline has passed, for a route with no token yet for a passing reason. A host refresher uses custody's existing rotation; the token, registry and sender rules are unchanged |
+| 0019 | The sender passes a credential read from the environment; the private protocol's closed frames serve one Model request | The credential may be a host-held access token. Two new invocation kinds of the same companion, a token exchange and a `chatgpt:` model listing, carry a refresh or access token, and for `adc` the file's client secret, over the same private channel in closed frames of their own, through host processes that generate no trace messages |
+| 0034 | Its failure-table row: custody's `:missing` and `:expired` become ADR 0019's generic credential-send failure, and no ADR 0029 terminal gains them; its reason table: custody answers `:expired` only when it holds a value | On a sign-in route `:missing` becomes the public `provider_sign_in_required`; `:expired`, and both answers on other routes, are unchanged. Custody also answers `:expired` when it holds no value and its deadline has passed, for a route with no token yet for a passing reason. A host refresher uses custody's existing rotation, and its sign-in requests use the existing no-runtime mode of `complete_prompt/3`, so they need no runtime; the token, registry, sender and no-runtime rules are unchanged |
 | 0039 | In the ephemeral profile, each hosted provider's key is read from its variable at the model boundary for each call; a proved pre-call refusal is fixed `model_call_failed`; `ask`'s fixed status-1 diagnostics; the host-VM audience covers the selected provider credential, in a common text its vision amendment places in seven authority texts | A sign-in route resolves from custody its host opened, and a proved pre-call refusal for missing sign-in is `provider_sign_in_required`. `ask` gains the status-1 diagnostics `provider_sign_in_required` and `sign_in_unavailable` (D50) and `sign_in_route_lost`, the last a hard halt (D38). Refresh tokens, ID tokens and the authorization-code exchange may also live in the host VM (D37), and a new common text replaces the seven copies at acceptance (D40) |
 | 0049 | The schema-version-1 configuration file's closed `providers` member; durable chat requires an `env` credential; a failed terminal's `reason` is `model_call_failed` or `unreadable_model_answer` | Adds, inside schema version 1, the `chatgpt`, `vertex` and `claude` provider names, the `oauth` credential form, and the `vertex` `project` and `location` members. Durable chat also accepts an `oauth` binding. A failed terminal's `reason` may also be `provider_sign_in_required`. The schema version does not change |
 | 0029 | A failed model call's public result is the fixed `model_call_failed`; the diagnostic pair stays private | A host refusal before dispatch because a sign-in route needs sign-in is public as `not_dispatched` with `provider_sign_in_required`. Dispatched failures and the private diagnostic pair are unchanged |
@@ -466,11 +474,14 @@ and code exchange may live in the `ask` and `auth` VMs, that a durable host
 VM holds refresh and ID tokens only in sensitive processes while the
 isolated provider process makes its sign-in requests, that the host's
 sign-in store, not runtime state, keeps sign-in tokens, and that crash dumps
-are disabled for `ask` and `auth`. The same acceptance qualifies four
-related passages of the technical vision, which say that credentials are
-persisted only as references and resolved just in time, so that they
-name the custody-held access token as the exception. This record does not
-edit those texts.
+are disabled for `ask` and `auth`. The maintainer decided the same day
+(D56) that the same acceptance qualifies, together, four related passages
+of the technical vision and the vision's sentence that credentials remain
+host-owned references, which say that credentials are persisted only as
+references and resolved just in time: each gains that the installed host,
+not the runtime, persists sign-in tokens in its sign-in store and holds
+them in host custody while its routes run. The companion states those
+texts. This record does not edit them.
 
 <a id="concept-adr-0073-compatibility"></a>
 ### Compatibility and Rollback
@@ -491,9 +502,10 @@ and `loopex ask`'s `loopex.ask/1` result reports it as a failed outcome.
 `/4`'s closed reasons for a stopping daemon gain `fatal:sign_in_route_lost`
 (D42). `loopex.ask/1`'s fixed status-1 diagnostics gain
 `provider_sign_in_required` and `sign_in_unavailable` (D50) and
-`sign_in_route_lost` (D38). The embedded composition API gains only what a
-host needs to open and close its sign-in routes and hand them to a
-composition. Before 1.0 only the current contract is kept, so no older
+`sign_in_route_lost` (D38). `run`, `resume` and `skill` without
+`--service` refuse a selected sign-in route (D58). The embedded composition
+API gains only what a host needs to open and close its sign-in routes and
+hand them to a composition. Before 1.0 only the current contract is kept, so no older
 reader is supported.
 
 Removing sign-in removes the `auth` command, the sign-in routes, the token
