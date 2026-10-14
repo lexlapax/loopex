@@ -4,7 +4,7 @@
 Technical depth: [Attached conversation mapping, service configuration and evidence](0071-daemon-attached-conversation-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service-hosted helpers designed on 2026-10-13; helper activation permits specified on 2026-10-13; the single counted activation sum and `Delegation.host/5` specified on 2026-10-13; after the holistic internal review on 2026-10-13, `host/5` landing with ADR 0037's readiness and the exit-status landing order; ADR 0037's status 125, `service_record_write_failed` (D31), recorded on 2026-10-14; after the second holistic internal review on 2026-10-14, the service's stop order, the permit taken last before the reserve append and bound only after startup, `host/5` withdrawn, and `home_unavailable` at status 111
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service-hosted helpers designed on 2026-10-13; helper activation permits specified on 2026-10-13; the single counted activation sum and `Delegation.host/5` specified on 2026-10-13; after the holistic internal review on 2026-10-13, `host/5` landing with ADR 0037's readiness and the exit-status landing order; ADR 0037's status 125, `service_record_write_failed` (D31), recorded on 2026-10-14; after the second holistic internal review on 2026-10-14, the service's stop order, the permit taken last before the reserve append and bound only after startup, `host/5` withdrawn, and `home_unavailable` at status 111; after the third internal review on 2026-10-14, the stop order's helper quiesce on the teardown deadline, the sign-in route loss class (D42) and the residuals of D41
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; it applies [ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept) and [ADR 0033](0033-collaboration-controller-lease-and-takeover.md#concept) to the conversation command, extends the daemon's startup inputs with [ADR 0049](0049-explicit-host-configuration.md#concept)'s file, and applies [ADR 0046](0046-child-session-tool.md#concept), [ADR 0056](0056-host-helper-ledger-recipe.md#concept) and [ADR 0069](0069-helper-run-evidence-and-route-guard.md#concept) to the service. It narrowly amends ADR 0049's conversation status record so a service-owned value can be absent, ADR 0032's activation ceiling so it also counts helper children, [ADR 0046](0046-child-session-tool.md#concept)'s fixed refusal order with one new refusal, `helper_activation_limit`, and [ADR 0055](0055-remote-session-creation-options.md#concept)'s creation options on a helper-enabled service
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept) and `loopex.experimental/4`, the daemon generation [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) introduced, both delivered by M7; ADRs 0046, 0056 and 0069 as delivered by M7; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the home, the on-demand start and `daemon.readiness`
@@ -150,6 +150,12 @@ it, and a parent whose creation started a session that its helper binding then
 failed still spends the activation that session took. `loopex service status`
 reports the activations used, children included.
 
+A service stopped in an orderly way first lets each sign-in route finish a
+token refresh in progress. A service that fails, or fails to start, while a
+route is refreshing can lose the token the provider rotated, and the
+operator then signs in again; the maintainer accepted this on 2026-10-14
+(D41).
+
 With helpers enabled, the attached conversation shows the parent's `task`
 calls and their results as the foreground does: the role, model, child
 session, outcome, bounded text and the separate and combined usage. The child
@@ -167,8 +173,11 @@ Technical depth: [Compatibility mechanics](0071-daemon-attached-conversation-tec
 The foreground conversation keeps its grammar and exit semantics. `run`,
 `resume`, `attach` and `sessions` keep theirs against a running service, with
 ADR 0037's `--service`. A daemon started without a file keeps M7's
-grammar; ADR 0037's separation and ADR 0072's marker refusals apply. Core
-gains no command and no record.
+grammar; ADR 0037's separation and ADR 0072's marker refusals apply, and so
+does ADR 0037's refusal of an unusable `HOME`, `home_unavailable`: a command
+that names its root by flag or `LOOPEX_HOME` and started under M7 without a
+usable `HOME` now refuses, and the daemon exits 111. Core gains no command
+and no record.
 
 Every conversation action uses a delivered member of `loopex.experimental/4`.
 The one protocol addition M8 makes is ADR 0037's `daemon.readiness`, which
@@ -207,7 +216,8 @@ ADR 0073's 120 to 123, ADR 0072's `root_adopting` at 124, and ADR 0037's
 `service_record_write_failed` at 125 (D31, 2026-10-14). The last three land
 together, 120 to 125, with ADR 0037's service record, so that no interim
 table has a gap. ADR 0037's refusal of a state root that overlaps
-the sign-in directory reuses this record's 111, `configuration_invalid`.
+the sign-in directory, and of an unusable `HOME` (`home_unavailable`),
+reuses this record's 111, `configuration_invalid`.
 Nothing in this record remains open.
 
 ## Governance Record
