@@ -10,7 +10,11 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   lifetime-scaled custody deadline specified the same day; the ADC directory's
   protection and the custody deadline under a slow exchange specified the
   same day; the maintainer's ADC client exception, the amended Core
-  settlement clauses and the in-process reply bound recorded the same day
+  settlement clauses and the in-process reply bound recorded the same day;
+  the maintainer's decisions on startup readiness of a sign-in route and on
+  the generation floor that survives sign-out recorded the same day, with
+  `chatgpt:` model admission, the store-failure and lock-contention rules
+  and the explicit Secret Service bus specified the same day
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -123,10 +127,20 @@ new provider protocol.
    a margin before its expiry that scales with the token's lifetime, at most
    one minute. A provider reply granting a token that lives under ten seconds
    is refused as a failed sign-in. A lock serializes
-   refreshes across every Loopex process that shares the home. A provider
+   refreshes across every Loopex process that shares the home, and no
+   process exchanges a refresh token without holding it. A provider
    that rejects the refresh token leaves the route unusable. Its calls are
    then refused before dispatch, by name: sign-in required. Nothing falls back
-   to another route or to an API key.
+   to another route or to an API key. The maintainer decided on 2026-10-13
+   how this meets service startup: a sign-in route that is not ready when
+   the service starts, because it was never signed in, its sign-in is
+   incomplete or it needs sign-in again, refuses the service start with exit
+   status 120. A revocation or sign-out while the service runs makes only
+   that route refuse its calls; the service and its other routes keep
+   running. When the provider has issued a new token but the store cannot
+   save it, the service keeps using the new token from memory and retries
+   only the save; if the service stops before the save succeeds, the new
+   token is lost and the route needs sign-in again.
 8. **Three commands manage sign-in.** `loopex auth login <provider>` opens a
    browser and receives the answer on a local loopback address. A headless
    host uses the provider's device flow where one exists; the companion
@@ -162,9 +176,32 @@ new provider protocol.
     `adc` source Loopex stores no token of its own. It reads gcloud's file at
     each refresh, notices when gcloud replaced it, and confirms the account
     before using a replaced file's token.
+14. **A `chatgpt:` model must be one the account lists.** OpenAI admits on
+    each plan only the models it lists for that account. After each sign-in
+    and each successful refresh, Loopex fetches that list through the same
+    process that exchanges tokens, which in a durable host is the isolated
+    provider companion and never the durable host VM itself. It bounds the
+    list and records it beside the sign-in. A `chatgpt:` model is admitted,
+    when the configuration is composed and when a session switches model,
+    only if the recorded list names it. An unlisted model, or a route with no
+    list yet, is refused before any call with the route-unavailable refusal
+    an unconfigured provider route already gets, and a refused switch keeps
+    the prior model. It is a configuration refusal, not a failed model call,
+    so nothing is retried.
+15. **Signing out keeps a floor, not a secret.** The maintainer decided on
+    2026-10-13 that `auth logout` leaves, beside the home's host identity, a
+    small non-secret file per route naming the highest write generation the
+    route has used and the Loopex client the provider issued. The next
+    sign-in reuses that client and writes a generation above every earlier
+    one. A service that is still running, and that the sign-out left without
+    a token, therefore recognizes a later sign-in by the same account and
+    client as newer than anything it held, takes it up without a restart and
+    resumes refreshing.
 
 The maintainer decided items 9 and 10, the daemon exit statuses and the
-outcome numbering on 2026-10-13. They are recorded as decided, not proposed.
+outcome numbering on 2026-10-13, and the startup rule of item 7 and the
+generation floor of item 15 the same day. They are recorded as decided, not
+proposed.
 
 Alternatives are in the companion. The main one rejected is reusing a widely
 deployed client identity, such as Codex CLI's or Claude Code's, which the
@@ -184,10 +221,13 @@ conservative token estimate of what has arrived. When the estimate reaches
 the ceiling, it stops reading, closes the stream and builds the reply from
 what it kept. The reply is recorded with the same `limit` completion a
 provider-truncated reply has, so the run, accounting and compaction treat it
-as they already treat a reply cut at its limit. The estimate is
-conservative, about one token per three bytes, so a cut reply is usually
-shorter than a provider-enforced ceiling would have allowed, never longer by
-that estimate. The summarizer and every other
+as they already treat a reply cut at its limit. The estimate counts about one
+token per three bytes. For English text and code that is usually more tokens
+than the provider counts, so a cut reply is usually shorter than a
+provider-enforced ceiling would have allowed. For text in multi-byte scripts
+it can count fewer, so such a reply can run past the provider's own count of
+the ceiling. Either way the kept reply never exceeds the ceiling by the
+estimate. The summarizer and every other
 role may therefore use `chatgpt:`.
 
 One ceiling rule serves both ways a call is made: the provider companion of
@@ -214,7 +254,9 @@ sent and nothing is owed. Loopex does not retry the call, because a retry
 would meet the same refusal. The refusal can also arrive on the one retry a
 generic unsent failure earns, when the sign-in was lost between the two
 attempts; it ends the run the same way. A maintenance or compaction run reports the same
-category.
+category. An abort or a run deadline that has already won takes precedence,
+as it does over any other model-call failure: the run ends cancelled or at
+its bound, and the attempt record still names the sign-in category.
 
 Clients see the reason in the run's terminal outcome on both
 `loopex.experimental/3` and `/4`. The reference chat and `ask` print that the
@@ -247,6 +289,11 @@ disagreeing uses neither as they stand:
   and `auth login` repairs it. A running service keeps the account it
   started with and never writes over the other account's secret.
 
+Signing out deletes both the secret and the metadata but keeps the route's
+generation floor (decision 15). So a sign-in after a sign-out never reuses a
+generation a running service has already seen, and it presents the same
+issued client that service holds.
+
 <a id="concept-adr-0073-consequences"></a>
 ### Observable Consequences
 
@@ -267,14 +314,27 @@ current token expires. It never prints a token and never contacts a provider.
 Configuration inspection still shows only the reference form, never whether a
 credential is available.
 
-A service holding a sign-in route keeps the token fresh while it runs. If the
-operator signs out, or the provider revokes access, new calls on that route
-fail before dispatch with the public reason `provider_sign_in_required`. The
-service also records the reason in its own diagnostic output, and `auth
-status` shows it. After the operator signs in again with
-the same account, the service picks up the new token without a restart. A
+A service holding a sign-in route keeps the token fresh while it runs. A
+sign-in route that is not ready when the service starts refuses the start
+(decision 7). If the operator signs out, or the provider revokes access,
+while the service runs, only that route's new calls fail before dispatch with
+the public reason `provider_sign_in_required`. The service notices a sign-out
+within about 30 seconds and a revocation at its next refresh. Until then it
+may still send the access token it holds, and a revoked sign-in's last access
+token can stay valid at the provider until it expires, up to an hour for
+OpenAI. The service also records the reason in its own diagnostic output, and
+`auth status` shows it. After the operator signs in again with
+the same account, the service picks up the new token without a restart, after
+a sign-out too. A
 different account needs a service restart, as replacing an API key does
 today. A running call is never cut off or repeated because a token changed.
+
+On Linux the Secret Service is reached through the desktop session's message
+bus. The service uses the bus address it was started with and never looks
+for another. A keyring that is locked or absent when the service starts makes
+a route stored there refuse the start as an unavailable credential store
+(exit status 121). `auth login` falls back to the private file only for a
+route with no stored sign-in yet.
 
 When no keyring is available, `auth login` says the token is stored in a file
 and names the file. Anything running as the same operating-system user can
@@ -294,7 +354,7 @@ byte-for-byte as accepted, and the ADR index records the amendment.
 | ADR | Clause amended | Change |
 | --- | --- | --- |
 | 0048 | Credentialed routes store only named environment references; no keychain or file sources; no live rotation; one fixed binding shape | Adds the `oauth` form and the `vertex` project and location members. A host refresher may rotate the same route's custody to a fresh token for the same account. A different account still needs a restart |
-| 0019 | The sender passes a credential read from the environment | The credential may be a host-held access token. A new token-exchange invocation of the same companion carries a refresh token over the same private channel |
+| 0019 | The sender passes a credential read from the environment | The credential may be a host-held access token. Two new invocations of the same companion, a token exchange and a `chatgpt:` model listing, carry a refresh or access token over the same private channel |
 | 0034 | Custody holds one value bound at composition | Custody's existing rotation and expiry are used by a host refresher; the token, registry and sender rules are unchanged |
 | 0039 | In the ephemeral profile, each hosted provider's key is read from its variable at the model boundary for each call | A sign-in route resolves from custody owned by the composition. A refresh in this profile runs in the host VM, under the same audience the profile already accepts |
 | 0049 | The schema-version-1 configuration file's closed `providers` member; durable chat requires an `env` credential | Adds, inside schema version 1, the `chatgpt`, `vertex` and `claude` provider names, the `oauth` credential form, and the `vertex` `project` and `location` members. Durable chat also accepts an `oauth` binding. The schema version does not change |
@@ -320,7 +380,9 @@ Technical depth: [Compatibility mechanics](0073-provider-oauth-sign-in-technical
 Existing configuration files, `env` and `none` bindings, and the
 `openai:`, `anthropic:`, `openrouter:` and `ollama:` routes are unchanged. The
 configuration schema stays at version 1. The new forms are additive members
-that a build without this decision refuses by name. No Core callback is
+that a build without this decision refuses by name: a new provider name as an
+unsupported provider, and an `oauth` credential on an existing route as an
+invalid credential binding. No Core callback is
 added; the Model callback admits one more closed reason before dispatch. The committed model already names its route. The one durable and wire
 change is the new failure reason: the settled-attempt record admits its
 category, and the `loopex.experimental/3` and `/4` schemas and vectors list
