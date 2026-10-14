@@ -9,13 +9,17 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   numbering recorded the same day; the host-to-store sign-in context and the
   lifetime-scaled custody deadline specified the same day; the ADC directory's
   protection and the custody deadline under a slow exchange specified the
-  same day
+  same day; the maintainer's ADC client exception, the amended Core
+  settlement clauses and the in-process reply bound recorded the same day
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
+  [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
   [ADR 0019](0019-host-owned-provider-protection.md#concept),
+  [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept),
   [ADR 0029](0029-bounded-provider-failure-diagnostics.md#concept),
   [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept),
   [ADR 0039](0039-ephemeral-embedded-profile.md#concept),
+  [ADR 0043](0043-context-compaction-checkpoint.md#concept),
   [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept) and
   [ADR 0049](0049-explicit-host-configuration.md#concept),
   listed under [amendments](#concept-adr-0073-amendments). It changes one
@@ -68,7 +72,12 @@ new provider protocol.
    a distinct OAuth client, registered or issued for Loopex. Loopex never
    presents another product's client ID, user agent or application header. It
    never lets the provider library refresh tokens or turn on its
-   subscription-impersonation modes.
+   subscription-impersonation modes. The maintainer decided on 2026-10-13 one
+   exception: the `adc` source presents the client ID and secret written in
+   gcloud's Application Default Credentials file, because Application
+   Default Credentials are Google's documented way for any application to use
+   the credentials the user gave gcloud. The exception covers that source
+   only. It never applies to `chatgpt:` or `claude:`.
 4. **The order is OpenAI, then Gemini, then Anthropic.**
    - **OpenAI** uses Sign in with ChatGPT. A Plus or Pro user authorizes Loopex
      to use their plan, up to a weekly cap they set for Loopex. Requests go to
@@ -92,8 +101,8 @@ new provider protocol.
    `adc` source reads, and every selected state root must lie physically
    apart, under ADR 0037's separation invariant, which refuses an overlapping
    selection before any token or root write, and whose walk check refuses a
-   backup, adopt or restore that meets either directory, or any mount,
-   inside the tree it walks. The installed host checks the paths once
+   backup, adopt or restore whose walked root lies over either directory or
+   that meets either directory, or any mount, inside the tree it walks. The installed host checks the paths once
    and hands the token store the checked paths; the store and its refreshers
    repeat that check before every token write and never look for a root
    themselves. So backups never contain tokens. Tokens never enter
@@ -176,12 +185,17 @@ shorter than a provider-enforced ceiling would have allowed, never longer by
 that estimate. The summarizer and every other
 role may therefore use `chatgpt:`.
 
-One ceiling implementation serves both ways a call is made: the provider
-companion of the durable hosts, and the in-process caller of the ephemeral
-profile. The in-process caller streams the `chatgpt:` reply through the
-profile's existing single-use connection, so the ephemeral cleanup proof is
-unchanged, and it shows no reply progress while the reply arrives, as it shows
-none for any route today.
+One ceiling rule serves both ways a call is made: the provider companion of
+the durable hosts, and the in-process caller of the ephemeral profile. The
+in-process caller streams the `chatgpt:` reply through the profile's existing
+single-use connection, so the ephemeral cleanup proof is unchanged, and it
+shows no reply progress while the reply arrives, as it shows none for any
+route today. That connection also keeps its existing bound on the raw bytes
+of one response. The stream carries far more bytes than the reply text, so a
+large ceiling can meet that bound first. The call then fails as a dispatched
+model-call failure, as any oversized in-process response does, and is not
+recorded as a reply cut at its limit. The companion has no such bound, so
+there the ceiling always decides.
 
 <a id="concept-adr-0073-failure-reason"></a>
 ### The Public Failure Reason
@@ -219,8 +233,10 @@ disagreeing uses neither as they stand:
 
 - When the secret is exactly one write ahead for the same account and
   client, the next process that takes the refresh lock completes the
-  metadata write from the secret. A refresh that crashed after the provider
-  rotated the token therefore loses nothing.
+  metadata write from the secret. A refresh that crashed after the secret
+  write therefore loses nothing; one that crashed after the provider rotated
+  the token and before the secret write loses the rotated token, so the
+  route needs sign-in again.
 - In every other disagreement, including a secret for a different account,
   the route is signed out. `auth status` shows that sign-in is incomplete
   and `auth login` repairs it. A running service keeps the account it
@@ -278,6 +294,9 @@ byte-for-byte as accepted, and the ADR index records the amendment.
 | 0039 | In the ephemeral profile, each hosted provider's key is read from its variable at the model boundary for each call | A sign-in route resolves from custody owned by the composition. A refresh in this profile runs in the host VM, under the same audience the profile already accepts |
 | 0049 | The schema-version-1 configuration file's closed `providers` member; durable chat requires an `env` credential | Adds, inside schema version 1, the `chatgpt`, `vertex` and `claude` provider names, the `oauth` credential form, and the `vertex` `project` and `location` members. Durable chat also accepts an `oauth` binding. The schema version does not change |
 | 0029 | A failed model call's public result is the fixed `model_call_failed`; the diagnostic pair stays private | A host refusal before dispatch because a sign-in route needs sign-in is public as `not_dispatched` with `provider_sign_in_required`. Dispatched failures and the private diagnostic pair are unchanged |
+| 0018 | The Model callback returns only `model_call_failed` as an error reason; settlement results carry only `model_call_failed` or `unreadable_model_answer`; its closed valid-combination table | The callback also admits `not_dispatched` with `provider_sign_in_required`. Its settlement records no conversation and no charge and always ends the run, on either attempt |
+| 0021 | The settled-attempt record's model-failure result is exactly `model_call_failed` | The result also admits `provider_sign_in_required` |
+| 0043 | A failed compaction episode's failure is one of a closed set of categories | The set also admits `provider_sign_in_required`, not retryable |
 
 The Proposed ADR 0037's sentence that file, keychain and command credentials
 need a separate future decision is answered by this record, for sign-in tokens
@@ -296,8 +315,8 @@ Technical depth: [Compatibility mechanics](0073-provider-oauth-sign-in-technical
 Existing configuration files, `env` and `none` bindings, and the
 `openai:`, `anthropic:`, `openrouter:` and `ollama:` routes are unchanged. The
 configuration schema stays at version 1. The new forms are additive members
-that a build without this decision refuses by name. No Core callback
-changes. The committed model already names its route. The one durable and wire
+that a build without this decision refuses by name. No Core callback is
+added; the Model callback admits one more closed reason before dispatch. The committed model already names its route. The one durable and wire
 change is the new failure reason: the settled-attempt record admits its
 category, and the `loopex.experimental/3` and `/4` schemas and vectors list
 it. Before 1.0 only the current contract is kept, so no older reader is

@@ -259,8 +259,8 @@ proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
 exactly three clauses of accepted ADR 0051: its statement that no backup CLI
 is added; its latest-backup-only restriction, which `--discard-later-work`
 relaxes for a lost source; and its manifest walks, which stop on a
-host-supplied credential-directory identity or on any mount inside the walked
-tree, through a new `restore/3` beside the unchanged `restore/2`. ADR 0051's other decisions, ADR 0070 and the
+host-supplied credential directory's identity or filesystem location or on
+any mount inside the walked tree, through a new `restore/3` beside the unchanged `restore/2`. ADR 0051's other decisions, ADR 0070 and the
 pre-1.0 rule settle the rest.
 
 0073 was proposed on 2026-10-13 when the maintainer added provider sign-in to
@@ -269,9 +269,13 @@ three new routes: `chatgpt:` for Sign in with ChatGPT, `vertex:` for Gemini on
 Google Cloud, and `claude:`, reserved until Anthropic sanctions a client
 registration for Loopex. Tokens are host-held in the operating system's
 keyring or an owner-only file outside the state root, and Loopex uses only its
-own client identities. On acceptance it amends named clauses of accepted ADRs
-0019, 0029, 0034, 0039 and 0048, including the new public failure reason
-`provider_sign_in_required` in ADR 0029's bounded vocabulary; adds the `oauth`
+own client identities, except that its `adc` source presents the client of
+gcloud's Application Default Credentials file. On acceptance it amends named
+clauses of accepted ADRs 0018, 0019, 0021, 0029, 0034, 0039, 0043 and 0048,
+including the new public failure reason `provider_sign_in_required` in ADR
+0029's bounded vocabulary, ADR 0018's Model callback boundary, settlement
+categories and valid-combination table, ADR 0021's settled-attempt result
+schema and ADR 0043's episode failure union; adds the `oauth`
 binding form and `vertex` members to ADR 0049's schema version 1 as additive
 members; and amends one sentence of Proposed ADR 0037. M8's daemon exit statuses are 111 to 115 for 0071 (114
 retired), 116 to 119 and 124 (`root_adopting`) for 0072 and 120 to 123 for

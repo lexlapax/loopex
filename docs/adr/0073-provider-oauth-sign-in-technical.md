@@ -150,9 +150,11 @@ stored.
   apply ADR 0037's
   [physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
   to every directory they walk, so ADR 0072's complete-copy backups never
-  capture a token: a walk refuses a directory with a protected identity and
-  any mount inside the walked tree, a bind-mounted token file included, and
-  a restore that meets either before its commit is never committed. ADR 0051's complete manifest
+  capture a token: a walk refuses a walked root located over a protected
+  directory, a directory with a protected identity and any mount inside the
+  walked tree, a bind-mounted token file included. A restore that meets one
+  before its commit is never committed, and one met after its commit leaves
+  the commit standing with cleanup pending. ADR 0051's complete manifest
   excludes no file.
 - `auth/` is created with mode `0700`. Every file in it is `0600`, owned by
   the effective user. A reader refuses a symlink anywhere on the path, a
@@ -563,7 +565,7 @@ Concept: [Account binding and recovery](0073-provider-oauth-sign-in.md#concept-a
   `account_label` and `state`, so the metadata of the same account can be
   rebuilt from it.
 
-**Pairing rule.** `Store.read(home, route)` reads the metadata and the
+**Pairing rule.** `Store.read(context, route)` reads the metadata and the
 record and returns exactly one of:
 
 | Result | When |
@@ -661,7 +663,14 @@ the ID token unverified on its private channel; it does not verify.
 4. `iss` equals the profile's issuer: `https://auth.openai.com` for OpenAI;
    `https://accounts.google.com` or `accounts.google.com` for Google, which
    documents both.
-5. `aud` is the client ID, as a string or a one-element list.
+5. `aud` is the expected client ID, as a string or a one-element list. For
+   an authorization-code exchange that is the Loopex client that obtained
+   the grant: OpenAI's issued `oaiapp_...` client or the compiled Google
+   desktop client. For the `adc` source it is the `client_id` of the ADC
+   file that was read for that refresh, the client the refresh posted under
+   the [ADC exception](#technical-adr-0073-adc); a token whose audience is
+   any other client, the compiled Google desktop client included, is
+   refused.
 6. `exp` is later than now minus 60 s; `iat` is no later than now plus 60 s.
 7. `nonce` equals the attempt's nonce on the authorization-code path.
 8. `sub` is a string of 1 to 255 bytes. Its digest is the
@@ -726,10 +735,25 @@ Loopex stores no token for it. Its metadata is:
 is high-entropy, so the digest discloses nothing usable. The access token
 lives only in custody memory.
 
-**File grammar.** The file is
-`$HOME/.config/gcloud/application_default_credentials.json` for the effective
-user. `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are never
-consulted, so the service's environment cannot redirect it.
+**Client identity.** The maintainer decided on 2026-10-13 that the `adc`
+source is the one exception to decision 3: it presents the `client_id` and
+`client_secret` that gcloud wrote into the ADC file, because Application
+Default Credentials are Google's documented mechanism for any application
+to use the credentials the user granted gcloud. The exception is bound to
+this source: no other source or route reads a client from a file, the
+`loopex` source of `vertex:` uses the compiled Loopex client, and
+`chatgpt:` and `claude:` never present a client Loopex was not issued. The
+metadata's `client_id` is the file's, and ID-token check 5 expects it.
+
+**File grammar.** The file is `<G>/application_default_credentials.json`,
+where `<G>` is the second member of the sign-in context's
+`protected_directories`, ADR 0037's ADC directory `$HOME/.config/gcloud`
+for the effective user as `LoopexCli.Home` computed it. `auth login` and
+the `SignIn.Route` refresher derive the path from the context they were
+given, never from `HOME` or the environment: ADR 0037 lets only
+`LoopexCli.Home` read `HOME`, and composition never does.
+`GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are never consulted,
+so the service's environment cannot redirect it.
 
 - The final path component is a regular file, not a symlink, owned by the
   effective user, with no group or other write bit; otherwise
@@ -811,8 +835,15 @@ other's drain; it holds no transport, process or progress logic.
     native-request step of `OneShotHTTP1` already reads for Anthropic;
   - `OneShotHTTP1`'s response collector, for a `chatgpt` fingerprint, parses
     the SSE body incrementally and folds each `response.output_text.delta`
-    and function-call argument delta through `ReplyCeiling`, within the
-    collector's existing 8,388,608-byte raw ceiling;
+    and function-call argument delta through `ReplyCeiling`. The collector
+    keeps its existing bound of 8,388,608 raw response bytes
+    (`@max_body`), which counts every SSE event and its JSON framing, not
+    only reply text. When the raw bytes would pass that bound before
+    `ReplyCeiling` halts and before `response.completed`, the collector
+    halts as it does today with `Req.TransportError` reason
+    `:loopex_response_too_large`, and the caller answers
+    `{:error, {:dispatched_or_unknown, "model_call_failed"}}`, not a `limit`
+    reply;
   - on halt the collector stops receiving and returns the admitted text. The
     owner's existing teardown closes the worker connection and proves the
     tagged pool subtree gone before the caller sends its result, exactly as
@@ -825,7 +856,12 @@ other's drain; it holds no transport, process or progress logic.
   unchanged.
 
 The selected-credential echo guard runs over the built reply in both callers,
-as it does today.
+as it does today. The two callers share the ceiling rule; only the
+in-process caller has a raw-byte bound. The companion's `drain/5` streams
+through ReqLLM with no raw-byte bound of its own, so there the ceiling or
+`response.completed` always ends the reply. In the in-process caller a
+ceiling large enough that the stream's raw bytes reach 8,388,608 first ends
+the attempt as the dispatched model-call failure above.
 
 **Rule.** For a request whose route is `chatgpt`, and only then:
 
@@ -969,7 +1005,7 @@ Concept: [Observable consequences](0073-provider-oauth-sign-in.md#concept-adr-00
 | Provider echoes a token | The existing exact-match echo guard on the access token | Split or encoded echoes, as today |
 | Forged identity token or substituted signing key | `RS256` only, keys only from the issuer's compiled JWKS URI, closed header, bounded rotation refetch | A compromise of the provider's own keys |
 | A crash between the two halves of a write | The pairing rule refuses both mismatch directions; same-account `roll_forward` under the lock | A different-account cut needs `auth login` again |
-| Impersonating another client | Only Loopex's own client identities; source scan for forbidden ReqLLM options | — |
+| Impersonating another client | Only Loopex's own client identities, except the `adc` source's client read from gcloud's file under the maintainer's exception; source scan for forbidden ReqLLM options | — |
 | Runaway spend | The plan's per-app weekly cap; credit overflow only if the user allows it; the Google project's budgets | Operator-owned |
 
 <a id="technical-adr-0073-evidence"></a>
@@ -987,9 +1023,9 @@ use temporary homes and never touch a real keyring.
 | --- | --- |
 | `apps/loopex_llm_reqllm/test/sign_in_profiles_test.exs` | Compiled endpoints, issuers and JWKS URIs are HTTPS and per profile; no override path outside tests. A source scan finds no `oauth_file`, `auth_file`, `oauth_http_options`, `with_claude_subscription`, `codex_originator`, `openai_codex` or `refresh_oauth_credentials` in Loopex source, and no Codex CLI or Claude Code client ID. Token-response validation (issuer, audience, scopes, bounds). `claude` is disabled without a sanctioned profile |
 | `apps/loopex_llm_reqllm/test/sign_in_routes_test.exs` | The binding grammar's alternatives, pointers and classes. `oauth` on existing routes and `env` on sign-in routes refuse. `vertex` project and location vectors. Per-route sealed headers. The `chatgpt` mapping never sends rejected members and always streams with `store: false` |
-| `apps/loopex_llm_reqllm/test/sign_in_id_token_test.exs` | Against test RSA keys generated with `:public_key`: a valid RS256 token verifies and yields the subject digest; a forged signature, an altered payload, `alg` `none`, `HS256` signed with the public key as an HMAC secret, `ES256`, and `jku`, `jwk`, `x5u`, `x5c` or `crit` headers are refused; wrong issuer (both Google forms accepted), wrong or multi-member audience, expiry, `iat` in the future and nonce mismatch are refused; an unknown `kid` refetches once and verifies after rotation, a still-unknown `kid` is refused, and a second unknown `kid` within 60 s does not refetch; an over-bound or non-RSA key set, a redirect from the JWKS URI and a fetch timeout are refused, the last as `provider_unreachable`; a profile's key set never verifies another profile's token |
+| `apps/loopex_llm_reqllm/test/sign_in_id_token_test.exs` | Against test RSA keys generated with `:public_key`: a valid RS256 token verifies and yields the subject digest; a forged signature, an altered payload, `alg` `none`, `HS256` signed with the public key as an HMAC secret, `ES256`, and `jku`, `jwk`, `x5u`, `x5c` or `crit` headers are refused; wrong issuer (both Google forms accepted), wrong or multi-member audience, and for the `adc` source an audience equal to the compiled Google desktop client or to any client other than the ADC file's `client_id`, while the file's own `client_id` verifies, expiry, `iat` in the future and nonce mismatch are refused; an unknown `kid` refetches once and verifies after rotation, a still-unknown `kid` is refused, and a second unknown `kid` within 60 s does not refetch; an over-bound or non-RSA key set, a redirect from the JWKS URI and a fetch timeout are refused, the last as `provider_unreachable`; a profile's key set never verifies another profile's token |
 | `apps/loopex_composition/test/sign_in_store_test.exs` | File backend: modes, owner, symlink refusal; stale `.tmp` cleanup. The metadata path never reads a secret. The pairing table, every row: metadata ahead of the record; the record ahead by one for the same account (`roll_forward`) and for a different subject or client (`inconsistent`); ahead by two; each side alone; an undecodable record, including a truncated Secret Service value. Write cuts after the record and before the metadata, on the file backend and on each keyring backend through its recording fake executable, for a same-account refresh and for a login of a different account over an existing one; a failed keyring read-back exits `credential_store_write_failed` with the metadata unchanged; `roll_forward` acted on only under the lock. **Separation before backend access:** each case builds the real sign-in context map over real temporary directories, the shape `LoopexCli.Home.sign_in_context/1` returns, with no test-only option or hook in the store; `Separation.check/1` passes on it, and the filesystem is then changed so the auth directory lies inside a listed root (a symbolic link replacing an ancestor of the auth directory) or contains one (the root's path created under it). `write/4` then returns `{:error, {:auth_root_overlap, pointer}}` with that root's pointer; the file backend creates no file, temporary or directory, and the keychain and Secret Service backends' recording fake executables record no invocation. A context of the wrong shape refuses the same way |
-| `apps/loopex_composition/test/sign_in_adc_test.exs` | A gcloud-shaped `authorized_user` fixture: restart rereads the file, refreshes and keeps the subject; an absent ID token on an unchanged grant keeps the subject; a response without `refresh_token` keeps using the file's; malformed files (missing member, wrong `type`, extra member, nested value, over-bound, symlink, other owner, group-writable, another `universe_domain`) are refused; a replaced file for the same account is adopted at the next generation without restart; a replaced file for another account is `sign_in_account_changed` with custody `nil`; a replaced file whose refresh returns no ID token is refused; a deleted file is `sign_in_required`; `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are ignored; logout leaves gcloud's file untouched |
+| `apps/loopex_composition/test/sign_in_adc_test.exs` | A gcloud-shaped `authorized_user` fixture: restart rereads the file, refreshes and keeps the subject; an absent ID token on an unchanged grant keeps the subject; a response without `refresh_token` keeps using the file's; malformed files (missing member, wrong `type`, extra member, nested value, over-bound, symlink, other owner, group-writable, another `universe_domain`) are refused; a replaced file for the same account is adopted at the next generation without restart; a replaced file for another account is `sign_in_account_changed` with custody `nil`; a replaced file whose refresh returns no ID token is refused; a deleted file is `sign_in_required`; the refresh posts the file's own `client_id`, and a replaced file's ID token whose `aud` is not that `client_id` is `sign_in_failed` with custody `nil` and metadata unchanged; the refresher, given a sign-in context whose `protected_directories` names a temporary `G` while `HOME` names another directory holding a different ADC file, reads only `<G>/application_default_credentials.json`; `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_CONFIG` are ignored; logout leaves gcloud's file untouched |
 | `apps/loopex_composition/test/sign_in_keychain_test.exs` | Tagged `:macos_keychain`, against a temporary keychain: round trip, overwrite, delete; the secret never appears in any spawned argv, checked through an argv-recording wrapper |
 | `apps/loopex_composition/test/sign_in_secret_service_test.exs` | Tagged `:secret_service`, under `dbus-run-session` with a throwaway keyring: round trip and availability probe. Untagged, a recording fake executable proves the wrapper's argv and standard-input bytes |
 | `apps/loopex_composition/test/sign_in_refresh_test.exs` | Refresh at the window, including a short `expires_in`. **Custody deadline**, through the real refresher and `CredentialCustody.resolve/1`: a fresh 30 s token from the fake server resolves `{:ok, _}` as soon as custody starts and is refreshed at 15 s; with the server then unreachable it still resolves until 22,500 ms after `t0` and `:expired` after it; **delayed response**: a 10 s token whose response the fake server delays by more than 7,500 ms after the request reaches it (so verification and the write finish after `t0` + 7,500 ms) enters custody past its deadline, `CredentialCustody.resolve/1` returns `:expired` on the first call, a model call on the route refuses before dispatch with no provider request carrying that token, and the refresher's next refresh is due at once, a repeated delay following step 5's transient schedule; a token with `expires_in` 9 is `sign_in_failed`, at login with nothing written and at refresh with nothing written and custody unchanged. A refresher whose context's auth directory is moved inside a listed root after start exchanges nothing and rotates custody to `nil`; rotation persisted; `invalid_grant` → `sign_in_required` and custody `:missing`; transient retry schedule; expiry while unreachable → `:expired` refusal. Two OS processes on one home perform exactly one exchange, the other adopting. Stale lock reclaim. Account change refused; same-account re-login adopted within 30 s; logout reaches custody `nil`. **Different-account write cut:** a service running account A; `auth login` for B is killed after its record write; the service's next refresh exchanges nothing, writes nothing and rotates custody to `nil`, B's record bytes are unchanged, a new composition refuses `provider_sign_in_required`, `auth status` shows `sign_in_incomplete`, and rerunning the login repairs it. **Restart before metadata publication:** a refresh at which the fake server rotates and invalidates the old refresh token is killed after its record write; a restarted composition rolls the metadata forward and refreshes with the rotated token; the invalidated token is never presented again. Refresh-response rules: an OpenAI response without `refresh_token` fails with no write; a Google response without `refresh_token` or `id_token` keeps the prior refresh token and subject; a refresh-response ID token is never used for identity |
@@ -999,7 +1035,7 @@ use temporary homes and never touch a real keyring.
 | `apps/loopex_cli/test/auth_command_test.exs` | Grammar and every exit status. Loopback: state mismatch, wrong path, denial, timeout, port already bound. `--device` refusal text. A login whose ID token fails verification writes nothing. `status` makes no secret read and no network call. `logout` revoke success, failure and `--local-only`. The ADC metadata path |
 | `apps/loopex_cli/test/daemon_sign_in_test.exs` | Statuses 120 to 123, each refused start leaving no socket; start-on-demand presence check; revoked mid-service → next call `not_dispatched` with no fallback to another route, and the attached client's terminal outcome is `failed` with `provider_sign_in_required` and the `auth login` hint; re-login adopted and the next turn succeeds without restart |
 | `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` covers exactly `Enum.to_list(65..124) -- [114]`, each status once; `fetch/1` refuses 114 |
-| `apps/loopex_llm_reqllm/test/chatgpt_reply_ceiling_test.exs` | Through the fake server: a stream longer than the ceiling ends with completion `limit`, text whose `Loopex.Bounds.estimate/1` is at most the ceiling and is a prefix of what the server sent, a cut on a UTF-8 boundary, no tool calls, nil reported usage, and the server observing the connection closed; a stream that completes below the ceiling is unchanged; a ceiling of 1; a cut during a streamed tool call; the request body never contains `max_output_tokens`. Each case runs through both actual callers: the companion worker's `drain/5`, where the halt calls `StreamResponse.close/1` and no `StreamServer` or HTTP task survives the invocation, and the in-process caller through `OneShotHTTP1`, where the halt is followed by the owner's existing tagged-pool teardown proof before the result, and no progress delta is emitted. A source check finds one ceiling implementation, `ReplyCeiling`, called from both |
+| `apps/loopex_llm_reqllm/test/chatgpt_reply_ceiling_test.exs` | Through the fake server: a stream longer than the ceiling ends with completion `limit`, text whose `Loopex.Bounds.estimate/1` is at most the ceiling and is a prefix of what the server sent, a cut on a UTF-8 boundary, no tool calls, nil reported usage, and the server observing the connection closed; a stream that completes below the ceiling is unchanged; a ceiling of 1; a cut during a streamed tool call; the request body never contains `max_output_tokens`. Each case runs through both actual callers: the companion worker's `drain/5`, where the halt calls `StreamResponse.close/1` and no `StreamServer` or HTTP task survives the invocation, and the in-process caller through `OneShotHTTP1`, where the halt is followed by the owner's existing tagged-pool teardown proof before the result, and no progress delta is emitted. A source check finds one ceiling implementation, `ReplyCeiling`, called from both. **Raw-byte bound:** a stream longer than the ceiling whose SSE framing reaches 8,388,609 raw bytes while its estimate is still below the ceiling ends the in-process caller with `{:error, {:dispatched_or_unknown, "model_call_failed"}}` after the same teardown proof, while the same stream through the companion caller ends at the ceiling with completion `limit` |
 | `apps/loopex_composition/test/chatgpt_summarizer_test.exs` | A maintenance summary on a `chatgpt:` route through the fake server, with a summary longer than ADR 0043's ceiling, settles as a `limit` reply within the ceiling and is handled as any limit-truncated summary, once through a durable composition (companion caller) and once through an ephemeral composition's maintenance model (in-process caller) |
 | `apps/loopex/test/sign_in_required_settlement_test.exs` | `{:not_dispatched, "provider_sign_in_required"}` settles attempt one as `not_dispatched`, accounting `none`, next `terminal` with no retry; the run ends `failed` with that reason; the record replays. **Route availability changes between attempts:** attempt one settles `not_dispatched`/`model_call_failed` with `retry`, custody then becomes `:missing`, and attempt two settles terminal with `provider_sign_in_required`; the two-attempt history replays to the same terminal. The category with `dispatched_or_unknown`, accounting other than `none`, `next` other than `terminal`, or a termination other than abort or deadline is invalid history; a maintenance run reports the category |
 | `apps/loopex_protocol/test/sign_in_required_vectors_test.exs` | The new vectors encode and decode on `loopex.experimental/3` and `/4`; the reason with a nonnull `failure`, or as a failure category with `retryable` `true`, is refused; the regenerated manifests and schema proof match |
@@ -1013,7 +1049,9 @@ being available, run with `--only`:
   forced refresh, and logout with revocation.
 - `real-sign-in-gemini`: the same for `vertex:`, through both the `loopex`
   and `adc` sources, against a maintainer-owned project. The `adc` part reads
-  a file written by a real `gcloud auth application-default login`.
+  a file written by a real `gcloud auth application-default login`, and its
+  login verifies a real Google ID token whose `aud` is that file's
+  `client_id`.
 - `real-sign-in-anthropic`: defined, and refused as `sign_in_unavailable`
   until a sanctioned registration exists. That tested refusal is the lane's
   complete proof for the disabled `claude:` route; M8 closure needs positive
@@ -1068,6 +1106,33 @@ Concept: [Amendments to accepted decisions](0073-provider-oauth-sign-in.md#conce
   and vectors on `loopex.experimental/3` and `/4`. The private stage and
   category pair, its sealing and its exclusion from every public plane are
   unchanged; the new reason is never derived from it.
+- **ADR 0018, Technical depth, "Model result boundary".** The union
+  "`{:ok, reply()} | {:error, {:not_dispatched, "model_call_failed"}} |
+  {:error, {:dispatched_or_unknown, "model_call_failed"}} | {:error,
+  term()}`" gains `{:error, {:not_dispatched,
+  "provider_sign_in_required"}}`, returned only by a host refusal before
+  dispatch on a sign-in route. Every other term keeps its meaning.
+- **ADR 0018, Technical depth, `result_projection`.** "`"category" =>
+  "model_call_failed" | "unreadable_model_answer"`" gains
+  `"provider_sign_in_required"`.
+- **ADR 0018, Technical depth, the closed valid-combination table.** Row 4,
+  "Exact `not_dispatched` has no conversation and no accounting. Attempt one
+  selects retry only when no termination has won", stays exact for
+  `model_call_failed`. One row is added: a `not_dispatched` result with
+  category `provider_sign_in_required`, on attempt one or two, with no
+  termination or an abort or deadline termination, has conversation `none`,
+  accounting source `none` and next `terminal`, never `retry`. Every other
+  combination with the category is invalid history.
+- **ADR 0021, Technical depth, "Exact schema".** "Normal reply and
+  model-failure results remain exactly: … `%{"kind" => "error",
+  "category" => "model_call_failed"}`". Amended: the model-failure result is
+  exactly that map or `%{"kind" => "error", "category" =>
+  "provider_sign_in_required"}`. The twelve root keys, the kind value and
+  the unreadable result are unchanged.
+- **ADR 0043, Technical depth, the episode terminal's failure union.**
+  "`{category: "model_call_failed", retryable: false}`" is joined by
+  `{category: "provider_sign_in_required", retryable: false}`, for
+  run-owned and standalone episodes alike. The other members are unchanged.
 - **ADR 0049, Technical, file contract.** The `providers` row, "durable chat
   requires `{"credential":{"env":"NAME"}}`", is amended: durable chat also
   accepts `{"credential":{"oauth":{"source":...}}}` on a sign-in route. Schema

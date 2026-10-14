@@ -4,7 +4,7 @@
 Technical depth: [Installed host configuration and path discovery](0037-host-configuration-and-path-discovery-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service command resolved from the escript's own location on 2026-10-13; readiness source, status object and sign-in separation specified on 2026-10-13; separation comparison for missing paths and the host-to-store sign-in context specified on 2026-10-13; the ADC directory protected and the physical walk check added on 2026-10-13; the walk check extended to refuse any mount inside a walked tree on 2026-10-13; the maintainer's Linux separation by filesystem path and Linux mount-table walk rule decided, and the restore walk after the commit stated, on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host; it also narrowly amends [ADR 0049](0049-explicit-host-configuration.md#concept)'s grammar so `--config` is optional when a home is selected
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), accepted and delivered by M7; [ADR 0071](0071-daemon-attached-conversation.md#concept) for the service's configuration reader; [ADR 0072](0072-store-readiness-marker-backup-and-restore.md#concept) for the root facts the diagnostic command reports
@@ -117,18 +117,41 @@ leaving files out of a backup:
   from its deepest existing directory. Where separation cannot be proved, as
   when two not-yet-created names could be one name on a case-insensitive
   volume, the layout is refused.
+- **On Linux, paths are also compared inside their filesystems.** The
+  maintainer decided on 2026-10-13 that on Linux each of these paths is
+  also located by the kernel's mount table: the filesystem it lies on and
+  its path inside that filesystem. Two paths overlap when they are on the
+  same filesystem and one of those inner paths equals or contains the
+  other. This recognizes a bind mount of any directory or subdirectory of a
+  protected directory, such as a subdirectory of gcloud's directory bound
+  at another path and selected as a state root, which neither the paths
+  nor the directory identities above reveal. A mount table that cannot be
+  read, is too large or is malformed refuses the layout. The comparison runs
+  in the early path check and again, for the walked root, at the start of
+  every backup, adopt and restore walk. On macOS, which has no bind mount,
+  the directory identities decide as before.
 - That path check is the early refusal. A mount can still place part of a
   root over credential storage with no link between the two paths, and on
   Linux a single credential file can be bind-mounted into a root. So
   `store backup`, `store adopt` and `store restore` also compare every
   directory they walk while copying or verifying a root with the protected
-  directories' physical identities, and refuse any mount point inside the
-  walked tree, whatever it holds. Either refuses `auth_root_overlap` before
-  that walk copies a file, and a restore that meets one before its commit
-  is never committed. A state root, backup or destination that contains a
-  mount is therefore refused, and physical separation of every copied root
-  rests on that refusal. A credential file the operator copies into a root
-  is ordinary root content that no walk can recognize.
+  directories' physical identities, and refuse any mount inside the walked
+  tree, whatever it holds. On Linux a mount is one the kernel's mount table
+  lists strictly inside the tree: the maintainer decided on 2026-10-13 that
+  an entry which merely reports another device, as files of an overlay
+  filesystem and btrfs subvolumes do, is not refused there, so state roots
+  in overlay filesystems, as containers use, and on btrfs are supported. On
+  macOS an entry on another device than the walked root is refused, as
+  before. Either refusal is `auth_root_overlap` before that walk copies a
+  file. A restore that meets one before its root commit record is
+  published is never committed. One met after that record exists, in the
+  restore's final check of the destination or in claim cleanup, leaves the
+  commit standing and the cleanup pending, with the destination closed,
+  until a later call with the same plan finishes. A state root, backup or
+  destination that contains a mount is therefore refused, and physical
+  separation of every copied root rests on that refusal. A credential file
+  the operator copies into a root is ordinary root content that no walk can
+  recognize.
 - The installed host's home module owns the rule and decides which paths each
   command checks. It checks before any token is written, any root is created
   or opened, and before `store adopt`, `store backup`, `store restore`,

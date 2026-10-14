@@ -42,8 +42,8 @@ composition, the Local executor's restore codec, the CLI and the daemon.
 | Read-only inventory and audit of a live root path; adopt's manifest without the placement lock's entries; whole-tree backup copy | Three operations added to `LoopexComposition.Restore.IO`: `{:root_inventory, root, manifest, workspace_ref, mode}`, `{:adopt_manifest, root, max_total}` and `{:backup_copy, root, staging_state, manifest}` | `loopex_composition` | Existing guardian, new operations |
 | Adopt's hold of the root's placement lock | The extracted placement lock primitive on `STATE_ROOT/placement.lock`, called by `StoreAdmin.adopt/2`; never `Placement.acquire/2` | `loopex_composition` | Existing primitive, new caller |
 | Session-identifying failure of the audit | `LoopexComposition.Restore.Audit` and `Restore.IO.audit_store_bytes/1` return the failing session identifier privately; the public results of `restore/2` and `restore/3` are ADR 0051's | `loopex_composition` | Existing, changed |
-| Restore entry point taking the walk guard | `LoopexComposition.Restore.restore/3`, beside the accepted `restore/2`, which delegates with no guard; `test_restore/3`'s options admit `:guard`; `Restore.IO.run/3` admits a `:guard` option beside `:probe` and `:pause_at` and binds it into the IO function the worker passes to `Restore.Workflow`, so every manifest walk of the transition and its continuations, and of the backup and adopt operations, receives it | `loopex_composition` | Existing, changed |
-| Protected identities and the mount table | `LoopexComposition.SignIn.Separation.identities/1` and `mount_points/1` (ADR 0037) | `loopex_composition` | New |
+| Restore entry point taking the walk guard | `LoopexComposition.Restore.restore/3`, beside the accepted `restore/2`, which delegates with no guard; `test_restore/3`'s options admit `:credential_guard`; `Restore.IO.run/3` admits a `:credential_guard` option beside `:probe` and `:pause_at` and binds it into the IO function the original worker passes to `Restore.Workflow`, so every manifest walk of the transition and its continuations, and of the backup and adopt operations, receives it. The key is named apart from `Restore.IO`'s private `guard/1` guardian loop | `loopex_composition` | Existing, changed |
+| Protected entries, the mount table and filesystem locations | `LoopexComposition.SignIn.Separation.identities/1`, `mount_table/1` and `location/2` (ADR 0037) | `loopex_composition` | New |
 | `store backup|restore|adopt` grammar, output, exit statuses | `LoopexCli.Store` (`lib/loopex_cli/store.ex`), dispatched from `LoopexCli.dispatch/2` as `"store"` | `loopex_cli` | New |
 | Marker check for read-only commands (`sessions`, `artifact`) | `LoopexCli` before `SessionCatalog.list/1` and `LoopexComposition.artifacts/1` | `loopex_cli` | Existing, changed |
 | Daemon exit statuses for marker refusals | `LoopexDaemon.ExitStatus`, `LoopexDaemon.Service.acquire_placement/1` | `loopex_daemon` | Existing, changed |
@@ -427,10 +427,10 @@ gcloud's Application Default Credentials directory, physically outside every
 state root, not because backup filters files. ADR 0037's
 [physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
 runs in every walk below: manifest A at step 7, the copy at step 8 and
-manifests B and C at step 9, each comparing every directory it encounters
-with the identities `Separation.identities/1` stats from the command's
-sign-in context at the walk's start and refusing any mount inside the walked
-tree. The disposable job-index cache removed at step 6 is
+manifests B and C at step 9, each comparing the walked root's filesystem
+location and every directory it encounters with the entries
+`Separation.identities/1` computes from the command's sign-in context at the
+walk's start and refusing any mount inside the walked tree. The disposable job-index cache removed at step 6 is
 deleted from the source before the manifest, not left out of the copy.
 
 **Layout.**
@@ -509,8 +509,9 @@ same bytes have distinct cuts.
    the replayed Store. `prior_lineage_sha256` is
    `RestoreCodec.lineage_digest/1` of A's `.loopex-restore` and
    `restore-lineage` entries. The source placement is the root's physical
-   path with `major_device` and `inode` from `File.lstat/1`. A walked
-   directory with a protected identity, or a mount inside the root, refuses
+   path with `major_device` and `inode` from `File.lstat/1`. A root located
+   over a protected directory, a walked directory with a protected
+   identity, or a mount inside the root, refuses
    `auth_root_overlap` with the root's pointer here, before the staging
    directory exists, so no copied file is written.
 8. Stage `BACKUP`'s parent `/.NAME.loopex-backup-HEX32` (mode `0700`) and run
@@ -588,7 +589,8 @@ lost source; ADR 0051 notes that a backup hash does not prove latestness.
    capture's (`backup_changed`). Manifest of `BACKUP/state` must equal those
    bytes (`backup_changed`); that walk applies ADR 0037's
    [physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
-   and a protected identity or a mount inside `BACKUP/state` refuses
+   and a location over a protected directory, a protected identity or a
+   mount inside `BACKUP/state` refuses
    `auth_root_overlap` with pointer `/arguments/backup`. `RootFormat.check(BACKUP/state)` must be `:current`
    (its code otherwise).
 2. Destination: absent, or an existing empty directory (`destination_not_empty`);
@@ -677,26 +679,39 @@ that later work was deliberately discarded; they stay beside the backup.
    with `guard` `%{protected_identities: Separation.identities(context)}`.
    ADR 0051's transition applies ADR 0037's
    [physical walk check](0037-host-configuration-and-path-discovery-technical.md#technical-0037-physical-walk)
-   in every manifest walk it makes of `BACKUP/state` and `DESTINATION`. The
-   walk's stop is reported in ADR 0051's unchanged closed vocabulary, by
-   phase:
+   in every manifest walk it makes of `BACKUP/state`, of an available
+   source and of `DESTINATION`. The walk's stop is reported in ADR 0051's
+   unchanged closed vocabulary, by phase:
 
-   - **Before the commit**, which includes the destination manifest compared
-     after the copy and before the root `committed` record is published: the
-     stop is an `io_error`, reported as `not_committed`
-     `inventory_unavailable` before possible intent and as a
-     `commit_unknown` observation with reason `io_error` after it. In both
-     cases the destination is not committed: no root `committed` record
-     exists and `Restore.lookup/3` answers absent or pending in an earlier
-     phase than `claim_release`.
-   - **After the commit**, in the claim cleanup ADR 0051 runs once the root
-     `committed` record exists, whether in the first call or in a later one
-     that resumes cleanup: the stop is a `commit_unknown` observation, the
-     outcome ADR 0051 already returns when that cleanup cannot finish. The
-     commit stands, the restore claims stay retained, `Restore.lookup/3`
-     answers pending at phase `claim_release`, never committed or
-     `current`, and composition refuses the destination until a later call
-     with the same plan finishes cleanup.
+   - **Before the commit**, which includes the destination manifest
+     compared after the copy and the activation manifest compared after the
+     generation install, before phase `destination_proofs`: the stop is an `io_error`, reported as
+     `not_committed` `inventory_unavailable` before possible intent and as
+     a `commit_unknown` observation with reason `io_error` after it. In
+     both cases the destination is not committed: no root `committed`
+     record exists and `Restore.lookup/3` answers absent or pending in an
+     earlier phase than `claim_release`.
+   - **In the final check after the commit.** The first call publishes the
+     root `committed` record in phase `destination_proofs` and then takes
+     one more destination manifest, which must equal the compiled final
+     image. A stop there is an `io_error` after the transition marked the
+     destination changed and intent possible, so the result is a
+     `commit_unknown` observation at phase `destination_proofs` with
+     reason `io_error`, and the claims are retained, not released. The
+     commit stands: the destination holds the root `committed` record and
+     its claim, so `Restore.lookup/3` answers pending at phase
+     `claim_release`, never committed or `current`, and composition refuses
+     the destination. A later call with the same plan finds that record and
+     continues as retained claim cleanup, the next case.
+   - **In claim cleanup**, which a later call with the same plan runs once
+     the root `committed` record exists: its walks of the backup, of an
+     available source and of the destination stop it, and the result is the
+     `commit_unknown` observation ADR 0051 already returns when that cleanup
+     cannot finish. The commit stands, the restore claims stay retained,
+     `Restore.lookup/3` answers pending at phase `claim_release`, and
+     composition refuses the destination until a call with the same plan
+     finishes cleanup. The first call's own claim release after a commit
+     makes no manifest walk, so the guard cannot stop it.
 
    A `commit_unknown` observation alone does not say which phase stopped,
    so the command does not infer noncommit from it. After any
@@ -705,10 +720,12 @@ that later work was deliberately discarded; they stay beside the backup.
    prints its answer; at `claim_release` it adds `restore TX_ID is
    committed in DESTINATION; claim cleanup is pending and the root stays
    closed until --resume finishes it`. It then repeats the walk check
-   read-only over `BACKUP/state` and `DESTINATION` and, when it finds a
-   protected identity or a mount, prints `auth_root_overlap` with
-   `/arguments/backup` or `/arguments/destination` before the outcome lines
-   below. The exit status is the table's.
+   read-only over `BACKUP/state`, over the captured source when the plan's
+   `source_status` is `available` and that path exists, and over
+   `DESTINATION`, and, when it finds a located root, a protected identity
+   or a mount, prints `auth_root_overlap` with `/arguments/backup`,
+   `/capture/source_state_root` or `/arguments/destination` before the
+   outcome lines below. The exit status is the table's.
 
 **Output by outcome.**
 
@@ -854,7 +871,7 @@ Concept: [Observable consequences](0072-store-readiness-marker-backup-and-restor
 
 Fault cuts use seams that already exist or mirror existing ones: a private
 `:before_publish` hook in `RootFormat`, as `Loopex.SessionDirectory` has;
-`Restore.test_restore/3`, whose options admit the same `:guard` as `restore/3`, and `Restore.IO`'s probe gates for restore and the new
+`Restore.test_restore/3`, whose `:credential_guard` option admits the same guard as `restore/3`, and `Restore.IO`'s probe gates for restore and the new
 IO operations; process kill through the existing fixture helpers. Every
 "unchanged" assertion compares a complete independent recursive `File.lstat/1`
 walk of the root (path, kind, mode, size, SHA-256, `nlink`), not `Restore.IO`'s
@@ -869,10 +886,10 @@ own manifest.
 | `apps/loopex_daemon/test/daemon_root_format_test.exs` | Daemon start exits 116, 117, 118, 119 and 124 for the five codes with the root unchanged, no socket, and the fatal line naming the class |
 | `apps/loopex_daemon/test/command_test.exs` (extended) | `ExitStatus.classes/0` maps every status from 65 to 124 except 114 exactly once and none to 114; its assertion grows from `65..110` to that list (ADR 0071, this record and ADR 0073) |
 | `apps/loopex_composition/test/store_adopt_test.exs` | A root built by the current code with its marker removed is adopted and differs only by the marker; idempotent second run writes nothing; job-index caches tolerated and left; without `--old-writer stopped`, `attestation_required` with no write; refusals with no write for a retired catalogue, a live lock (`root_held`), a writer marker, a helper writer marker and a restore claim, each releasing adopt's lock; a stale lock of a dead incarnation reclaimed at step 4 and the root adopted with no lock left; manifests A and C omit exactly `placement.lock` and the `placement.lock.*` entries and include everything else; audit refusals for a corrupt frame, a torn tail, a session with an unknown record kind (session named), a receipt without its marker, a missing artifact object and a workspace mismatch, each leaving only the `adopting` marker added and the lock released; a non-cooperating old-build writer (an embedded host or lockless path, as `--old-writer stopped` covers) simulated by a test process that takes no placement lock, appending a valid Store frame and creating a file at a private hook after the `adopting` publication and before manifest A (the write is audited and the root adopted) and after manifest A (`root_changed`, marker `adopting`, lock released); real exclusion at private hooks that pause adopt: `Placement.acquire/2` and a real daemon start attempted immediately after the `adopting` publication are refused (`root_adopting`, daemon exit 124) with the root and the lock unchanged, and attempted immediately after the rename, before the release, are refused `placement_active` (daemon exit 76) and admitted, the daemon serving, only after adopt releases; two adopters started together on one unmarked root, one paused while holding the lock: exactly one reaches the fence and commits, and the other refuses `root_held` with nothing written or, started after the release, reports `already marked`; kill after step 4, after the step 7 link, after manifest A, during the audit, after the rename and before the release: before the rename the root is left `adopting` (or unmarked before the link) with a stale lock, and after it `current`; after every cut whose root is left `adopting`, `admit/1`, `Placement.acquire/2`, `compose/1`, `store backup` and `store restore` with that root as source refuse `root_adopting` with the root unchanged, `report/1` says `adopting`, and a rerun of adopt reclaims the stale lock and repeats the full audit (observed by its decode count) before reaching `current`; after the cut following the rename, the next `Placement.acquire/2` reclaims the stale lock and serves the root, and adopt reports `already marked`; in every successful run the marker becomes `current` only by the rename, while adopt holds the lock and after C = A; **delivered M7-style lock-taking writer**: a separate OS process running the delivered `Placement.acquire/2` path on the root, as the M7 daemon's `Service.acquire_placement/1` and the M7 CLI do, started while adopt is paused at a private hook holding the lock (before the fence, after it and after the rename), is refused `placement_active` with no write to the root, and the root is adopted only on the audited bytes; a protected credential directory reached inside the root through a subtree mount, and any mount inside the root, including a bound credential file, refuses `auth_root_overlap` at manifest A (ADR 0037's `auth_separation_bind_test.exs`) |
-| `apps/loopex_composition/test/store_backup_test.exs` | Backup of a closed root with sessions, receipts, artifacts, resources, a helper namespace and earlier restore lineage: `state/` equals an independent walk of the source; capture fields equal an independent derivation; refusals for held, stale, writer-marker, helper-marker, claim, unmarked, existing, nested and symlinked targets, a changed workspace and 65,537 entries; a source write during the copy gives `source_changed` and no `BACKUP`; kill during copy, before rename and after rename leave no `BACKUP` or a complete one; job-index removal is the only source change; a walked directory carrying a protected credential directory's identity refuses `auth_root_overlap` at manifest A with no staging directory, with the real-mount cases (a directory subtree, a bound ADC or token file, a superseded inode, a same-device directory bind and a `tmpfs`) in ADR 0037's `auth_separation_bind_test.exs` |
-| `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; kill at each ADR 0051 phase, then `--resume` reaching committed with the same plan bytes; `previous_restore_running`; an edited plan file gives `restore_conflict`. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged. A protected credential directory's identity met in `BACKUP/state` refuses `auth_root_overlap /arguments/backup` at check 1 with nothing written; one met in `DESTINATION` during ADR 0051's walks before the commit leaves the destination uncommitted, the result in ADR 0051's unchanged vocabulary, and the `auth_root_overlap /arguments/destination` line printed. After every `commit_unknown` and `cleanup_unconfirmed` the command prints `Restore.lookup/3`'s answer, and at `claim_release` the committed-with-cleanup-pending line, exit 2; a `--resume` refused `auth_root_overlap` exits 1 and writes no continuation record, with the transaction as the lookup line showed it. The real-mount forms, before and after the commit, are in ADR 0037's `auth_separation_bind_test.exs` |
+| `apps/loopex_composition/test/store_backup_test.exs` | Backup of a closed root with sessions, receipts, artifacts, resources, a helper namespace and earlier restore lineage: `state/` equals an independent walk of the source; capture fields equal an independent derivation; refusals for held, stale, writer-marker, helper-marker, claim, unmarked, existing, nested and symlinked targets, a changed workspace and 65,537 entries; a source write during the copy gives `source_changed` and no `BACKUP`; kill during copy, before rename and after rename leave no `BACKUP` or a complete one; job-index removal is the only source change; a walked directory carrying a protected credential directory's identity refuses `auth_root_overlap` at manifest A with no staging directory, with the real-mount cases (a directory subtree, a bound subdirectory of a protected directory, a bound ADC or token file, a superseded inode, a same-device directory bind, a `tmpfs` and an admitted overlay root) in ADR 0037's `auth_separation_bind_test.exs` |
+| `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; kill at each ADR 0051 phase, then `--resume` reaching committed with the same plan bytes; `previous_restore_running`; an edited plan file gives `restore_conflict`. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged. A protected credential directory's identity met in `BACKUP/state` refuses `auth_root_overlap /arguments/backup` at check 1 with nothing written; one met in `DESTINATION` during ADR 0051's walks before the commit leaves the destination uncommitted, the result in ADR 0051's unchanged vocabulary, and the `auth_root_overlap /arguments/destination` line printed; one met in the final destination manifest after the commit prints the lookup's `claim_release` answer, the committed-with-cleanup-pending line and `auth_root_overlap /arguments/destination`, exit 2; with `--source available`, one met in the source prints `auth_root_overlap /capture/source_state_root`. After every `commit_unknown` and `cleanup_unconfirmed` the command prints `Restore.lookup/3`'s answer, and at `claim_release` the committed-with-cleanup-pending line, exit 2; a `--resume` refused `auth_root_overlap` exits 1 and writes no continuation record, with the transaction as the lookup line showed it. The real-mount forms, before and after the commit, are in ADR 0037's `auth_separation_bind_test.exs` |
 | `apps/loopex_executor_local/test/restore_codec_test.exs` (extended) | The discard attestation form round-trips exactly; a form carrying both `discard_later_work` and `latest_cut`, or `discard_later_work` `false`, is refused; the latest form's bytes are unchanged |
-| `apps/loopex_composition/test/restore_workflow_test.exs` (extended) | A plan with the discard form and `source_status` `available` refuses `invalid_plan` before any claim; with `lost` it commits and its receipt equals a latest-form restore's apart from the plan digest. **Restore guard at the facade**, on real directories on both hosts, through the public `Restore.restore/3`: `restore/2` and `restore/3` with `%{protected_identities: []}` each commit a clean backup into their own destination with lookup current; `restore/3` with a guard naming the `{major_device, inode}` of a directory inside `BACKUP/state` returns `not_committed` `inventory_unavailable` with claim `none`, the destination holding no root intent or `committed` record and lookup absent, while `restore/2` on the same backup commits; through `test_restore/3` with a guard, a protected directory outside the roots renamed (keeping its identity) into `DESTINATION` at a private pause hook after possible intent and before the destination manifest stops that manifest, giving a `commit_unknown` observation with reason `io_error` and no root `committed` record; malformed guards (another key, an extra key, three identities, a duplicate, a negative or 2^64 member, a non-list, a non-map) each return `not_committed` `invalid_plan` at phase `claim` with claim `none` and an independent walk of the backup and destination unchanged. **Post-commit cleanup** (a real transition): a restore cut after its root `committed` record with claim cleanup pending, then `restore/3` with `prior_admin_authority` `"joined"` and a guard naming a directory inside the committed `DESTINATION`, returns a `commit_unknown` observation; the root `committed` record and every claim are byte-identical, lookup answers pending at `claim_release`, and composition refuses the destination; `restore/3` with an empty guard then finishes cleanup, returns the receipt, and lookup answers committed and `current`. The Linux mount forms of both cases are in ADR 0037's `auth_separation_bind_test.exs` |
+| `apps/loopex_composition/test/restore_workflow_test.exs` (extended) | A plan with the discard form and `source_status` `available` refuses `invalid_plan` before any claim; with `lost` it commits and its receipt equals a latest-form restore's apart from the plan digest. **Restore guard at the facade**, on real directories on both hosts, through the public `Restore.restore/3`: `restore/2` and `restore/3` with `%{protected_identities: []}` each commit a clean backup into their own destination with lookup current; `restore/3` with a guard entry naming the `{major_device, inode}` of a directory inside `BACKUP/state`, and in a second case one whose `filesystem_path` contains `BACKUP/state`'s location, returns `not_committed` `inventory_unavailable` with claim `none`, the destination holding no root intent or `committed` record and lookup absent, while `restore/2` on the same backup commits; through `test_restore/3` with a guard, a protected directory outside the roots renamed (keeping its identity) into `DESTINATION` at a private pause hook after possible intent and before the activation manifest (after the generation install, before phase `destination_proofs`) stops that manifest, giving a `commit_unknown` observation with reason `io_error` and no root `committed` record; the same rename made at a pause hook after the root `committed` record is published and before the final destination manifest gives a `commit_unknown` observation at phase `destination_proofs` with reason `io_error`, the root `committed` record and every claim byte-identical, lookup pending at `claim_release`, and a later `restore/3` with the same plan and an empty guard finishing cleanup with lookup committed and `current`; for `source_status` `available`, a guard entry naming a directory inside the source stops the source manifest before the copy, giving `not_committed` `inventory_unavailable` with the source and destination unchanged; malformed guards (another key, an extra key, three entries, a two-element tuple, a duplicate identity, a duplicate `filesystem_path`, a negative or 2^64 member, a relative, non-UTF-8 or 4,119-byte `filesystem_path`, a non-list, a non-map) each return `not_committed` `invalid_plan` at phase `claim` with claim `none` and an independent walk of the backup and destination unchanged. **Post-commit cleanup** (a real transition): a restore cut after its root `committed` record with claim cleanup pending, then `restore/3` with `prior_admin_authority` `"joined"` and a guard naming a directory inside the committed `DESTINATION`, returns a `commit_unknown` observation; the root `committed` record and every claim are byte-identical, lookup answers pending at `claim_release`, and composition refuses the destination; `restore/3` with an empty guard then finishes cleanup, returns the receipt, and lookup answers committed and `current`. The Linux mount forms of both cases are in ADR 0037's `auth_separation_bind_test.exs` |
 | `apps/loopex_cli/test/store_command_test.exs` | Grammar, defaults, exit statuses 0, 1 and 2, exact output lines including both statement forms, the printed ADR 0037 writer command parsed by ADR 0037's own parser to `/paths/state_root` = destination, the `LOOPEX_HOME` precedence note, and the configuration file byte-identical after restore |
 | `apps/loopex_composition/test/delegation_readiness_code_test.exs` | Classification keeps `%{session_id, code}` for each of the three codes and names no session for runtime-page failures |
 | `apps/loopex_daemon/test/readiness_closed_root_test.exs` | A root on which the service did further work after a backup, then had one session history made unreadable: readiness `closed` with that session and `invalid_history`; the root moved aside and the earlier backup restored with `--source lost --discard-later-work`; the service on the restored root reports `serving`; an on-demand start reports `project_resources` `unadmitted`. A second case with no activity after the backup restores without the flag |
@@ -999,49 +1016,66 @@ ADR 0051's accepted files are not edited. The three amended clauses are:
      ADR 0051 restores it, and is never redispatched. Clients that saw later
      events find a history that ends at the cut.
 3. **Credential-directory identities and mounts in manifest walks.**
-   - ADR 0051's transition walks `BACKUP/state` and the destination with a
-     manifest whose entries are refused only for its stated kinds, modes,
-     links and bounds, through `Restore.restore/2`. Amended: a second entry
-     point, `LoopexComposition.Restore.restore(plan, invocation, guard)`, is
+   - ADR 0051's transition walks `BACKUP/state`, an available source and
+     the destination with a manifest whose entries are refused only for its
+     stated kinds, modes, links and bounds, through `Restore.restore/2`.
+     Amended: a second entry point,
+     `LoopexComposition.Restore.restore(plan, invocation, guard)`, is
      added. `restore/2` stays and is exactly `restore_validated(plan,
      invocation, [])` as delivered: no guard, no walk check, behavior and
      results exactly as accepted.
-   - `guard` is a closed map `%{protected_identities: identities}`, where
-     `identities` is a list of 0 to 2 distinct `{major_device, inode}`
-     tuples of integers from 0 to 2^64 - 1, as ADR 0037's
-     `Separation.identities/1` returns them. The facade validates it with the
-     plan and invocation, before any IO: any other shape, key, length, value
-     or a duplicate returns ADR 0051's invalid-input refusal,
-     `{:not_committed, %{"code" => "invalid_plan", "phase" => "claim",
-     "cleanup" => "joined", "claim" => "none"}}` with the plan's `tx_id` when
-     it is valid, and nothing is written. The guard is outside the plan and
-     invocation maps; it is never encoded, journaled, digested, retained or
-     put in process state. `test_restore/3`'s options admit `:guard` beside
-     `:probe` and `:pause_at`, validated the same way.
+   - `guard` is a closed map `%{protected_identities: entries}`, where
+     `entries` is a list of at most two entries
+     `{major_device, inode, filesystem_path}`, as ADR 0037's
+     `Separation.identities/1` returns them: `major_device` and `inode`
+     integers from 0 to 2^64 - 1, and `filesystem_path` an absolute UTF-8
+     path string of at most 4,118 bytes, the directory's
+     [filesystem location](0037-host-configuration-and-path-discovery-technical.md#technical-0037-filesystem-location)
+     on Linux and its canonical path on macOS. No two entries share a
+     `{major_device, inode}` or a `filesystem_path`. The facade validates
+     the guard with the plan and invocation, before any IO: any other
+     shape, key, length, value or a duplicate returns ADR 0051's
+     invalid-input refusal, `{:not_committed, %{"code" => "invalid_plan",
+     "phase" => "claim", "cleanup" => "joined", "claim" => "none"}}` with
+     the plan's `tx_id` when it is valid, and nothing is written. The guard
+     is outside the plan and invocation maps; it is never encoded,
+     journaled, digested or retained in any record. `test_restore/3`'s
+     options admit `:credential_guard` beside `:probe` and `:pause_at`,
+     validated the same way.
    - The facade passes it as `Restore.IO.run({:restore_driver, plan,
-     invocation}, limits, guard: guard)`. The guardian hands it to the
-     original worker it spawns, which binds it into the IO function it passes
-     to `Restore.Workflow`. That one worker carries every continuation path
-     the driver selects from the retained state of the same transaction:
+     invocation}, limits, credential_guard: guard)`. The guardian hands it
+     to the original worker it spawns, which binds it into the IO function
+     it passes to `Restore.Workflow`; it exists only there, for that
+     operation's life. That one worker carries every continuation path the
+     driver selects from the retained state of the same transaction:
      pending intake, retained claim handoff, source retirement, generation
      install, destination finalization and retained claim cleanup. Each
      reaches its manifest walks only through that IO function, so each walk
      receives the guard; there is no other resume entry point, since a
-     continuation is a further `restore/3` call with the same plan. No new
+     continuation is a further `restore/3` call with the same plan. The
+     terminal claim release that follows a committed result runs in a fresh
+     release worker the guardian spawns with only the claims to release; it
+     makes no manifest walk and does not receive the guard. No new
      transition, phase, record or outcome is added.
    - With a guard, every manifest walk the transition makes applies ADR
-     0037's physical walk check: it stops when it meets a directory with one
-     of the identities or any mount inside the walked tree, the mount rule
-     needing no member of the guard. ADR 0051's closed outcome vocabulary is
-     unchanged, and the outcome depends on the phase. Before the root
-     `committed` record is published, the stop is an `io_error`, reported as
-     `not_committed` `inventory_unavailable` before possible intent and as a
-     `commit_unknown` observation with reason `io_error` after it, and the
-     destination is not committed. In claim cleanup after that record
-     exists, the stop is the `commit_unknown` observation ADR 0051 already
-     returns when cleanup cannot finish: the commit stands, the claims stay
-     retained, `lookup/3` answers pending at `claim_release`, and a later
-     call with the same plan finishes cleanup once its walks pass.
+     0037's physical walk check: it stops when the walked root's location
+     overlaps an entry's `filesystem_path`, when it meets a directory with
+     an entry's `{major_device, inode}`, or at any mount inside the walked
+     tree, the mount rule needing no member of the guard. ADR 0051's closed
+     outcome vocabulary is unchanged, and the outcome depends on the phase.
+     Before the root `committed` record is published, the stop is an
+     `io_error`, reported as `not_committed` `inventory_unavailable` before
+     possible intent and as a `commit_unknown` observation with reason
+     `io_error` after it, and the destination is not committed. In the
+     final destination manifest the first call takes after publishing that
+     record, the stop is a `commit_unknown` observation at phase
+     `destination_proofs` with reason `io_error`: the commit stands, the
+     claims stay retained and `lookup/3` answers pending at
+     `claim_release`. In the claim cleanup of a later call after that
+     record exists, the stop is the `commit_unknown` observation ADR 0051
+     already returns when cleanup cannot finish, with the same standing
+     commit, retained claims and lookup answer. In both post-commit cases a
+     later call with the same plan finishes cleanup once its walks pass.
 
 Everything else ADR 0051 decides applies unchanged to both forms: same machine,
 same workspace identity, a complete unexcluded backup, an empty destination,
