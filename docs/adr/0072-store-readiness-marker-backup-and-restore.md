@@ -4,9 +4,9 @@
 Technical depth: [Marker, adopt, backup and restore commands, and evidence](0072-store-readiness-marker-backup-and-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck; the maintainer's D33 to D35 (time-zone-independent lock and writer-marker records, the `m7-adopt` prerequisites, the ADR 0056 amendment) and an internal review's fixes recorded on 2026-10-14; the maintainer's D45 (adopt rebinds a ledger bound through an alias) and a second internal review's fixes recorded on 2026-10-14; the maintainer's D48 (the rebinding carries the ledger's open authority, amending ADR 0016) and a third internal review's fixes recorded on 2026-10-14; the maintainer's D55 (the path-derived identity of `resource-packs/receipts`) and a fourth internal review's fixes recorded on 2026-10-14
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13 against the maintainer's decisions of that day; the maintainer's older-backup decision, the daemon exit-status renumbering, the two-phase adoption and adopt's hold of the placement lock through its commit recorded on 2026-10-13; the walk's credential-directory identity check and the corrected old-writer rationale recorded on 2026-10-13; the restore guard entry point, the mount refusal and the post-commit cleanup outcome recorded on 2026-10-13; the maintainer's Linux filesystem-path guard and mount-table rule, and the outcome of a stop in the final check after the commit, recorded on 2026-10-13; ADR 0037's mounts-above rule (D21) adopted by every walk on 2026-10-13; after the holistic internal review on 2026-10-13, the format-number rule and its inventory test, the job index kept on disk by backup and admitted by `restore/3`, and the maintainer's retained M7-built root for adoption (D24); the maintainer's product-path adoption of a live M7-written root in the release check (D26) recorded on 2026-10-14; the maintainer's format-number policy (D28), the golden-vector pin and the read-only child audit of the product-path adoption recorded on 2026-10-14; the maintainer's decision that credential separation is a path rule only (D27), which removes the restore guard, every walk rule for mounts and credential-directory identities and the third ADR 0051 amendment, recorded on 2026-10-14; the maintainer's decision that `restore/2` always leaves the helper job index out of its audit index, which drops `restore/3` (D29), recorded on 2026-10-14; after an internal review on 2026-10-14, the golden-vector pin replaced by a retained format-1 fixture check, and the child audit given its shape precheck; the maintainer's D33 to D35 (time-zone-independent lock and writer-marker records, the `m7-adopt` prerequisites, the ADR 0056 amendment) and an internal review's fixes recorded on 2026-10-14; the maintainer's D45 (adopt rebinds a ledger bound through an alias) and a second internal review's fixes recorded on 2026-10-14; the maintainer's D48 (the rebinding carries the ledger's open authority, amending ADR 0016) and a third internal review's fixes recorded on 2026-10-14; the maintainer's D55 (the path-derived identity of `resource-packs/receipts`) and a fourth internal review's fixes recorded on 2026-10-14; the maintainer's D59 (no rebinding of `resource-packs/receipts` holding a receipt) and a fifth internal review's fixes recorded on 2026-10-14
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing. It narrowly amends accepted [ADR 0016](0016-configured-cancellation-observation.md#concept) in one clause (D45, D48): `store adopt`, under the placement lock, the `adopting` fence and the `--old-writer stopped` attestation, may replace a ledger generation bound through the selected alias with a fresh-epoch generation bound to the physical path, carrying the open index, markers and receipts unchanged, and for `resource-packs/receipts`, whose identity is path-derived, only with an empty open index and with the physical path's identity (D55). It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendments](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It narrowly amends accepted [ADR 0056](0056-host-helper-ledger-recipe.md#concept) in one clause, stated in five sentences: the helper job index is left out of ADR 0051's audit (D35). It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
+- **Supersedes:** nothing. It narrowly amends accepted [ADR 0016](0016-configured-cancellation-observation.md#concept) in one clause (D45, D48): `store adopt`, under the placement lock, the `adopting` fence and the `--old-writer stopped` attestation, may replace a ledger generation bound through the selected alias with a fresh-epoch generation bound to the physical path, carrying the open index, markers and receipts unchanged, and for `resource-packs/receipts`, whose identity is path-derived, only while it holds no open effect and no receipt, and with the physical path's identity (D55, D59). It narrowly amends accepted [ADR 0051](0051-current-format-physical-restore.md#concept) in two clauses only, listed under [Amendments](#concept-adr-0072-amendment): its statement that no backup CLI is added; and its restriction of restore to the latest backup, which an explicit `--discard-later-work` statement relaxes for a lost source. It narrowly amends accepted [ADR 0056](0056-host-helper-ledger-recipe.md#concept) in one clause, stated in five sentences: the helper job index is left out of ADR 0051's audit (D35). It adds operator commands in front of ADR 0051's otherwise unchanged transition. It also takes the operator backup and restore work out of Proposed [ADR 0036](0036-daemon-grade-store-engine-and-migration.md#concept), which keeps the engine selection, migration and capacity refusal. That split is M8's proposal P2, which the maintainer accepted on 2026-10-13
 - **Depends on:** [ADR 0051](0051-current-format-physical-restore.md#concept) for the restore transition, its backup profile, inputs, limits and outcomes; [ADR 0056](0056-host-helper-ledger-recipe.md#concept) for the helper ledgers the audit decodes; [ADR 0070](0070-pre-1-superseded-surface-retirement.md#concept) and the current replay for record refusal; [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept) for the local adapter and its limits; [ADR 0046](0046-child-session-tool.md#concept) for the closed-host rule restore answers; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the command family, root and workspace selection, the physical root path every opener receives, the configuration writer, `doctor` and the readiness report
 - **Prerequisite for:** M8 outcomes 3 and 7, accepted before any marker, adopt, backup or restore command code is written
 
@@ -208,10 +208,13 @@ generation, and changes no other ledger file: the open effects, markers and
 receipts the audit read stay the ledger's authority, unchanged and never
 redispatched (D48). One ledger, the resource importer's
 `resource-packs/receipts`, takes its executor identity from its own path,
-and each of its open effects records that identity (D55): adopt rebinds it
-only when it holds no open effect, and then also gives its generation the
-identity its physical path derives; one holding an open effect is refused
-before the fence as `ledger_path_mismatch`. ADR 0016 treats an alias as an administrator rewrite and requires a
+and each of its open effects and receipts records that identity (D55, D59):
+adopt rebinds it only when it holds neither, and then also gives its
+generation the identity its physical path derives; one holding an open
+effect or a receipt is refused before the fence as `ledger_path_mismatch`.
+So a root whose `resource-packs/receipts` the old build bound through the
+alias, and which ever imported a resource pack, cannot be adopted and stays
+with that build. ADR 0016 treats an alias as an administrator rewrite and requires a
 migration to close the old open authority first; this record amends that
 for adopt alone (below). A crash in between leaves
 `adopting`, and the rerun audits each ledger as it then is and rebinds only
@@ -254,11 +257,12 @@ journal and terminal record are checked by a read-only audit over the
 delivered decoders, and every record the M7 build wrote stays
 byte-identical. Building the release, the M7 write and a check of the run's
 shape are host prerequisites (D34): a real provider need not do what the
-review asks, and when the run did not leave exactly one helper run whose
-child was prompted, or the build or write fails, the case stops before it
-starts and, as every such stop does, so do the release cases after it; they
-are recorded not dispatched and run again on the same candidate, and this
-is never a failure of the candidate. A second release case runs the
+review asks, and when the build or the M7 write fails, or the shape check
+reports unavailable (the run did not leave exactly one helper run whose
+child was prompted) or prints no verdict, the case stops before it starts
+and, as every such stop does, so do the release cases after it; in an
+indexed run they are recorded not dispatched, and they run again on the
+same candidate. This is never a failure of the candidate. A second release case runs the
 `v0.4.0` build's own lock and Store writer code against this build's
 records, and this build's against M7's, under different time zones (D33).
 Running adopt on a root already marked
@@ -398,8 +402,8 @@ while its holder lives (D33). For the same reason `TZ` can no longer name a
 credential variable or a Store launch exclusion. `store adopt` gives a Local
 ledger the old build bound through the selected alias a new generation
 bound to the physical path, with its open authority unchanged (D45, D48),
-and for `resource-packs/receipts`, only with no open effect, the identity
-of the physical path (D55). The marker, the backup layout and its records
+and for `resource-packs/receipts`, only with no open effect and no
+receipt, the identity of the physical path (D55, D59). The marker, the backup layout and its records
 are experimental current-format contracts, each with its own version. Before 1.0 only the
 current version of each is read. A backup is a directory holding the complete
 copy, ADR 0051's manifest and this record's capture record; there is no
@@ -458,8 +462,9 @@ record amends exactly two clauses of ADR 0051 and one each of ADRs 0056 and
    a fresh-epoch generation bound to the physical path, carrying the
    audited open index, markers and receipts unchanged. For
    `resource-packs/receipts`, whose executor identity is derived from its
-   path, adopt does so only while its open index is empty, and the new
-   generation also carries the identity of the physical path (D55). Every other ADR 0016
+   path, adopt does so only while it holds no open entry and no receipt,
+   and the new generation also carries the identity of the physical path
+   (D55, D59). Every other ADR 0016
    rule stands, for every other migration as well.
 
 <a id="concept-adr-0072-open"></a>
