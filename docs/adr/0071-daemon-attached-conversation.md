@@ -4,7 +4,7 @@
 Technical depth: [Attached conversation mapping, service configuration and evidence](0071-daemon-attached-conversation-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service-hosted helpers designed on 2026-10-13; helper activation permits specified on 2026-10-13
+- **Date:** 2026-09-30; reconciled with the delivered M7 baseline on 2026-10-13; detailed for implementation on 2026-10-13; service-hosted helpers designed on 2026-10-13; helper activation permits specified on 2026-10-13; the single counted activation sum and `Delegation.host/5` specified on 2026-10-13
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing; it applies [ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept) and [ADR 0033](0033-collaboration-controller-lease-and-takeover.md#concept) to the conversation command, extends the daemon's startup inputs with [ADR 0049](0049-explicit-host-configuration.md#concept)'s file, and applies [ADR 0046](0046-child-session-tool.md#concept), [ADR 0056](0056-host-helper-ledger-recipe.md#concept) and [ADR 0069](0069-helper-run-evidence-and-route-guard.md#concept) to the service. It narrowly amends ADR 0049's conversation status record so a service-owned value can be absent, ADR 0032's activation ceiling so it also counts helper children, [ADR 0046](0046-child-session-tool.md#concept)'s fixed refusal order with one new refusal, `helper_activation_limit`, and [ADR 0055](0055-remote-session-creation-options.md#concept)'s creation options on a helper-enabled service
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept) and `loopex.experimental/4`, the daemon generation [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) introduced, both delivered by M7; ADRs 0046, 0056 and 0069 as delivered by M7; [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for the home, the on-demand start and `daemon.readiness`
@@ -136,7 +136,10 @@ a new or resumed conversation until it is restarted; the refusal is shown as
 the service returns it. Helper children count toward those 64 exactly as
 client sessions do: each child the service starts spends one activation, and,
 as for any session, finishing or stopping it does not give the activation
-back. When none is left, the parent's `task` call is refused as
+back. A child still being created already holds its activation, and one count
+decides both kinds of request and is the count the service reports, so a new
+client session is refused while every remaining activation is held for
+children. When none is left, the parent's `task` call is refused as
 `helper_activation_limit` before anything is reserved or charged; the parent
 sees the refusal as its tool result, the attached conversation shows it in the
 transcript, and the parent keeps working. Children the service stops while

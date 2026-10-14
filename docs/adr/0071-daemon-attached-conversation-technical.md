@@ -241,7 +241,7 @@ delegation, the frozen catalog, parent creation and the evidence below.
 | Step | Where | Action | Refusal |
 | --- | --- | --- | --- |
 | 1. Capture roles, before any lock | `LoopexCli.HostOptions.helpers/1` (new) | For each enabled role in order, `Delegation.role(workspace, role, providers, read_only, cleanup_grace_ms)` with the delegation reply and context settings, exactly as `ChatConfiguration.helper_parent/2` builds it; keep the role geneses, the provider bindings and the limits `roles`, `max_children`, `token_budget`, `child_bounds` and `max_tokens` | `configuration_invalid` (111) with `/roles/NAME`; nothing started |
-| 2. Open the owner, after placement | `Service.delegation/1` | `Delegation.host(..., true)` when the start options carry `helpers`; the owner always opens | The delivered `composition_start_failed` |
+| 2. Open the owner, after placement | `Service.delegation/1` | `Delegation.host/5` with `enabled` true and `activation_permit: nil` when the start options carry `helpers`; the owner always opens | The delivered `composition_start_failed` |
 | 3. Freeze the catalog, after placement | `Service`, calling the host's `{LoopexCli.HostOptions, :helper_catalog, [helpers]}` with the placement identity | `Catalog.digest(runtime_id, providers, roles)` and one capture of the parent instructions with `enabled_roles` and `catalog_digest`, exactly as `ChatConfiguration`'s `capture_instructions/2` does; the result is kept in the service's state for its lifetime | `configuration_invalid` (111) as a fail-stop that releases the lock |
 | 4. Compose | `LoopexComposition.start_edges/2` | The handle's `enabled: true` registers the fixed `loopex.task` generation through `Delegation.definitions/1`; bind and the first 60,000 ms classification as delivered | As delivered |
 | 5. Keep classifying | `Service` | ADR 0037's further 60,000 ms `Helper.classify/2` slices from a linked task until coverage completes or a session is named | — |
@@ -367,16 +367,22 @@ creates children through Core, not through the daemon's admission relay, so it
 obtains its count from the daemon's session registry through a host-supplied
 permit.
 
-*Permit seam.* `Delegation.open/4` and `host/4` take one new option,
-`activation_permit`, a `{module, extra_args}` pair or `nil`. The helper owner
-calls three functions with `extra_args` prepended:
+*Permit seam.* `Delegation.open/4`, whose last argument is already an options
+keyword, takes one new option, `activation_permit`, a `{module, extra_args}`
+pair or `nil`. The delivered `Delegation.host/4` is
+`host(root, runtime_id, placement, enabled)` and takes no options, so this
+record adds `Delegation.host/5` (new): `host/4`'s four arguments plus an
+options keyword whose one admitted member is `activation_permit`, passed
+through to `open/4`; `host/4` stays and delegates to `host/5` with `[]`. The
+helper owner calls three functions with `extra_args` prepended:
 `module.acquire(permit_id)`, `module.settle(permit_id, settlement)` and
 `module.account(permit_id, session_id)`. Composition knows only that
 contract; Core is not involved and no composition module names a daemon
 module. The foreground passes `nil`: no permit is asked for, nothing is
 counted and `helper_activation_limit` never occurs, so the foreground's
-behaviour and bytes are unchanged. The service passes `nil` at open, because
-its registry starts after composition, and binds the pair at startup step 6
+behaviour and bytes are unchanged. The service calls `host/5` with
+`activation_permit: nil` at open, because its registry starts after
+composition, and binds the pair at startup step 6
 with `Helper.bind_activation_permit/2` (new). `LoopexDaemon.HelperActivation`
 (new) implements the three functions as one registry call each, over three
 new operations of `LoopexDaemon.ConnectionRegistry` below. It does not reuse
@@ -405,10 +411,24 @@ Each entry is in exactly one state:
 | `{:activated, session_id}` | Through `activation_set` | Settled; the session is in the registry's activated set |
 | `:anonymous` | Through `anonymous_activations` | Settled activated without a session |
 
-A permit released with no activation is removed. `activations_used`, which
-`daemon.status` reports, becomes the delivered sum plus the number of `held`
-and `unknown` permits; settled permits are already in the delivered terms, so
-nothing is counted twice. The map holds at most one entry per counted
+A permit released with no activation is removed.
+
+*One counted sum.* The delivered registry computes the ceiling's sum in two
+places: `daemon.status`'s `activations_used`
+(`apps/loopex_daemon/lib/loopex_daemon/connection_registry.ex` at `e560939d`,
+lines 1655 to 1657) and the admission check in the private
+`reserve_activation_binding/3` (lines 4050 to 4051), both
+`MapSet.size(activation_set) + map_size(activation_reservations) +
+anonymous_activations`. Changing only the reported sum would let held helper
+permits go uncounted at client admission: with 60 activations used and 4
+helper permits `held`, `session.create` would still be admitted as the 61st.
+The registry therefore gains one private function, `activations_counted/1`,
+returning the delivered sum plus the number of `held` and `unknown` permits,
+and every ceiling decision and report uses it: `reserve_activation_binding/3`
+refuses `activation_ceiling_reached` when it is at or above 64,
+`acquire_helper_permit/2` refuses at or above 64, and `activations_used`
+reports it. No other expression of the sum remains. Settled permits are
+already in the delivered terms, so nothing is counted twice. The map holds at most one entry per counted
 activation, so it is bounded by the ceiling plus recovery accounting.
 
 *Registry operations.* Each is one `GenServer.call` handled atomically in the
@@ -417,7 +437,7 @@ listener calls use; a timeout is a defect that ends the owner, below.
 
 | Operation | Effect | Reply |
 | --- | --- | --- |
-| `acquire_helper_permit(registry, permit_id)` | Absent entry, and the delivered sum plus `held` and `unknown` permits below 64: insert `held`. At or above: nothing | `{:ok, :acquired}`; `{:error, :activation_ceiling_reached}`. An existing `held` or `unknown` entry: `{:ok, :held}`, no second charge. A settled entry: `{:ok, {:settled, state}}`, no charge |
+| `acquire_helper_permit(registry, permit_id)` | Absent entry, and `activations_counted/1` below 64: insert `held`. At or above: nothing | `{:ok, :acquired}`; `{:error, :activation_ceiling_reached}`. An existing `held` or `unknown` entry: `{:ok, :held}`, no second charge. A settled entry: `{:ok, {:settled, state}}`, no charge |
 | `settle_helper_permit(registry, permit_id, settlement)` | `{:activated, session_id}`: remove the charge, add the session to `activation_set` unless present, record it. `{:activated, nil}`: remove the charge, add one anonymous activation, record `:anonymous`. `:no_activation`: remove the entry. `{:commit_unknown, :activated}`: as `{:activated, nil}`. `{:commit_unknown, :no_activation}`: set `unknown`, keeping the charge | `:ok`. The same settlement repeated, or `:no_activation` for an absent permit, is `:ok` with no effect. A settlement contradicting a settled entry: `{:error, :helper_permit_conflict}` |
 | `account_helper_activation(registry, permit_id, session_id)` | Never refused for capacity. Entry `held`, `unknown` or `:anonymous`: convert it to `{:activated, session_id}`, removing its charge or its anonymous count. Absent entry, or `permit_id` `nil`: add the session to `activation_set` unless present. Already `{:activated, session_id}`: nothing | `:ok`; a different settled session for the same permit: `{:error, :helper_permit_conflict}` |
 
@@ -502,8 +522,8 @@ standard error adds `attach with: loopex chat --service`.
 | Helper creation context on each connection | `LoopexDaemon.Owner`, `LoopexDaemon.ConnectionRegistry` |
 | Creation checks and helper-parent routing | `LoopexDaemon.SocketConnection` (`create_task/4`) |
 | Detailed parent creation | `LoopexComposition.Delegation` (`create_parent_detailed/7`, new), `LoopexComposition.Delegation.Helper`; `Loopex.Runtime.create_session_with_genesis_detailed/4` (new, `@doc false`) |
-| Permit seam, refusal order and child creation through the detailed call | `LoopexComposition.Delegation` (`activation_permit` option), `LoopexComposition.Delegation.Helper` (`@order`, `bind_activation_permit/2`, new) |
-| Permit implementation and accounting | `LoopexDaemon.HelperActivation` (new); `LoopexDaemon.ConnectionRegistry` (`helper_permits` state; `acquire_helper_permit/2`, `settle_helper_permit/3`, `account_helper_activation/3`, new); `LoopexDaemon.Service` (step 6) |
+| Permit seam, refusal order and child creation through the detailed call | `LoopexComposition.Delegation` (`activation_permit` option of `open/4`; `host/5`, new, with `host/4` delegating), `LoopexComposition.Delegation.Helper` (`@order`, `bind_activation_permit/2`, new) |
+| Permit implementation and accounting | `LoopexDaemon.HelperActivation` (new); `LoopexDaemon.ConnectionRegistry` (`helper_permits` state; `acquire_helper_permit/2`, `settle_helper_permit/3`, `account_helper_activation/3`, new; the private `activations_counted/1`, new, used by `reserve_activation_binding/3`, `acquire_helper_permit/2` and `activations_used`); `LoopexDaemon.Service` (step 6) |
 | Route guard | Unchanged: `LoopexComposition.Delegation.guard/3`, `LoopexDaemon.SocketConnection.route_guard/3` |
 
 #### Accepted text this record touches
@@ -568,7 +588,7 @@ another application is named.
 | `daemon_helper_restart_test.exs` | Process fault, real daemon | `SIGTERM` and `SIGKILL` to the service after the child is prompted and while its provider reply is held; the restart reports `classifying` then `serving`; the child is aborted and its provider receives no second prompt; the parent's `task` result is the stop-only outcome; the slot is released on conclusive evidence and stays occupied otherwise; a torn final ledger frame recovers under ADR 0056; `session.create` and every mutation during classification refuse `helper_classification_incomplete`; a restart with delegation disabled classifies and guards the same history; each prepared owner recovery starts is counted in `activations_used`, and a recovery that takes the count past 64 still stops every child |
 | `daemon_helper_activation_test.exs` | Real daemon at the delivered limit of 64, using the provider isolation fixture; no test-only limit | One parent whose children spend activations until the 64th: the next `task` call returns `helper_activation_limit` as its tool result, writes no ledger frame, charges no child count or tokens, and the parent's run completes; mixed: client sessions and children together reach 64, after which `session.create` refuses `activation_ceiling_reached` and a `task` call `helper_activation_limit`; release: a permit whose call is refused by a later failure, cancelled before the reserve append, or whose child creation activates nothing is returned and the next call succeeds; a child creation held at Core and answered `commit_unknown` keeps its charge in `activations_used` until the operation resolves; one-way: a child that completes, fails or is stopped through its parent keeps its activation counted; `daemon.status` reports children in `activations_used`; the attached conversation shows the refusal in the transcript |
 | `apps/loopex_composition/test/delegation_activation_permit_test.exs` | Unit, fake permit module | The refusal is decided after `ledger_capacity` and before the reserve append; every earlier refusal is returned without calling `acquire`; `nil` permit never refuses and leaves the order as accepted; each acquired permit is settled exactly once on every path, with Core's disposition for `{:ok, _}`, `commit_unknown` with each disposition, other errors and cancel; a failure injected after Core's answer (the child ledger append, the prompt) leaves the settlement already made and makes no second one; a re-forwarded job reuses its `permit_id`; recovery calls `account` with the permit and never `acquire`; an `unknown` permit is released on conclusive absence and converted on recovery; `{permit_id, session_id}` pairs recovered before `bind_activation_permit/2` are returned by it |
-| `apps/loopex_daemon/test/helper_activation_registry_test.exs` | Real `ConnectionRegistry` process, no fake | `acquire` up to the ceiling and `activation_ceiling_reached` at 64 with clients and permits mixed; a repeated `acquire` answers `held` or the settlement and charges once; `{:activated, nil}`, which `resolve_activation/4` refuses, counts one anonymous activation; `{:commit_unknown, :activated}` counts one anonymous activation and a later `account` with the session converts it without a second count; `{:commit_unknown, :no_activation}` stays in `activations_used` until a `:no_activation` settle releases it or `account` converts it; identical settles are idempotent and a contradicting one is `helper_permit_conflict`; `account` past 64 is admitted and then refuses every new client activation and `acquire`; a `{:helper, _}` origin is refused by `reserve_activation/3`, a connection origin by the helper operations, and a client create whose command identity equals a `permit_id` neither joins nor conflicts; `daemon.status`'s `activations_used` equals the sum at every step |
+| `apps/loopex_daemon/test/helper_activation_registry_test.exs` | Real `ConnectionRegistry` process, no fake | `acquire` up to the ceiling and `activation_ceiling_reached` at 64 with clients and permits mixed; a repeated `acquire` answers `held` or the settlement and charges once; `{:activated, nil}`, which `resolve_activation/4` refuses, counts one anonymous activation; `{:commit_unknown, :activated}` counts one anonymous activation and a later `account` with the session converts it without a second count; `{:commit_unknown, :no_activation}` stays in `activations_used` until a `:no_activation` settle releases it or `account` converts it; identical settles are idempotent and a contradicting one is `helper_permit_conflict`; `account` past 64 is admitted and then refuses every new client activation and `acquire`; a `{:helper, _}` origin is refused by `reserve_activation/3`, a connection origin by the helper operations, and a client create whose command identity equals a `permit_id` neither joins nor conflicts; `daemon.status`'s `activations_used` equals `activations_counted/1` at every step; the shared sum, both directions: with 60 client activations and 4 permits `held` (then the same with `unknown`), a client `session.create` reservation through `reserve_activation_binding/3` refuses `activation_ceiling_reached`, and with 60 client activations plus 3 held permits it is admitted as the 64th and the next `acquire` refuses `activation_ceiling_reached`; releasing one held permit with `:no_activation` readmits exactly one client reservation |
 | `apps/loopex_composition/test/delegation_create_parent_detailed_test.exs` | Unit, real runtime | `bind_parent` failing, refused and fencing after Core activated the parent: the error carries `disposition: :activated` and the session; a failure before Core carries `:no_activation` and `nil` |
 | `apps/loopex_daemon/test/helper_parent_activation_test.exs` | Socket, real registry | The same post-create binding failure through `session.create`: the admission is refused, `activations_used` rises by one, the session is not in the index, and the next creation still succeeds below the ceiling |
 | `apps/loopex_daemon/test/helper_route_guard_test.exs` (extended) | Socket | Every mutating `/4` method on a helper child refuses `helper_session_owned` and the child's records are unchanged; attach, inspect and history on the child are admitted; resuming a dormant child refuses; killing the owner makes every mutation refuse `helper_owner_unavailable` and the service exit `runtime_lost` |

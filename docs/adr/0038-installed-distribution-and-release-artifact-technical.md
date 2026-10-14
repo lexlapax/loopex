@@ -421,8 +421,15 @@ Concept: [Observable consequences](0038-installed-distribution-and-release-artif
 with `--only installed-artifact`. It runs `build.sh` for the candidate into the
 retained-output directory, then `smoke.sh`. On a `Darwin arm64` host it
 proves `darwin-arm64`; on a `Linux x86_64` host with Docker it proves
-`linux-x86_64`. The closure matrix runs the full release check on one host
-and `--only installed-artifact` on the other, retaining both outputs.
+`linux-x86_64`. The closure matrix, as the M8 plan's decision D18 fixes it,
+runs the full release check once on the `Darwin arm64` host, where this lane
+proves `darwin-arm64` beside the attended outcome-6 record and the
+`macos_keychain` lane. The `Linux x86_64` host runs this lane with
+`--only installed-artifact`, together with the `bind_mount`,
+`secret_service` and `cross_uid` lanes the plan names, each by `--only`. Every
+one of them is required: a lane that reports evidence unavailable, such as a
+Linux host without Docker for this lane, blocks closure and is never a pass.
+Both hosts' complete outputs are retained.
 
 **Clean host.** On macOS the lane runs as the invoking user under
 `env -i HOME=<empty temporary> LANG=C.UTF-8 PATH=/usr/bin:/bin:/usr/sbin:/sbin`
