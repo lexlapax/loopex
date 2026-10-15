@@ -946,10 +946,10 @@ lost source; ADR 0051 notes that a backup hash does not prove latestness.
 **Checks, in order** (`StoreAdmin.restore/3`). Each refusal writes nothing.
 
 1. Read `BACKUP/capture`; decode and re-encode it exactly
-   (`backup_invalid`). On `--resume`, then read
+   (`backup_invalid`). On `--resume` or `--abandon`, then read
    `BACKUP/restores/TX_ID/plan` and decode it exactly (`backup_invalid`
-   naming it if it is absent or does not round-trip). With `--source available`, or on `--resume` when
-   that plan's `source_status` is `available`, call ADR 0037's
+   naming it if it is absent or does not round-trip). With `--source available`, or on `--resume` or
+   `--abandon` when that plan's `source_status` is `available`, call ADR 0037's
    `Separation.check/1` at once on the command's sign-in context with
    `{"/capture/source_state_root", SOURCE}` appended to its `state_roots`,
    `SOURCE` being the capture's source path; an overlap refuses
@@ -1062,7 +1062,7 @@ that later work was deliberately discarded; they stay beside the backup.
 | Result | Output | Exit |
 | --- | --- | --- |
 | `{:committed, receipt}` | `restored TX_ID ordinal N into DESTINATION`; then `Restore.lookup(DESTINATION, TX_ID, limits)`'s answer; when it is committed and `current`, the selection lines below | 0; 2 with the re-presentation command when the lookup answers anything else |
-| `{:not_committed, refusal}` | `not restored: CODE at PHASE; claim none|retained`. With `claim` retained, the re-presentation command below, or, on `--resume`, the `--abandon` command when the intent and claim checks below choose it (D71, D77) | 1 |
+| `{:not_committed, refusal}` | `not restored: CODE at PHASE; claim none|retained`. With `claim` retained, the re-presentation command below; on `--resume`, whatever the claim, the command its `"next"` names (D71, D77) | 1 |
 | `{:cleanup_unconfirmed, observation}` or `{:commit_unknown, observation}` | `restore TX_ID is unresolved: PHASE, intent INTENT, cleanup CLEANUP, reason REASON`, the instruction to keep every process away from the source, backup and destination, and the re-presentation command, or, on `--resume`, the `--abandon` command when the intent and claim checks below choose it (D71, D77) | 2 |
 
 Selection lines, printed after a committed restore. The command never writes
@@ -1427,7 +1427,7 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `attestation_required` | restore, adopt | Restore: `--source` or `--old-writer` missing, or `--resume` or `--abandon` without `--previous-restore`. Adopt: `--old-writer stopped` missing | State them |
 | `discard_requires_lost_source` | restore | `--discard-later-work` with `--source available` | Move the original root aside and restore with `--source lost`, or drop the flag if the backup is the latest state |
 | `old_writer_running`, `previous_restore_running` | restore | A live holder or earlier restore process | Stop it |
-| `restore_not_abandonable` | restore `--abandon` | The transaction reached its intent record, or committed (D66, D67) | `--resume TX_ID` |
+| `restore_not_abandonable` | restore `--abandon` | The transaction reached its intent record, or committed (D66, D67) | `--resume TX_ID`; when its intent record is damaged or unreadable, ADR 0051 leaves it unknown and its claims stay: restore the backup again into a new destination (D78) |
 | `restore_abandoned` | restore `--resume` | A listed `continuation-N` records an abandonment and the transaction has no intent record (D71, D74) | Rerun `--abandon TX_ID` if it stopped part-way; start a new restore without `--resume` |
 | `restore_conflict` | restore `--abandon` | A claim directory beside a root the plan names holds another transaction's `owner`, an `owner` that does not decode, or another entry, or an acquisition published its `owner` while the directory was being removed; names the claim | Finish the other transaction with `--resume` or end it with `--abandon` first, then rerun; a claim whose `owner` does not decode, or that holds another entry, stays stranded under ADR 0051 |
 | `source_absent`, `source_not_absent` | restore | Path contradicts `--source` | State the true branch |
@@ -1444,10 +1444,13 @@ complete, unchanged audit, in each case with at most adopt's stale placement
 lock (the cut table above); for backup, at most a staging directory beside
 `BACKUP`, never a partial `BACKUP`; for restore, the retained plan and ADR
 0051's own uncertainty, resolved by `--resume` from the intent record on,
-except the [residual window](#technical-adr-0072-restore) of an available
-source that is a restored root, and by `--abandon` before it, which also
-removes a claim left without its owner record, after which `--resume`
-refuses `restore_abandoned`; for `--abandon`, the state its rerun finishes ([abandonment](#technical-adr-0072-restore)).
+except a damaged or unreadable intent record, which ADR 0051 `:458` leaves
+unknown (claims retained, roots closed; restore the backup again into a new
+destination), and the [residual window](#technical-adr-0072-restore) of an
+available source that is a restored root, and by `--abandon` before it,
+after which `--resume` refuses `restore_abandoned`; `--abandon` also
+removes a claim left without its owner record, after which a transaction
+past its intent record finishes with `--resume`; for `--abandon`, the state its rerun finishes ([abandonment](#technical-adr-0072-restore)).
 
 <a id="technical-adr-0072-evidence"></a>
 ### Evidence and Test Plan
@@ -1624,7 +1627,7 @@ candidate.
 
 Each label is one recorded case of `lane` (`release-lane.sh:312-330`), as
 plan item 7 changes it. `m7-adopt` is a script lane: its one wrapped
-command, `scripts/m7-adopt-lane.sh` (new, W4), runs steps 3, 4 and 5 in order, stops at the first step that fails, and
+command, `scripts/m7-adopt-lane.sh` (new, W4), runs steps 3, 4 and 5 in order, stops at the first step that fails and exits 1, and
 after the third prints the final `m7-adopt: PASS steps=3` line that
 `release_lane_run`'s judge checks. `m7-adopt-lock` is an ExUnit lane, step
 6, whose expected count is 3. Each passes when its judge passes and
@@ -1979,7 +1982,10 @@ amended clauses are:
      written until the destination's `intent` is renamed into place
      (`workflow.ex:1723-1732`); `--abandon` removes it with the destination
      (abandonment step 4). An `intent.tmp` that decodes stays a possible
-     intent. `restore/2`, lookup and every other reader treat a persisted
+     intent; under D78 only one naming this transaction is this
+     transaction's intent record, and `--abandon` refuses
+     `destination_not_empty` on another transaction's (abandonment step 4),
+     deleting nothing. `restore/2`, lookup and every other reader treat a persisted
      intent temporary as ADR 0051 says; the intent check `--abandon` shares
      with `--resume` (D77, D78) writes nothing, and on `--resume` only
      chooses the command printed and the `restore_abandoned` refusal.

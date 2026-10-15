@@ -381,7 +381,10 @@ intent record exists, `--resume` refuses `restore_abandoned`, so an
 abandoned plan is never re-run from the start. From the intent record on,
 `--resume` never refuses `restore_abandoned` and prints its own command
 unless a claim lacks its owner record (D78). A transaction past its intent record, or committed, still finishes with
-`--resume`, even after a refused `--abandon` (D74), except in one window
+`--resume`, even after a refused `--abandon` (D74), unless its intent
+record is damaged or unreadable, which ADR 0051 leaves unresolved: its
+claims stay, its roots stay closed, and the operator restores the backup
+again into a new destination (D78), and except in one window
 that has no path in M8: a restore whose available source is itself a
 restored root, killed after the destination's intent record and before the
 restore's first write to the source, is not resumed, and `--abandon` refuses it, so
@@ -526,7 +529,9 @@ record amends exactly four clauses of ADR 0051 and one each of ADRs 0056 and
    only, an `intent.tmp` that does not decode beside an absent `intent` is
    absence, because the source is not written until the destination's
    `intent` is renamed into place. An `intent.tmp` that decodes stays a
-   possible intent. The transition and every other reader treat a persisted
+   possible intent; under D78 only one naming this transaction is this
+   transaction's intent record, and `--abandon` refuses
+   `destination_not_empty` on another transaction's, deleting nothing. The transition and every other reader treat a persisted
    intent temporary as ADR 0051 says; `--resume` reads the records, by the
    intent record `--abandon` uses, only to choose the command it prints and
    to refuse `restore_abandoned` (D71, D77, D78). ADR 0051 also requires a further reviewed recovery decision before
