@@ -406,8 +406,10 @@ Backends:
      a temporary keychain with `security create-keychain`, sets that key,
      and passes the keychain to `add-generic-password`,
      `find-generic-password` and `delete-generic-password` as their keychain
-     argument. No test touches the login keychain, and the release lanes use
-     `--store file`.
+     argument. No automated test touches the login keychain; the
+     `real-sign-in-*` release lanes use `--store file`, and the only contact
+     with a real keychain is the read-only absence query of the removal
+     steps below.
 2. **Linux Secret Service.** The backend runs `/usr/bin/secret-tool` from the
    `libsecret-tools` package, by absolute path only.
    - Every `secret-tool` child, and the wrapper below, is spawned with the
@@ -2001,8 +2003,8 @@ flow. The adapter's own tests compile it, and `loopex_composition`,
 `loopex_composition`'s test helper already loads `loopex`'s support. It uses
 `:gen_tcp` with fixed-response handlers, like the existing provider fixtures,
 and can produce rotation, `invalid_grant`, `slow_down`, delay and malformed
-replies. All tests
-use temporary homes and never touch a real keyring.
+replies. The tests in the table below use temporary homes and never touch a
+real keyring.
 
 | File | Cases |
 | --- | --- |

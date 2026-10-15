@@ -167,18 +167,19 @@ Constraints that hold across workstreams:
   independent parents permitted to overlap, in the foreground and the service.
   The service adds no service-wide slot; the router's 4,096 shared rows and
   ADR 0032's activation ceiling bound it.
-- **No credential in tests or logs.** Every test except `m8-operator`
-  uses a temporary `HOME` and keychains and, where it has one, a temporary
-  state root (a temporary `LOOPEX_HOME` or a temporary root named by
-  `--state-root` or by the `paths.state_root` of a file named by
-  `--config`, or, for the `installed-artifact` and `real-sign-in-*` lanes,
-  the root named by the configuration file `init` writes under their
-  temporary `HOME`, whose `$HOME/.loopex` D86 reads as satisfying the
-  temporary-`LOOPEX_HOME` rule (`real-sign-in-anthropic` writes no file and
-  uses no root)); `m8-operator` alone runs in the separate macOS user account
-  ADR 0038 names, the attended opt-in of vision-technical §23.2 (D86) and of
-  ADR 0003's no-real-home test rule (D87); apart from the read-only absence query below, no test touches
-  a real keyring or login keychain.
+- **No credential in tests or logs.** Every test except `m8-operator` uses
+  a temporary `HOME` and keychains and, where it has one, a temporary state
+  root (a temporary `LOOPEX_HOME`, a temporary root passed directly to the
+  API under test, or a temporary root named by `--state-root` or by the
+  `paths.state_root` of a file named by `--config`, or, for the
+  `installed-artifact` and `real-sign-in-*` lanes, the root named by the
+  configuration file `init` writes under their temporary `HOME`, whose
+  `$HOME/.loopex` D86 reads as satisfying the temporary-`LOOPEX_HOME` rule
+  (`real-sign-in-anthropic` writes no configuration file and uses no root));
+  `m8-operator` alone runs in the separate macOS user account ADR 0038
+  names, the attended opt-in of vision-technical §23.2 (D86) and of ADR
+  0003's no-real-home test rule (D87); apart from the read-only absence
+  query below, no test touches a real keyring or login keychain.
   The attended `real-sign-in-*` lanes are no exception: each signs in under
   its temporary `HOME` with `--store file` (ADR 0073's owner-only file
   backend), and the keychain and Secret Service backends
@@ -308,14 +309,15 @@ scripts/check.sh`; release lanes run under `bash scripts/check-release.sh
 --only LANE` before a merge that changes their boundary and once in the
 closure matrix. Every case except `m8-operator` uses a temporary `HOME` and
 workspaces and, where it has one, a temporary state root (a temporary
-`LOOPEX_HOME` or a temporary root named by `--state-root` or by the `paths.state_root` of a file named by `--config`, or,
-for the `installed-artifact` and `real-sign-in-*` lanes, the root named by
-the configuration file `init` writes under their temporary `HOME`, whose
-`$HOME/.loopex` D86 reads as satisfying the temporary-`LOOPEX_HOME` rule
-(`real-sign-in-anthropic` writes no file and uses no root)); `m8-operator`
-alone runs in the separate macOS user account ADR 0038 names, the attended
-opt-in of vision-technical §23.2 (D86) and of ADR 0003's no-real-home test
-rule (D87).
+`LOOPEX_HOME`, a temporary root passed directly to the API under test, or a
+temporary root named by `--state-root` or by the `paths.state_root` of a
+file named by `--config`, or, for the `installed-artifact` and
+`real-sign-in-*` lanes, the root named by the configuration file `init`
+writes under their temporary `HOME`, whose `$HOME/.loopex` D86 reads as
+satisfying the temporary-`LOOPEX_HOME` rule (`real-sign-in-anthropic` writes
+no configuration file and uses no root)); `m8-operator` alone runs in the
+separate macOS user account ADR 0038 names, the attended opt-in of
+vision-technical §23.2 (D86) and of ADR 0003's no-real-home test rule (D87).
 
 **Closure matrix (D18, revised).** The full `bash scripts/check-release.sh`
 runs once on the Linux x86-64 host `serenity`, with the M8 attempts index
@@ -1176,7 +1178,7 @@ on them. A lane whose action is not done by the
 closure candidate is deferred under D36, its route shipping disabled (D43),
 or blocks closure. Acceptance of the fix choices the
 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13)
-and holistic 2 to [18](../process/agent-context-map.md#disposition-m8-holistic18-2026-10-14)
+and holistic 2 to [19](../process/agent-context-map.md#disposition-m8-holistic19-2026-10-14)
 dispositions list also remains open.
 
 1. **OpenAI client.** Confirm that Loopex registers by Sign in with ChatGPT's

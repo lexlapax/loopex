@@ -975,7 +975,9 @@ for a service that exited 125.
 
 Concept: [Observable consequences](0037-host-configuration-and-path-discovery.md#concept-adr-0037-consequences).
 
-Every case uses a temporary `HOME` and `LOOPEX_HOME`. Test files are in
+Every case uses a temporary `HOME` and, where it selects a state root, a
+temporary one (a temporary `LOOPEX_HOME`, `--state-root`, or the
+`paths.state_root` of a file under the temporary `HOME`). Test files are in
 `apps/loopex_cli/test` unless another application is named.
 
 *Test seams.* The race and real-daemon cases run a test-built escript at

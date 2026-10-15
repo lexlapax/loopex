@@ -1600,11 +1600,14 @@ candidate.
    that commit.
 2. **Write.** In a temporary directory `T` whose path has no symbolic-link
    component, with `LOOPEX_HOME` unset, `HOME` the new empty directory
-   `T/home`, and `MIX_HOME`, `MIX_ARCHIVES` and `HEX_HOME` set to the
-   runner's own (`MIX_HOME` defaulting to the runner's `~/.mix`), so the
-   Mix runs of the shape check and steps 5 and 6 find Hex and rebar, for this step, its shape check and steps 3 to 6, `T/workspace`
-   is a fresh copy of
-   M7's `test/fixtures/m7/review/workspace`, live on its own device and
+   `T/home`, `MIX_HOME` a private `T/mix-home` holding copies of the
+   runner's Mix archives and per-Elixir rebar, `HEX_HOME` a new empty
+   `T/hex` with `HEX_OFFLINE=1`, and `PATH` naming the toolchain pair's own
+   `bin` directories, as `provider_build_fixture.exs` does, for this step,
+   its shape check and steps 3 to 6, so that the Mix runs of the shape
+   check and of steps 5 and 6 find Hex and rebar without writing the
+   runner's; `T/workspace` is a fresh copy of M7's
+   `test/fixtures/m7/review/workspace`, live on its own device and
    inode, and `T/config.json` is the fixture's configuration form for `T`.
    The M7 build has no credential-free chat provider, so the lane runs the
    M7 launcher's `chat --config T/config.json` under the release check's
@@ -1716,7 +1719,9 @@ otherwise is recorded fail or unavailable, as plan item 7 states.
    `start`, the host prerequisite requires `TZ=America/Los_Angeles ps -o
    lstart= -p P` and `TZ=UTC0 ps -o lstart= -p P` to differ for the
    runner's own OS PID `P`, so the cases cannot pass vacuously on a host
-   without that zone's data. The test file's three `lock` cases (`mix test
+   without that zone's data. When `m7-adopt` is not selected, the lane
+   first creates `T` and `T/home` as step 2 does and sets the same
+   environment. The test file's three `lock` cases (`mix test
    --only m7_adopt:lock`), under `without_credential` and `TZ=UTC`, with
    step 1's tree in `LOOPEX_M7_ADOPT_V040_TREE`, run the `v0.4.0` build's
    own code through `MIX_ENV=prod mix run --no-start -e` in that tree under
@@ -2077,6 +2082,6 @@ restored root. The tenth review's were decided as D78: one intent record,
 the intent check's, for `--abandon` and `--resume`.
 
 Acceptance of this record includes the fix choices the M8 internal review 2
-and holistic 2 to 18 dispositions list for it
+and holistic 2 to 19 dispositions list for it
 ([internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13),
-[holistic 18](../process/agent-context-map.md#disposition-m8-holistic18-2026-10-14)).
+[holistic 19](../process/agent-context-map.md#disposition-m8-holistic19-2026-10-14)).
