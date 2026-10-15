@@ -59,7 +59,7 @@ the CLI and the daemon.
 | Discard-later-work attestation form of the ADR 0051 plan | `Loopex.Executor.Local.RestoreCodec` (`apps/loopex_executor_local/lib/restore_codec.ex`), its `attestation` grammar | `loopex_executor_local` | Existing, changed |
 | Refusal of the discard form with an available source | The plan validation in `LoopexComposition.Restore.Workflow` (`lib/loopex_composition/restore/workflow.ex`) | `loopex_composition` | Existing, changed |
 | Unreadable-session code kept by helper classification | `LoopexComposition.Delegation.Helper` (`classify_sessions/4`, `classify_session/4`, `load_parent/2`), `LoopexComposition.Delegation.RetainedObjects`' binding lookup (`history/3`, `read_object/2`), `LoopexComposition.Delegation.incomplete/1` | `loopex_composition` | Existing, changed |
-| Abandonment of a restore stopped before its intent record (D66, D67, D70), with removal of an owner-less claim (D68) | `LoopexComposition.Restore.abandon/2`, `@doc false`: its only caller is `StoreAdmin`, and `store restore --abandon` is the surface. Three `Restore.IO` operations: `{:abandon_claims, plan}`, which lists and classifies the claim directories and captures each held claim's release custody; `{:remove_ownerless_claim, directory}`; and `{:remove_abandoned_destination, destination, baseline, ordinal}`. Claim release is ADR 0051's existing terminal release, `{:release_restore_claims, claims}` (`restore/io.ex:1497-1577`) | `loopex_composition` | Existing guardian, new entry point and operations |
+| Abandonment of a restore stopped before its intent record (D66, D67, D70), with removal of an owner-less claim (D68) | `LoopexComposition.Restore.abandon/2`, `@doc false`: its only caller is `StoreAdmin`, and `store restore --abandon` is the surface. Three `Restore.IO` operations: `{:abandon_claims, plan}`, which lists and classifies the claim directories, captures each held claim's release custody and observes the destination's intent record; `{:remove_ownerless_claim, directory}`; and `{:remove_abandoned_destination, destination, baseline, ordinal}`. Claim release is ADR 0051's existing terminal release, `{:release_restore_claims, claims}` (`restore/io.ex:1497-1577`), and the committed check is the existing `{:restore_lookup, root, tx_id}`, both in the same guardian | `loopex_composition` | Existing guardian, new entry point and operations |
 
 **Physical root paths.** Every opener, the `store` commands included,
 receives the selected root as ADR 0037's `LoopexCli.Home` hands it: the
@@ -1054,15 +1054,16 @@ that later work was deliberately discarded; they stay beside the backup.
    `Restore.lookup(DESTINATION, TX_ID, limits)`, which is read-only, and
    prints its answer; at `claim_release` it adds `restore TX_ID is
    committed in DESTINATION; claim cleanup is pending and the root stays
-   closed until --resume finishes it`. The exit status is the table's.
+   closed until the printed command finishes it`. The exit status is the
+   table's.
 
 **Output by outcome.**
 
 | Result | Output | Exit |
 | --- | --- | --- |
 | `{:committed, receipt}` | `restored TX_ID ordinal N into DESTINATION`; then `Restore.lookup(DESTINATION, TX_ID, limits)`'s answer; when it is committed and `current`, the selection lines below | 0; 2 with the re-presentation command when the lookup answers anything else |
-| `{:not_committed, refusal}` | `not restored: CODE at PHASE; claim none|retained`. With `claim` retained, the re-presentation command below, or, on `--resume`, the `--abandon` command when the intent check finds no intent record (D71) | 1 |
-| `{:cleanup_unconfirmed, observation}` or `{:commit_unknown, observation}` | `restore TX_ID is unresolved: PHASE, intent INTENT, cleanup CLEANUP, reason REASON`, the instruction to keep every process away from the source, backup and destination, and the re-presentation command, or, on `--resume`, the `--abandon` command when the intent check finds no intent record (D71) | 2 |
+| `{:not_committed, refusal}` | `not restored: CODE at PHASE; claim none|retained`. With `claim` retained, the re-presentation command below, or, on `--resume`, the `--abandon` command when the intent and claim checks below choose it (D71, D77) | 1 |
+| `{:cleanup_unconfirmed, observation}` or `{:commit_unknown, observation}` | `restore TX_ID is unresolved: PHASE, intent INTENT, cleanup CLEANUP, reason REASON`, the instruction to keep every process away from the source, backup and destination, and the re-presentation command, or, on `--resume`, the `--abandon` command when the intent and claim checks below choose it (D71, D77) | 2 |
 
 Selection lines, printed after a committed restore. The command never writes
 the configuration file:
@@ -1138,49 +1139,60 @@ destination, so the transaction stays as it was: a committed root with
 cleanup pending stays committed and closed. Output and exits follow the
 table above.
 
-`restore/2` continues a claimed transaction without an intent only from an
-exact complete staged copy: every claimed root's manifest must equal the
-baseline (`workflow.ex:1537-1550`). Every other transaction killed after its
-first claim and before its intent record answers `--resume` the same way on
-every attempt, with the claim retained (D71):
+**Before the intent record** (D71, D77), `--resume` is specified by phase,
+not by crash point. `restore/2` continues a claimed transaction without an
+intent only from an exact complete staged copy that it admits
+(`workflow.ex:1537-1550`); otherwise it answers `not restored` (exit 1) or
+`restore TX_ID is unresolved: …` (exit 2), whichever it gives, and
+`--resume` prints the `--abandon` command.
 
-- A partial copy holding no copied restore lineage, or a copy to which
-  `destination_intent` added an administrative entry: `not restored:
-  inventory_mismatch at PHASE; claim retained`, exit 1. The absence proof
-  passes and the copy's manifest differs from the baseline
-  (`workflow.ex:1407-1410`, `:1546`).
-- A cut between an available source's two claims (`:1372-1374`,
-  `:1402-1405`), a torn `intent.tmp`, which lookup cannot decode
-  (`restore/io.ex:2047-2056`), or a copy holding a copied lineage ordinal of
-  a backup of a restored root, which fails the destination lookup's checks
-  (`restore_guard.ex:223`, `:242`, `:550-562`): `restore TX_ID is
-  unresolved: …`, exit 2. The absence of intent is never proved, so
-  `restore/2` answers `commit_unknown` (`restore.ex` `restore_result/2`).
-  The exact complete copy of such a backup answers the same way, so
-  `--resume` continues a complete copy only of a backup that holds no
-  restore lineage.
+The **intent check** and the **claim check** decide which command a
+`--resume` result other than committed prints; the intent check also decides
+the `restore_abandoned` refusal above. Both read directly, read-only, and
+grant nothing: `--abandon` repeats its own checks under the guardian
+(abandonment steps 1 and 3).
 
-The **intent check** decides which command these results print. After any
-`--resume` result other than committed, and at the `restore_abandoned`
-check above, `StoreAdmin` reads `DESTINATION/.loopex-restore/lineage/ORDINAL/`
-directly, read-only, `ORDINAL` being the plan's `prior_restore_count` + 1 in
-eight digits. It finds no intent record when `DESTINATION` is absent, or
-when `File.lstat/1` of `intent` answers `{:error, :enoent}` and `intent.tmp`
-is absent or does not decode with `RestoreCodec.decode(:intent, _)`; any
-other answer, a read error included, counts as an intent record. With no
-intent record it prints `store restore --abandon TX_ID --previous-restore
-stopped|rebooted BACKUP DESTINATION` in place of the re-presentation command.
-The check grants nothing: `--abandon` repeats it under the guardian
-(abandonment step 3). The split between the two commands is the intent
-record (D67): `--abandon` ends every transaction before it, the exact
-complete copy that ADR 0051 would also continue included, and `--resume` is
-the only path from it on.
+- The intent check reads `intent` and `intent.tmp` in
+  `DESTINATION/.loopex-restore/lineage/ORDINAL/`, `ORDINAL` being the plan's
+  `prior_restore_count` + 1 in eight digits, at most 65,536 bytes of each
+  (ADR 0051 technical depth `:225-226`). It finds an intent record of the
+  transaction only when one of them decodes with
+  `RestoreCodec.decode(:intent, _)` and its `tx_id` is the plan's; anything
+  else, an absent `DESTINATION` or file, a longer file and a read error
+  included, is none. Before the intent record it therefore finds none.
+- The claim check lists the claim directory beside each root the plan
+  names. One holding nothing or only `owner.tmp` is owner-less (D68).
+
+With no intent record of the transaction, or with an owner-less claim
+whatever the intent check finds, `--resume` prints `store restore --abandon
+TX_ID --previous-restore stopped|rebooted BACKUP DESTINATION` in place of the
+re-presentation command. The owner-less case covers a committed transaction
+killed inside a claim release, which `--resume` alone cannot finish: the
+owner-less claim makes every lookup of its root refuse
+(`restore/io.ex:2336-2353`), and `--abandon` removes it and then refuses
+`restore_not_abandonable`, after which `--resume` finishes.
+
+The split between the two commands is the intent record (D67): `--abandon`
+ends every transaction before it, the exact complete copy that ADR 0051
+would also continue included, and `--resume` is the only path from it on.
+One window has no path in M8, an ADR 0072 residual: a restore whose
+available source is itself a restored root, killed after the destination's
+`intent` and before its first write to the source, the source's new lineage
+ordinal directory (`workflow.ex:1723-1731`). There the source's newest
+ordinal is its earlier destination-role one, which the source claim's lookup
+refuses (`restore_guard.ex:242`, `:550-562`), so `--resume` does not
+commit, and `--abandon` refuses `restore_not_abandonable`. The claims stay
+and both roots stay closed; M8 gives the operator nothing beyond leaving
+them. The probe row of the evidence plan records the delivered outcome.
 
 **Abandonment (D66, D67, D68, D70).** `--abandon TX_ID` is the explicit
 disposable-root cleanup ADR 0051 requires for an incomplete baseline
 (technical depth `:436-438`), and the reclaim ADR 0051 admits for the
 original transaction and plan after the earlier invokers are joined or the
-host rebooted (`:361-363`); ADR 0051's transition is unchanged. It makes
+host rebooted (`:361-364`); ADR 0051's transition is unchanged. D66, D67
+and D70 are the further reviewed recovery decision ADR 0051 requires before
+the sole intent or claim evidence of an unknown outcome is deleted, as the
+[sixth amendment](#technical-adr-0072-amendment) records (D77). It makes
 every check and publication of the re-presentation above through
 `continuation-N`, except the `restore_abandoned` check, never performing
 retention step 2, and publishes the record with `action` `"abandon"`; the
@@ -1196,7 +1208,7 @@ The transaction's **intent record** is the destination's
 `prior_restore_count` + 1 in eight digits. `RestoreGuard` reads either as
 the transaction's intent and `--resume` continues from it
 (`restore_guard.ex:214-228`, `:442-451`), as ADR 0051 counts a persisted
-intent temporary as a possible intent (technical depth `:228-229`). For
+intent temporary as a possible intent (technical depth `:228-230`). For
 `--abandon` only, an `intent.tmp` that does not decode beside an absent
 `intent`, torn by a kill while `publish!` wrote it
 (`restore/io.ex:1997-2004`), is no intent record (D70, the
@@ -1219,7 +1231,8 @@ invocation's limits, `abandon/2`:
    a partial copied lineage stops (`:2047-2056`). Anything else, another
    transaction's `owner`, an `owner` that does not decode, or any other
    entry, refuses `restore_conflict` naming the claim, with nothing
-   written; ADR 0051 keeps such a claim stranded (`:361-362`).
+   written; ADR 0051 keeps such a claim stranded (`:361-362`). It also
+   returns whether `DESTINATION` holds the intent record defined above.
 2. `{:remove_ownerless_claim, directory}` removes each owner-less claim
    directory (D68): it deletes `owner.tmp`
    when listed, `fsync`s the directory, removes it with `rmdir` and
@@ -1232,9 +1245,10 @@ invocation's limits, `abandon/2`:
    acquisition that never published its `owner` or a release that already
    deleted it (`:1557-1562`), and it fences nothing ADR 0051 continues.
 3. Refuses `restore_not_abandonable` when the transaction has reached its
-   intent record (D67): with the destination's claim held, when
-   `DESTINATION` holds the intent record; without it, when `DESTINATION` is
-   present and `Restore.lookup/3` answers committed. With no claim held, it
+   intent record (D67): with the destination's claim held, when step 1
+   found the intent record; without it, when `DESTINATION` is present and
+   the existing `{:restore_lookup, DESTINATION, TX_ID}` operation, run
+   through the same guardian, answers committed. With no claim held, it
    answers `{:no_claim, _}`.
 4. With the destination's claim held, reads the backup's manifest with the
    existing `{:manifest, backup_state_root, max_total}` operation, whose
@@ -1247,11 +1261,13 @@ invocation's limits, `abandon/2`:
    `.loopex-restore/lineage/ORDINAL` as directories; and `baseline`,
    `baseline.tmp` and a torn `intent.tmp` in that last directory. Any other
    entry refuses `destination_not_empty` naming it, with nothing removed.
-   It then removes every entry, deepest first, then `DESTINATION` itself,
-   and `fsync`s its parent. Without that claim it never touches
-   `DESTINATION`: an available source killed after its source claim alone
-   left the empty directory of retention step 2, which another restore may
-   since have claimed.
+   It then removes exactly the checked entries, deepest first, then
+   `DESTINATION` itself, and `fsync`s its parent; a directory that `rmdir`
+   finds not empty, holding an entry written after the check, refuses
+   `destination_not_empty` naming it, and a rerun checks again. Without
+   that claim it never touches `DESTINATION`: an available source killed
+   after its source claim alone left the empty directory of retention step
+   2, which another restore may since have claimed.
 5. Releases the held claims, the source's before the destination's, with
    ADR 0051's terminal release (`restore/io.ex:1497-1577`) given step 1's
    custody, which deletes each `owner` and then its directory only after
@@ -1291,10 +1307,7 @@ removed M, destination removed|absent|untouched`, exit 0; `restore TX_ID
 holds no claim; nothing abandoned`, or the count of owner-less claims
 removed, exit 0; a refusal exits 1 having written nothing but the
 continuation record and removals a rerun finishes; `cleanup_unconfirmed`
-exits 2 with the `--abandon` command to rerun. A
-committed transaction killed inside its claim release is finished the same
-way: `--abandon` removes the owner-less claim and refuses while a held claim
-remains, which `--resume` then releases.
+exits 2 with the `--abandon` command to rerun.
 
 <a id="technical-adr-0072-readiness"></a>
 ### Root Facts and Service Readiness Fields
@@ -1380,8 +1393,8 @@ sentence names the path or session and the operator's next step.
 | Exit | Meaning |
 | --- | --- |
 | 0 | Done: backup published; restore committed with current lookup; restore abandoned, or holding no claim; root adopted or already marked |
-| 1 | Refused or not done, with nothing written that the operator must resolve, except a `not_committed` restore whose claim is retained, which prints the re-presentation command, or on `--resume` with no intent record the `--abandon` command (D71), and an adopt refused after its fence, which leaves the marker `adopting` and prints the rerun command |
-| 2 | Uncertain: restore `commit_unknown` or `cleanup_unconfirmed`, which prints the re-presentation command, or on `--resume` with no intent record the `--abandon` command (D71); abandonment `cleanup_unconfirmed`; a restore committed with a lookup that is not committed and `current`; adopt `root_changed`. Do not proceed; follow the printed command |
+| 1 | Refused or not done, with nothing written that the operator must resolve, except a `not_committed` restore whose claim is retained, which prints the re-presentation command, or on `--resume`, as the intent and claim checks choose, the `--abandon` command (D71, D77), and an adopt refused after its fence, which leaves the marker `adopting` and prints the rerun command |
+| 2 | Uncertain: restore `commit_unknown` or `cleanup_unconfirmed`, which prints the re-presentation command, or on `--resume`, as the intent and claim checks choose, the `--abandon` command (D71, D77); abandonment `cleanup_unconfirmed`; a restore committed with a lookup that is not committed and `current`; adopt `root_changed`. Do not proceed; follow the printed command |
 
 Parser errors are `usage` and exit 1, as for every `loopex` command.
 
@@ -1408,7 +1421,7 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `restore_abandoned` | restore `--resume` | A listed `continuation-N` records an abandonment and the transaction has no intent record (D71, D74) | Rerun `--abandon TX_ID` if it stopped part-way; start a new restore without `--resume` |
 | `restore_conflict` | restore `--abandon` | A claim directory beside a root the plan names holds another transaction's `owner`, an `owner` that does not decode, or another entry, or an acquisition published its `owner` while the directory was being removed; names the claim | Finish the other transaction with `--resume` or end it with `--abandon` first, then rerun; a claim whose `owner` does not decode, or that holds another entry, stays stranded under ADR 0051 |
 | `source_absent`, `source_not_absent` | restore | Path contradicts `--source` | State the true branch |
-| `destination_not_empty`, `destination_path_invalid` | restore | Destination rules; for `--abandon`, `destination_not_empty` names an entry beneath `DESTINATION` the restore did not write, and nothing is removed | Choose a new empty directory; for `--abandon`, move the named entry out, then rerun |
+| `destination_not_empty`, `destination_path_invalid` | restore | Destination rules; for `--abandon`, `destination_not_empty` names an entry beneath `DESTINATION` the restore did not write: before any removal, nothing is removed; at a directory `rmdir` finds not empty, the removals made stay and a rerun checks again | Choose a new empty directory; for `--abandon`, move the named entry out, then rerun |
 | `auth_root_overlap` | backup, adopt, restore | ADR 0037: the root, `BACKUP`, `DESTINATION` or an available source the capture names is, contains or lies inside a protected credential directory by resolved path; names the pointer | Select a separate path |
 | ADR 0051 refusal codes | restore | Passed through verbatim from `{:not_committed, refusal}` | As the operator runbook's outcome table says |
 | `root_changed` | adopt | Root changed between the audit manifest and the final manifest, a writer marker or socket appeared before the audit manifest, a marker appeared at the fence, or, at step 11, a ledger's placement changed or `resource-packs/receipts` gained an open entry or receipt after step 6; the marker is left `adopting` or as found | Stop other processes; run `doctor`; rerun adopt; if the rerun refuses `ledger_path_mismatch`, the root stays with the build that wrote it |
@@ -1420,10 +1433,11 @@ it, a committed current marker written under the placement lock only after a
 complete, unchanged audit, in each case with at most adopt's stale placement
 lock (the cut table above); for backup, at most a staging directory beside
 `BACKUP`, never a partial `BACKUP`; for restore, the retained plan and ADR
-0051's own uncertainty, resolved by `--resume` from the intent record on and
-by `--abandon` before it, which also removes a claim left without its owner
-record, after which `--resume` refuses `restore_abandoned`; for `--abandon`,
-the state its rerun finishes ([abandonment](#technical-adr-0072-restore)).
+0051's own uncertainty, resolved by `--resume` from the intent record on,
+except the [residual window](#technical-adr-0072-restore) of an available
+source that is a restored root, and by `--abandon` before it, which also
+removes a claim left without its owner record, after which `--resume`
+refuses `restore_abandoned`; for `--abandon`, the state its rerun finishes ([abandonment](#technical-adr-0072-restore)).
 
 <a id="technical-adr-0072-evidence"></a>
 ### Evidence and Test Plan
@@ -1450,7 +1464,7 @@ own manifest.
 | `apps/loopex_composition/test/store_adopt_test.exs` | A root built by the current code with its marker removed is adopted and differs only by the marker; idempotent second run writes nothing; job-index caches tolerated and left; without `--old-writer stopped`, `attestation_required` with no write; refusals with no write for a retired catalogue, a live lock (`root_held`), a writer marker, a helper writer marker and a restore claim, each releasing adopt's lock; a stale lock of a dead incarnation reclaimed at step 4 and the root adopted with no lock left; manifests A and C omit exactly `placement.lock` and the `placement.lock.*` entries with everything beneath them, the guard's owner entry included, and include everything else; audit refusals for a corrupt frame, a torn tail, a session with an unknown record kind (session named), a receipt without its marker, a missing artifact object and a workspace mismatch, each leaving only the `adopting` marker added and the lock released; a non-cooperating old-build writer (an embedded host, as `--old-writer stopped` covers) simulated by a test process that takes no placement lock, appending a valid Store frame and creating a file at a private hook after the `adopting` publication and before manifest A (the write is audited and the root adopted) and after manifest A (`root_changed`, marker `adopting`, lock released); real exclusion at private hooks that pause adopt: `Placement.acquire/2` in a separate OS process attempted immediately after the `adopting` publication is refused `root_adopting` with the root and the lock unchanged, and attempted immediately after the rename, before the release, is refused `placement_active` and admitted only after adopt releases (the daemon's 124 and 76 at the same hooks are in `daemon_root_format_test.exs`); a lockless test process that writes `store.log.writer` after step 5 and before manifest A makes adopt refuse `root_changed`; **alias-bound ledger** (D45, D48): a root whose `receipts` ledger was first prepared through a symbolic-link alias of the root and holds an open entry, adopted with that alias as `GIVEN`, is committed with `receipts/generation` differing from the audited bytes only in `executor_epoch`, `generation_id` and `root_binding`, the last now `RestoreCodec.ledger_binding/1` of the physical placement, the root otherwise differing only by the marker, the open entry, markers and receipts byte-identical, and `Ledger.prepare/3` through the physical path then answers `{:ok, _}` while through the alias it refuses `generation_mismatch`; the same root adopted with its physical path as `GIVEN`, and a root whose `receipts` was copied in from another root, each refuse `ledger_path_mismatch` naming `receipts` before the fence with nothing written; a ledger holding `restore-lineage` is never rebound; kills at private hooks after the rebind temporary is written, after its rename and before the marker rename each leave `adopting`, and a rerun removes the temporary, audits each ledger against its current binding, rebinds only a ledger still bound through the alias and commits with the ledger bound physically; through `test_adopt/3` with supplied placements no ledger is rebound; **path-derived identity** (D55, D59): a root whose `resource-packs/receipts` was first prepared through a symbolic-link alias, adopted with that alias as `GIVEN`, holding no open entry and no receipt, is committed with that generation's `root_binding` and `executor_identity` those of the physical path, then `store backup` of the adopted root succeeds and a resource import through the physical path succeeds; the same root killed after that generation's rename and before the marker rename is committed by a rerun; holding an open entry, and holding only a receipt, adopt refuses `ledger_path_mismatch` naming `resource-packs/receipts` before the fence with nothing written; an open entry, and a receipt, written there by a lockless test process after step 6 and before manifest A each make step 11's check refuse `root_changed` before any generation is replaced, leaving `adopting` and every generation unchanged, that of a `receipts` ledger also bound through the alias included; two adopters started together on one unmarked root, one paused while holding the lock: exactly one reaches the fence and commits, and the other refuses `root_held` with nothing written or, started after the release, reports `already marked`; kill after step 4, after the step 7 link, after manifest A, during the audit, after the rename and before the release: before the rename the root is left `adopting` (or unmarked before the link) with a stale lock, and after it `current`; after every cut whose root is left `adopting`, `admit/1`, `Placement.acquire/2`, `compose/1`, `store backup` and `store restore` with that root as source refuse `root_adopting` with the root unchanged, `report/2` says `adopting`, and a rerun of adopt reclaims the stale lock and repeats the full audit (observed by its decode count) before reaching `current`; after the cut following the rename, the next `Placement.acquire/2` reclaims the stale lock and serves the root, and adopt reports `already marked`; in every successful run the marker becomes `current` only by the rename, while adopt holds the lock and after C = A; **lock-taking writer**: a separate OS process running this build's `Placement.acquire/2` path on the root, started while adopt is paused at a private hook holding the lock (before the fence, after it and after the rename), is refused (`root_unmarked`, `root_adopting` or `placement_active`) with no write to the root, and the root is adopted only on the audited bytes; the real `v0.4.0` build against this build's lock and writer marker is the `m7-adopt-lock` label; **retained M7 root** (D24): the [fixture](#technical-adr-0072-m7-fixture) extracted to a temporary directory and checked against its pinned digest is refused `root_unmarked` by `admit/1`, `Placement.acquire/2`, `compose/1` and `store backup` with an independent walk unchanged (the daemon's exit 116 on it is in `daemon_root_format_test.exs`), then adopted with `--old-writer stopped` through `StoreAdmin.test_adopt/3` supplying the workspace reference the fixture's genesis records and the ledger placement its `README.md` records, so this case is the audit-and-marker proof with the workspace and ledger-placement checks bypassed and the product path is the release check's [`m7-adopt` lane](#technical-adr-0072-m7-adopt) (D26): the full audit decodes its conversation session, which is the helper parent, the helper child session, the helper binding and run logs and every Store frame; the root differs from the extracted fixture only by the marker; and the read-only child audit of the `m7-adopt` lane's step 5 (`test/support/m7_child_audit.ex`) passes on the adopted fixture with the root unchanged. Every case here runs composition code only (`apps/loopex_composition/mix.exs:39-47`), with `:catalogue` a test reader; the product reader and the catalogue listing are `store_command_test.exs`'s |
 | `apps/loopex_composition/test/m7_adopt_child_audit_test.exs` (cases tagged `m7_adopt: :shape`, `m7_adopt: :audit` and `m7_adopt: :lock`; `:m7_adopt` excluded in `test_helper.exs`) | Run only by the [`m7-adopt` and `m7-adopt-lock` labels](#technical-adr-0072-m7-adopt), against `T/state` named by `LOOPEX_M7_ADOPT_STATE_ROOT`, through `test/support/m7_child_audit.ex` (listed in `test_ignore_filters`), with no runtime, Store, owner or placement started against `T/state` and no file under `T/state` or `T/workspace` opened for writing. `shape`, before adopt: exactly one run log under `delegation/*/runs/` and exactly one `settle` whose terminal `child_run_id` is non-null, else the one verdict line `m7-adopt shape: unavailable REASON` with the case passing; a run log that does not decode prints `available`. `audit`, after adopt, with the conversation identifier from `LOOPEX_M7_ADOPT_SESSION_ID`: the Store log decodes with a complete tail and replays, every session recovers, the one helper run log decodes with a complete tail under identifiers taken from its header as `Restore.Audit`'s `helper_log!/3` takes them, and its `settle` terminal's Base64 `child_session_id` and `child_run_id`, once decoded, name a Store session other than the conversation whose run's terminal record matches the settlement's state, journal version and terminal digest. `lock`: step 6's three cases, against roots under `T/lock` and the `v0.4.0` tree in `LOOPEX_M7_ADOPT_V040_TREE`, which open and write those roots and nothing under `T/state` (D33) |
 | `apps/loopex_composition/test/store_backup_test.exs` | Backup of a closed root with sessions, receipts, artifacts, resources, a helper namespace and earlier restore lineage: `state/` equals an independent walk of the source; capture fields equal an independent derivation; refusals for held, stale, writer-marker, helper-marker, claim, unmarked, existing, nested and symlinked targets, a changed workspace and 65,537 entries; a dead contender's `placement.lock.guard.claim-ID` left with no lock refuses `root_unclean` naming it; a marked root whose `receipts` ledger an embedded composition first prepared through a symbolic-link alias refuses `ledger_path_mismatch` naming `receipts`, with no staging directory and no `BACKUP`; a source write during the copy, and a `store.log.writer` written by a lockless test process after step 3 and before manifest A, each give `source_changed` and no `BACKUP`; kill during copy, before rename and after rename leave no `BACKUP` or a complete one; an independent walk shows the source unchanged apart from removed marker temporaries, with a populated helper job index still in place, present in manifests A, B and C and copied into `state/` byte for byte, and absent only from the audit's index; a capture record carrying any member beyond the listed ones refuses `backup_invalid`; the separation refusals are ADR 0037's `auth_separation_test.exs` cases |
-| `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; a backup of a root with helper history and its job index restores with the index copied byte for byte, and a service started on it with one job-index entry corrupted in the backup discards that entry, rescans its session and serves, never refusing; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; a kill at each ADR 0051 phase hook from the intent record on (a decodable `intent.tmp`, the destination's `intent`, and every later phase), then `--resume` reaching committed with the same plan bytes; a kill after the copy's last mode acknowledgement and before `destination_intent`'s first administrative entry, of a backup holding no restore lineage, then `--resume` reaching committed; **`--resume` before the intent record** (D71): a kill mid-`baseline_copy` of a backup without restore lineage, and inside `destination_intent` after its first administrative entry and after its `baseline`, each answering `not restored: inventory_mismatch` with the claim retained, exit 1; a kill for an available source between its two claims, in each claim order, with a torn `intent.tmp`, and mid-`baseline_copy` of a lineage-2 backup inside its copied lineage ordinal, each answering `commit_unknown` with the claim retained, exit 2; each printing the `--abandon` command and not the re-presentation command, the same on a second attempt; **abandonment** (D66, D67, D70): a kill after the first claim and before the intent record (in `inventory`, mid-`baseline_copy`, after the copy's last mode acknowledgement, inside `destination_intent` after its first administrative entry and after its `baseline`, and with a torn `intent.tmp`; and for an available source between its two claims, in each claim order), then `--abandon` releases the transaction's claims and removes the destination (leaves it untouched when it holds no destination claim), then a fresh restore succeeds and `RestoreGuard.state/1` of the original source root is no longer `restore_incomplete`; a kill during the removal, after it, between the two releases, and inside a release after its `owner` deletion, each followed by a rerun of `--abandon` reaching the same end; a rerun after completion prints `holds no claim` and writes nothing; `--resume` after a completed abandonment, and after one killed during its removal, refuses `restore_abandoned` with nothing written; a file placed in the claimed `DESTINATION` outside the baseline's paths and the administrative names makes `--abandon` refuse `destination_not_empty` naming it with nothing removed; `--abandon` with a decodable `intent.tmp`, with `intent`, and after commit refuses `restore_not_abandonable` with nothing but its continuation record written; another transaction's claim, an undecodable `owner`, and a claim directory holding `owner` beside another entry refuse `restore_conflict` with nothing removed; **owner-less claims** (D68): a claim directory left empty, or holding only `owner.tmp`, by a kill inside acquisition, at the destination and at an available source, and one left by a kill inside a release after its `owner` deletion, are removed by `--abandon`, after which `RestoreGuard.state/1` of that root is no longer `restore_incomplete`; a committed restore killed inside its source claim's release has that claim removed by `--abandon`, which refuses `restore_not_abandonable` for the held destination claim, and a following `--resume`, finding the intent record, does not refuse `restore_abandoned` and releases it with lookup current; an acquisition paused after creating its directory, and one paused after writing `owner.tmp`, while `--abandon` removes the directory, fail and hold no claim; an acquisition paused after creating its directory that publishes `owner` after `--abandon` listed the directory and before its `rmdir` keeps its claim, and `--abandon` refuses `restore_conflict`; a second `--abandon` paused after its listing against the first refuses `previous_restore_running`, and a fresh restore into `DESTINATION` while an abandonment is paused after its removal and before its release refuses `restore_conflict`; a `--resume` whose `DESTINATION` argument resolves to another directory than the plan's `destination_state_root` refuses `destination_path_invalid`, and one whose `BACKUP/state` differs from the plan's `backup_state_root` (a copied backup) refuses `backup_invalid`, each before the continuation record with nothing written; a run killed between retention steps 1 and 2, then `--resume`, creates `DESTINATION`, calls `restore/2` with `prior_admin_authority` `"none"` and commits, as does one killed after retention step 2 before `restore/2` published its claim; a `--resume` after a durable claim calls it with `"joined"`; a `--resume` into a destination that already holds part of the copy is not refused as `destination_not_empty`; `previous_restore_running`, and an earlier invoker the probe cannot verify recorded `unverifiable` without refusal; an available source whose holder the probe cannot verify is reported `unverifiable` and restored; a committed restore whose follow-up lookup a `Restore.IO` probe gate makes answer other than committed and `current` returns that lookup answer; an edited plan file gives `restore_conflict`; **two re-presentations** of one transaction paused at a private hook after their listing: exactly one links `continuation-N` and calls `restore/2`, and the other refuses `previous_restore_running` without calling it; one paused after taking `N` and before writing its temporary, while a second lists, takes the same `N` and proceeds: only one of the two links `continuation-N` and calls `restore/2`; a `continuation-1` that does not decode refuses `backup_invalid` naming it, and a leftover `continuation-1.tmp-*` is ignored; a run killed during retention step 1, after `attestation` and before `plan` is complete, makes `--resume` refuse `backup_invalid` naming `plan`, and `store restore` without `--resume` into the same destination then commits; with `continuation-1024` present, `--resume` refuses `inventory_limit_exceeded` with nothing written. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged. After every `commit_unknown` and `cleanup_unconfirmed` result the closed result map carries `Restore.lookup/3`'s answer. The separation refusals, the available source's included, are ADR 0037's `auth_separation_test.exs` cases. These cases call `StoreAdmin` and assert its closed result maps; the printed lines and exit statuses are `store_command_test.exs`'s |
+| `apps/loopex_composition/test/store_restore_command_test.exs` | Round trips for `lost` (after moving the source aside) and `available`, each committed with lookup current, and the restored root started by composition serving the same sessions; a backup of a root with helper history and its job index restores with the index copied byte for byte, and a service started on it with one job-index entry corrupted in the backup discards that entry, rescans its session and serves, never refusing; second restore of a restored root (lineage 2); each attestation refusal and each path refusal; `old_writer_running` for a live holder, report-only for a stale one; changed backup byte, changed capture, changed manifest; a kill at each ADR 0051 phase hook from the intent record on (a decodable `intent.tmp`, the destination's `intent`, and every later phase), the source lost or holding no restore lineage, then `--resume` reaching committed with the same plan bytes; a kill after the copy's last mode acknowledgement and before `destination_intent`'s first administrative entry, of a backup holding no restore lineage, then `--resume` reaching committed; **`--resume` before the intent record** (D71, D77): after each abandonment cut below, a `--resume` that does not commit prints the `--abandon` command and not the re-presentation command, and that `--abandon` followed by a fresh restore into the same `DESTINATION` commits, after which a `--resume` of the abandoned transaction refuses `restore_abandoned`; **probe** (D77): a second restore whose available source is itself a restored root (lineage 1), killed at the `source_retirement` phase hook, then `--resume` and `--abandon`, records the delivered outcome of the [residual window](#technical-adr-0072-restore); **abandonment** (D66, D67, D70): a kill after the first claim and before the intent record (in `inventory`, mid-`baseline_copy`, after the copy's last mode acknowledgement, inside `destination_intent` after its first administrative entry and after its `baseline`, and with a torn `intent.tmp`; and for an available source between its two claims, in each claim order), then `--abandon` releases the transaction's claims and removes the destination (leaves it untouched when it holds no destination claim), then a fresh restore succeeds and `RestoreGuard.state/1` of the original source root is no longer `restore_incomplete`; a kill during the removal, after it, between the two releases, and inside a release after its `owner` deletion, each followed by a rerun of `--abandon` reaching the same end; a rerun after completion prints `holds no claim` and writes nothing but its continuation record; `--resume` after a completed abandonment, and after one killed during its removal, refuses `restore_abandoned` with nothing written; a file placed in the claimed `DESTINATION` outside the baseline's paths and the administrative names makes `--abandon` refuse `destination_not_empty` naming it with nothing removed; `--abandon` with a decodable `intent.tmp`, with `intent`, and after commit refuses `restore_not_abandonable` with nothing but its continuation record written; another transaction's claim, an undecodable `owner`, and a claim directory holding `owner` beside another entry refuse `restore_conflict` with nothing removed; **owner-less claims** (D68): a claim directory left empty, or holding only `owner.tmp`, by a kill inside acquisition, at the destination and at an available source, and one left by a kill inside a release after its `owner` deletion, are removed by `--abandon`, after which `RestoreGuard.state/1` of that root is no longer `restore_incomplete`; a committed restore killed inside its source claim's release makes `--resume` print the `--abandon` command, and has that claim removed by `--abandon`, which refuses `restore_not_abandonable` for the held destination claim, and a following `--resume`, finding the intent record, does not refuse `restore_abandoned` and releases it with lookup current; an acquisition paused after creating its directory, and one paused after writing `owner.tmp`, while `--abandon` removes the directory, fail and hold no claim; an acquisition paused after creating its directory that publishes `owner` after `--abandon` listed the directory and before its `rmdir` keeps its claim, and `--abandon` refuses `restore_conflict`; a second `--abandon` paused after its listing against the first refuses `previous_restore_running`, and a fresh restore into `DESTINATION` while an abandonment is paused after its removal and before its release refuses `restore_conflict`; a `--resume` whose `DESTINATION` argument resolves to another directory than the plan's `destination_state_root` refuses `destination_path_invalid`, and one whose `BACKUP/state` differs from the plan's `backup_state_root` (a copied backup) refuses `backup_invalid`, each before the continuation record with nothing written; a run killed between retention steps 1 and 2, then `--resume`, creates `DESTINATION`, calls `restore/2` with `prior_admin_authority` `"none"` and commits, as does one killed after retention step 2 before `restore/2` published its claim; a `--resume` after a durable claim calls it with `"joined"`; a `--resume` into a destination that already holds part of the copy is not refused as `destination_not_empty`; `previous_restore_running`, and an earlier invoker the probe cannot verify recorded `unverifiable` without refusal; an available source whose holder the probe cannot verify is reported `unverifiable` and restored; a committed restore whose follow-up lookup a `Restore.IO` probe gate makes answer other than committed and `current` returns that lookup answer; an edited plan file gives `restore_conflict`; **two re-presentations** of one transaction paused at a private hook after their listing: exactly one links `continuation-N` and calls `restore/2`, and the other refuses `previous_restore_running` without calling it; one paused after taking `N` and before writing its temporary, while a second lists, takes the same `N` and proceeds: only one of the two links `continuation-N` and calls `restore/2`; a `continuation-1` that does not decode refuses `backup_invalid` naming it, and a leftover `continuation-1.tmp-*` is ignored; a run killed during retention step 1, after `attestation` and before `plan` is complete, makes `--resume` refuse `backup_invalid` naming `plan`, and `store restore` without `--resume` into the same destination then commits; with `continuation-1024` present, `--resume` refuses `inventory_limit_exceeded` with nothing written. Older backup: a session runs further after the backup, the root is moved aside, and `--source lost --discard-later-work` commits; the restored root serves the sessions as they were at the cut, and the retained `attestation` has `discard_later_work` `true` and the retained plan the discard form, both read back byte for byte; `--resume` of that transaction reuses those bytes. Refusals with nothing written: the flag with `--source available` (`discard_requires_lost_source`), the flag with `--resume` (`usage`), and a retained attestation whose flag disagrees with its plan (`backup_invalid`). Without the flag the plan carries the latest form unchanged. After every `commit_unknown` and `cleanup_unconfirmed` result the closed result map carries `Restore.lookup/3`'s answer. The separation refusals, the available source's included, are ADR 0037's `auth_separation_test.exs` cases. These cases call `StoreAdmin` and assert its closed result maps; the printed lines and exit statuses are `store_command_test.exs`'s |
 | `apps/loopex_executor_local/test/restore_codec_test.exs` (extended) | The discard attestation form round-trips exactly; a form carrying both `discard_later_work` and `latest_cut`, or `discard_later_work` `false`, is refused; the latest form's bytes are unchanged |
 | `apps/loopex_composition/test/restore_workflow_test.exs` (extended) | A plan with the discard form and `source_status` `available` refuses `invalid_plan` before any claim; with `lost` it commits and its receipt equals a latest-form restore's apart from the plan digest. **Job index** (D29): a backup whose `state/` holds `delegation/<runtime>/job-index-v1/` job and `coverage/` entries commits through `restore/2`, the destination holding those entries byte for byte and every manifest the transition records listing them, where the delivered `restore/2` refused it `invalid_current_history`; a resumed transaction of such a backup, cut after intent and re-presented, commits the same way; a member under `delegation/` that is neither the job index nor an admitted helper shape, such as `delegation/<runtime>/job-index-v2/entry` or a writer marker, still refuses `invalid_current_history` with nothing published |
 | `apps/loopex_cli/test/store_command_test.exs` | Grammar, defaults, exit statuses 0, 1 and 2, exact output lines including both statement forms, `--abandon`'s `usage` and `attestation_required` refusals, its abandoned, no-claim and `cleanup_unconfirmed` lines with exits 0, 0 and 2, `--resume`'s `--abandon` command line in place of the re-presentation command when no intent record exists, after `not_committed` with exit 1 and after `commit_unknown` with exit 2, and its `restore_abandoned` refusal with exit 1, exit 2 for a committed restore whose follow-up lookup is not committed and `current`, and after every `commit_unknown` and `cleanup_unconfirmed` result the printed `Restore.lookup/3` answer and, at `claim_release`, the committed-with-cleanup-pending line with exit 2; the printed ADR 0037 writer command parsed by ADR 0037's own parser to `/paths/state_root` = the physical destination, the `LOOPEX_HOME` precedence note, and the configuration file byte-identical after restore; **symbolic-link ancestors**: a root selected through a symbolic-link ancestor is served, backed up and restored into a destination given through another such alias, the printed destination is its physical path, and the restored root, selected through the alias, serves; **adopt's two spellings** (D45): `store adopt --state-root ALIAS`, `ALIAS` a symbolic-link alias of an unmarked root whose `receipts` ledger was bound through `ALIAS`, receives from `LoopexCli.Home` both the physical root and `ALIAS`'s `Path.expand/1` spelling, and commits with `receipts` rebound to the physical path; `store adopt` of an unmarked root whose `daemon/session-index-v1` is corrupt refuses `invalid_current_history` naming it and leaves the marker `adopting`; on the extracted [retained M7 root](#technical-adr-0072-m7-fixture) adopted through `StoreAdmin.test_adopt/3` with the product `:catalogue` reader, offline `sessions` lists the conversation session, the only one the M7 build catalogued, and adopt added no row; a first restore run under one `HOME` cut after intent, then `--resume` under a `HOME` whose `.loopex/auth` contains the plan's destination, refuses `auth_root_overlap /arguments/destination` with nothing written |
@@ -1945,7 +1959,9 @@ amended clauses are:
    - ADR 0051 Technical depth, reserved paths (`:228-230`): "Temp `*.tmp`
      paths belong solely to this original transition and are absent at
      commit; a persisted intent temp counts as possible intent, never as
-     harmless absence."
+     harmless absence." The same rule, transition step 3 (`:458`):
+     "Original tx/nonce/plan claim binds continuation even if visible intent
+     is malformed or missing."
    - Amended, for `store restore --abandon` only: an `intent.tmp` in the
      destination's `.loopex-restore/lineage/ORDINAL/` that
      `RestoreCodec.decode(:intent, _)` does not accept, beside an absent
@@ -1955,8 +1971,14 @@ amended clauses are:
      (abandonment step 4). An `intent.tmp` that decodes stays a possible
      intent. `restore/2`, lookup and every other reader treat a persisted
      intent temporary as ADR 0051 says; `StoreAdmin`'s intent check after a
-     `--resume` (D71) applies the same test only to print the `--abandon`
-     command or refuse `restore_abandoned`, writing nothing.
+     `--resume` (D71, D77) reads the records only to choose the command it
+     prints and to refuse `restore_abandoned`, writing nothing.
+   - ADR 0051 also requires a further reviewed recovery decision before the
+     sole intent or claim evidence of an unknown outcome is deleted
+     (technical depth `:487-489`, `:611`; concept `:150-153`, `:182-183`).
+     D66, D67 and D70 are that decision for `--abandon`, which removes such
+     evidence before the intent record; those sentences are not amended, and
+     the clause count is unchanged (D77).
 
 Everything else ADR 0051 decides applies unchanged to both attestation
 forms: same machine, same workspace identity, a complete unexcluded backup, an empty destination,
@@ -2018,7 +2040,12 @@ sixth amendment, and `--resume`'s outcomes before the intent record, its
 `--abandon` command, the continuation record's `action` and
 `restore_abandoned` as D71, that refusal narrowed by D74 to a transaction
 with no intent record, which the
-[re-presentation](#technical-adr-0072-restore) specifies.
+[re-presentation](#technical-adr-0072-restore) specifies. The ninth review's
+findings were decided as D77: those outcomes stated by phase, the
+`--abandon` command also printed for an owner-less claim, an intent check
+bound to the transaction, the further reviewed recovery decision ADR 0051
+requires, and the residual window of an available source that is a
+restored root.
 
 Acceptance of this record includes the fix choices the M8 internal review 2
 and holistic 2 to 8 dispositions list for it
