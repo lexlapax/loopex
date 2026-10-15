@@ -35,7 +35,8 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   refined by its mechanism (D65), ephemeral `ask`'s refusal of an unbound
   sign-in model (D73), and that registration as the lane's recorded step 0,
   whose every failure is a failed case (D76, superseding in part D64, D65,
-  D69 and D75)
+  D69 and D75), and the unrevoked grants the OpenAI and Google lanes leave
+  (D79)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -545,16 +546,18 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
    locally run apps, and sends paid or hosted apps to an interest form. Confirm
    that Loopex registers this way, and approve the `agent_name_hint` it
    presents. If OpenAI requires a partner client, submit the interest form.
-   The maintainer decided on 2026-10-14 (D64, D65, simplified by D76)
-   that the `real-sign-in-openai` lane performs this registration as its
-   recorded step 0, after its case starts: an attended sign-in and
+   The maintainer decided on 2026-10-14 (D64, D65, superseded in part by
+   D76) that the `real-sign-in-openai` lane performs this registration as
+   its recorded step 0, after its case starts: an attended sign-in and
    sign-out in the lane's own temporary home, which keeps the issued
    client. Any failure in step 0, OpenAI refusing the registration
    included, is a failed case. Only a missing host prerequisite, checked
    before the case starts, stops the lane with the evidence unavailable.
-   A run interrupted between step 0's sign-in and sign-out leaves that
-   home's tokens unrevoked, for the operator to revoke at OpenAI. The
-   lane's next sign-in then uses that issued client.
+   The lane's next sign-in then uses that issued client. The OpenAI lane's
+   last sign-in, and any sign-in of the OpenAI or Google lane that a
+   failure or interruption leaves before its sign-out, stays unrevoked;
+   the lane deletes its temporary home at its end, and the operator
+   revokes any leftover grant at the provider (D79).
 2. **Google client.** Create Loopex's Google OAuth desktop client in a Google
    Cloud project the maintainer owns, and decide when to pass verification for
    the `cloud-platform` scope. Until the app is verified, users see an
