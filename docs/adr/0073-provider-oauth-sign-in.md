@@ -596,7 +596,7 @@ own lane, which always runs, and a missing Google client disables only the
 `loopex` source of `vertex:`. The disabled `claude:` route is proved by its
 tested refusal and needs no deferral.
 
-Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 12](../process/agent-context-map.md#disposition-m8-holistic12-2026-10-14) dispositions list for it.
+Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 13](../process/agent-context-map.md#disposition-m8-holistic13-2026-10-14) dispositions list for it.
 
 ## Governance Record
 

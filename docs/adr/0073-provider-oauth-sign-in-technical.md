@@ -2069,7 +2069,7 @@ leftover grant; then `rm -rf PATH` (D82, D84). The operator reruns
 `service stop` until it reports `stopped` before `rm -rf`; in a `HOME`
 with no configuration file (the `real-sign-in-anthropic` lane's, or one
 whose lane was killed before `init`) it refuses `configuration_not_found`,
-meaning no service. The lane neither stops the service it leaves nor
+meaning no service. A service a killed lane was still spawning can take its lock after that `stopped`; the operator-cleanup residual includes it. The lane neither stops the service it leaves nor
 deletes its `HOME` or its transcript file; its steps' own service stop and
 restart (step 3) and logouts are not cleanup. After it ends, by pass,
 failure or kill, the operator runs those commands, a stated

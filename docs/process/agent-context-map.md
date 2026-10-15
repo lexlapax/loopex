@@ -8864,7 +8864,10 @@ prerequisite ADRs remain Proposed and M8 remains Open.
    and holistic 12 for the residual window; ADR 0072's lost-source check
    stated as checking only that the captured source path is absent; and
    the D67 and D71 evidence cells stating the `"next"` member. The
-   holistic 12 record now counts two P2s. The fix-choice lists of
+   holistic 12 record now counts two P2s. A service a killed lane was
+   still spawning, which can take its lock after the operator's
+   `service stop` reports `stopped`, is stated as part of D82's
+   operator-cleanup residual. The fix-choice lists of
    [internal review 2](#disposition-m8-internal-review2-2026-10-13) and
    holistic 2 to [12](#disposition-m8-holistic12-2026-10-14) remain listed
    for acceptance.
