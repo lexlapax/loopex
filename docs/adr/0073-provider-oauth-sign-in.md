@@ -581,7 +581,9 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
    the `cloud-platform` scope. Until the app is verified, users see an
    unverified-app screen, it is capped at 100 users, and in Testing status its
    refresh tokens expire after 7 days. The `adc` source works without this
-   client.
+   client. Both Google lanes also need a maintainer-owned Google Cloud
+   project with the Vertex AI API enabled; `real-sign-in-gemini-adc` needs
+   only that project.
 3. **Anthropic sanction.** Ask Anthropic whether it will sanction an OAuth
    client registration for Loopex, and on what terms. Until it does, `claude:`
    stays disabled.
@@ -601,7 +603,7 @@ own lane, which always runs, and a missing Google client disables only the
 `loopex` source of `vertex:`. The disabled `claude:` route is proved by its
 tested refusal and needs no deferral.
 
-Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 15](../process/agent-context-map.md#disposition-m8-holistic15-2026-10-14) dispositions list for it.
+Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 16](../process/agent-context-map.md#disposition-m8-holistic16-2026-10-14) dispositions list for it.
 
 ## Governance Record
 

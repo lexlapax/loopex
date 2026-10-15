@@ -2048,11 +2048,13 @@ and reach its loopback port, locally or forwarded with `ssh -L`, for the
 `real-sign-in-gemini`, read from the candidate's source of
 `Loopex.LLM.ReqLLM.SignIn.Profiles`, and `gcloud` for
 `real-sign-in-gemini-adc`; for both Google lanes, the maintainer-owned
-Google Cloud project ID, given to the lane before `start` and checked
-against the `vertex` `project` pattern above; and, for a reused
+Google Cloud project ID, entered by the operator at the terminal with the
+confirmation above, before `start`; and, for a reused
 `installed-artifact` case,
 the archive and its log at their recorded SHA-256 (the M8 plan's release
-check, item 5). A missing host prerequisite is the lane's only pre-start
+check, item 5). An absent project ID, or one that does not match ADR
+0073's `vertex` `project` pattern, is a missing host prerequisite. A
+missing host prerequisite is the lane's only pre-start
 stop: `not_dispatched`, evidence unavailable, resumable on the same
 commit, except that the compiled client is fixed by the candidate's source,
 so its stop resumes only on a candidate that carries it or defers the lane
@@ -2065,8 +2067,9 @@ its install and its configuration writes under `env -i` with only
 temporary directories, which its exit trap removes, and with `--store
 file` (D84). Here `PATH` alone names the lane's home directory; `"$PATH"`
 and "the `PATH` variable" name the search path, printed as its literal
-value. Every Loopex login a lane runs adds `--no-browser`, so it prints
-its URL for the operator's browser, and the `real-sign-in-gemini-adc`
+value. Every browser-flow login a lane runs (`auth login openai`,
+and `auth login gemini` with the `loopex` source) adds `--no-browser`, so
+it prints its URL for the operator's browser, and the `real-sign-in-gemini-adc`
 gcloud login runs with `--no-browser`. After `start` each
 `real-sign-in-*` lane prints to the terminal `<lane>: home PATH`, naming
 that `HOME`, and the operator's cleanup commands for it, bound to the
@@ -2079,11 +2082,12 @@ application-default revoke`; revocation at the provider of any other
 leftover grant; then `rm -rf PATH` (D82, D84, D85). Then, before its first
 step, it extracts the verified archive under that `HOME` and installs it
 at ADR 0038's documented location there by ADR 0038's install sequence
-without its `PATH` line, running `BIN version` in place of `loopex
-version`, so `BIN` is the `loopex` every step runs; each lane except
+without its `export PATH=…` line, running `BIN version` in place of
+`loopex version`, so `BIN` is the `loopex` every step runs; each lane except
 `real-sign-in-anthropic` then writes its configuration file with `BIN
-init` and `BIN config set`, binding only its route, `oauth` (for `vertex`
-with the maintainer-owned `project` and `location` `global`), and
+init` and `BIN config set`, binding only its route, `oauth` with source `adc` for
+`real-sign-in-gemini-adc` and `loopex` otherwise (for `vertex` with the
+maintainer-owned `project` and `location` `global`), and
 selecting its model; a failure there is a consumed failure of the case (D76). The
 operator reruns `service stop` until it reports `stopped` before `rm -rf`;
 a missing `BIN`, or a refusal `configuration_not_found` in a `HOME` with
@@ -2114,7 +2118,7 @@ leaves it valid for the operator's cleanup to revoke (D81). The lanes:
 
 - `real-sign-in-openai`, `steps=6`: (0) Loopex's dynamic client
   registration with OpenAI, an attended `loopex auth login openai --store
-  file` followed by `loopex auth logout openai` in the lane's own temporary
+  file --no-browser` followed by `loopex auth logout openai` in the lane's own temporary
   `HOME`, so the generation floor keeps the issued `oaiapp_...` client
   (D23); any failure in it, OpenAI refusing the registration included, is a
   consumed failure (D76); step (0)'s output heads the lane's redacted
