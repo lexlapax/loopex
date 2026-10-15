@@ -508,8 +508,10 @@ macOS user account whose shell profile loads no mise or Homebrew.
    set `com.apple.quarantine` (`0083;<hex now>;Safari;`) on the archive and,
    after `tar -xzf`, on every extracted entry, as a browser download and
    Archive Utility would leave them. Once the checksum matches, print
-   `installed-artifact: archive PATH SHA256`, the archive's path and
-   SHA-256, the line later lanes reuse the archive by. Run
+   `installed-artifact: archive PATH SHA256`, PATH being the archive's
+   absolute path in `<out-dir>` on the host that runs `smoke.sh` and SHA256
+   its SHA-256, the line
+   later lanes reuse the archive by. Run
    `/bin/sh bin/loopex-verify`. On
    macOS run the documented `xattr -dr` and assert that `xattr -lr` shows no
    quarantine attribute. Move the tree to the documented location.
@@ -565,7 +567,8 @@ macOS user account whose shell profile loads no mise or Homebrew.
    in the container less `/proc`, `/sys` and `/dev`; on macOS it is the
    invoking user's home, `/private/tmp`, `$TMPDIR` and `/Users/Shared`.
 
-Only after step 6 passes does `smoke.sh` print its last line,
+`smoke.sh` runs the steps in order, stops at the first that fails and exits
+1. Only after step 6 passes does it print its last line,
 `installed-artifact: PASS steps=6`, the line the release runner's
 script-lane judge requires.
 
