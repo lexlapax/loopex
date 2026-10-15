@@ -507,7 +507,10 @@ macOS user account whose shell profile loads no mise or Homebrew.
 1. **Download and verify.** Check the archive with its `.sha256`. On macOS,
    set `com.apple.quarantine` (`0083;<hex now>;Safari;`) on the archive and,
    after `tar -xzf`, on every extracted entry, as a browser download and
-   Archive Utility would leave them. Run `/bin/sh bin/loopex-verify`. On
+   Archive Utility would leave them. Once the checksum matches, print
+   `installed-artifact: archive PATH SHA256`, the archive's path and
+   SHA-256, the line later lanes reuse the archive by. Run
+   `/bin/sh bin/loopex-verify`. On
    macOS run the documented `xattr -dr` and assert that `xattr -lr` shows no
    quarantine attribute. Move the tree to the documented location.
 2. **Linkage and loaded images.** Run `assert-linkage.sh <platform> <root>
@@ -746,7 +749,8 @@ path resolution changes, and the digest verification before launch is kept.
 under the maintainer's pre-1.0 current-contract rule. An unsupported root is
 refused before any write, and recovery restores a backup under a build that
 reads the root's format; the M6 and M7 builds provide no operator restore,
-so a root they wrote is adopted. Keeping the previous install directory until a
+so a root they wrote is adopted or stays with the build that wrote it.
+Keeping the previous install directory until a
 replacement serves is the only "switch back", and it is safe only because the
 refused root was never written. No earlier build is assumed to contain a
 restore command, an installed layout or the marker check.
@@ -786,7 +790,7 @@ in an `ubuntu:22.04` container with OpenSSL 3 linked statically, never from
 the build host's runtime; the macOS quarantine-removal step after manifest
 verification, without signing or notarization; and current-format roots only,
 with recovery by backup and restore under a build that reads its format (an
-M7-written root is adopted, ADR 0072); and the
+M7-written root is adopted or stays with the build that wrote it, ADR 0072); and the
 clarifying reading of ADR 0003's "no compiler" as "no build toolchain", with
 the OTP `compiler` application shipped as a runtime dependency of Elixir.
 

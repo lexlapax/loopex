@@ -265,7 +265,9 @@ relaxes for a lost source; its rule that an owner-less claim is
 stranded, which `store restore --abandon` relaxes for a claim directory
 holding nothing or only `owner.tmp` (D68); and its rule that a persisted
 intent temporary counts as possible intent, which `--abandon` alone relaxes
-for an `intent.tmp` that does not decode beside an absent `intent` (D70). M8 changes `restore/2` to leave the disposable
+for an `intent.tmp` that does not decode beside an absent `intent` (D70)
+(`--resume`'s intent check reads the records only to choose its printed
+command and to refuse `restore_abandoned`, writing nothing; D71, D74, D77). M8 changes `restore/2` to leave the disposable
 helper job index out of its audit index, as adopt and backup do, while still
 copying it (D29); no ADR 0051 sentence governs that, and it narrowly amends
 ADR 0056's complete helper-namespace audit (D35). It also narrowly amends ADR

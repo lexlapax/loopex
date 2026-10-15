@@ -20,7 +20,10 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   untouched-paths statement narrowed to what the service's own stop and
   start touch, and the closure matrix completed with `m7-adopt`,
   `m7-adopt-lock` and D36's deferral, and the daemon's discard of
-  `LOOPEX_PROVIDER_API_KEY` stated with its binding exception, on 2026-10-14
+  `LOOPEX_PROVIDER_API_KEY` stated with its binding exception, on 2026-10-14;
+  the recovery of an M6 or M7 root stated as adoption or the build that wrote
+  it, and the installed lane's archive line named, after the ninth internal
+  review on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
@@ -130,7 +133,7 @@ minimal runtime distribution carries no compiler.
    release over a root this release wrote. Recovery is a backup restored under
    a build that reads the root's format, with ADR 0072's commands for the
    current format; the M6 and M7 builds provide no operator restore, so a
-   root they wrote is adopted.
+   root they wrote is adopted or stays with the build that wrote it.
 8. **macOS uses a documented quarantine-removal step, not signing.** The
    maintainer chose on 2026-10-13 that the macOS archive is neither signed nor
    notarized. The operator verifies the archive against its checksum file,
@@ -209,6 +212,10 @@ that reads its format, with ADR 0072's commands for the current format; the
 M6 and M7 builds provide no operator restore. The installed demonstration proves the
 refusal and the same-build restore together, so that "restart the old binary"
 is never mistaken for a plan.
+
+## Open for the Maintainer
+
+None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 9](../process/agent-context-map.md#disposition-m8-holistic9-2026-10-14) dispositions list for it.
 
 ## Governance Record
 

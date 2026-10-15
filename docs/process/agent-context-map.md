@@ -57,7 +57,7 @@ starting from the founding vision and moving to the implemented subsystems.
 | Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
 | Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
 | M7 coding-agent proof | [M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | Closed 2026-10-13 under its [closure disposition](#disposition-m7-closure-2026-10-13). ADRs 0041–0049 and the narrow vision amendment were accepted with it. Read the [external review](../evidence/M7-external-review-1.md), [scope decisions](#disposition-m7-audit-scope-2026-09-30) and [thinking-continuation choice](#disposition-m7-thinking-continuation-2026-09-30), [authorized section 13.4 amendment](#disposition-m7-continuation-vision-amendment-2026-09-30), [round 5 decisions](#disposition-m7-round5-outage-2026-09-30) and [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) for the decisions behind it. |
-| M8 installed-operator planning | [Open M8 plan](../plans/M8.md#concept) | [Prerequisites and proof](../plans/M8-technical.md#technical-depth) | Open for planning after M7 closed; no product implementation. Read the [opening record](#disposition-m8-opening-2026-09-30), the [rebase record](#disposition-m8-rebase-2026-10-13), the [scope record](#disposition-m8-scope-2026-10-13), the [detail record](#disposition-m8-detail-2026-10-13), the readiness records [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), [final pass](#disposition-m8-final-pass-2026-10-14), [holistic](#disposition-m8-holistic-2026-10-14), [holistic 2](#disposition-m8-holistic2-2026-10-14), [holistic 3](#disposition-m8-holistic3-2026-10-14), [holistic 4](#disposition-m8-holistic4-2026-10-14), [holistic 5](#disposition-m8-holistic5-2026-10-14), [holistic 6](#disposition-m8-holistic6-2026-10-14), [holistic 7](#disposition-m8-holistic7-2026-10-14) and [holistic 8](#disposition-m8-holistic8-2026-10-14) records, and Proposed ADRs 0037, 0038, 0071, 0072 and 0073. ADR 0072 builds on accepted ADR 0051's restore. ADR 0073 adds provider sign-in as outcome 8. ADR 0036 covers only the M9 engine, migration and capacity refusal. |
+| M8 installed-operator planning | [Open M8 plan](../plans/M8.md#concept) | [Prerequisites and proof](../plans/M8-technical.md#technical-depth) | Open for planning after M7 closed; no product implementation. Read the [opening record](#disposition-m8-opening-2026-09-30), the [rebase record](#disposition-m8-rebase-2026-10-13), the [scope record](#disposition-m8-scope-2026-10-13), the [detail record](#disposition-m8-detail-2026-10-13), the readiness records [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), [final pass](#disposition-m8-final-pass-2026-10-14), [holistic](#disposition-m8-holistic-2026-10-14), [holistic 2](#disposition-m8-holistic2-2026-10-14), [holistic 3](#disposition-m8-holistic3-2026-10-14), [holistic 4](#disposition-m8-holistic4-2026-10-14), [holistic 5](#disposition-m8-holistic5-2026-10-14), [holistic 6](#disposition-m8-holistic6-2026-10-14), [holistic 7](#disposition-m8-holistic7-2026-10-14), [holistic 8](#disposition-m8-holistic8-2026-10-14) and [holistic 9](#disposition-m8-holistic9-2026-10-14) records, and Proposed ADRs 0037, 0038, 0071, 0072 and 0073. ADR 0072 builds on accepted ADR 0051's restore. ADR 0073 adds provider sign-in as outcome 8. ADR 0036 covers only the M9 engine, migration and capacity refusal. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Architecture as implemented | [Architecture](../developer/architecture.md#concept) | [Architecture invariants and mechanics](../developer/architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
@@ -368,7 +368,7 @@ end of the file.
 | M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27); [implementation start](#disposition-m6-implementation-start-2026-09-27) |
 | M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30), [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30) and [proposed rollback retarget](#disposition-m7-round5-rollback-proposal-2026-09-30); [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) and [proposed logical-matrix rule](#disposition-m7-round6-matrix-proposal-2026-09-30); earlier choices remain recorded in the [M7 plan](../plans/M7.md#concept) |
 | M7 acceptance, 2026-09-30 | [Plan pair, ADRs 0041–0049 and paired vision amendments accepted](#disposition-m7-acceptance-2026-09-30); implementation may begin under the accepted ownership sequence |
-| M8 planning, from 2026-09-30 | [Opened as the planning successor](#disposition-m8-opening-2026-09-30); [rebased onto the closed M7 baseline](#disposition-m8-rebase-2026-10-13); [rescoped to the delivered M7 baseline](#disposition-m8-scope-2026-10-13) with four maintainer decisions that settle choices C1 to C3 and supersede P3; [completed for implementation](#disposition-m8-detail-2026-10-13) with P1, P2 and P4 to P8 accepted, service-hosted helpers and provider sign-in added, and only provider registrations and acceptance of the listed fix choices left open; revised after readiness reviews [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), the [final pass](#disposition-m8-final-pass-2026-10-14) and the holistic rounds [1](#disposition-m8-holistic-2026-10-14), [2](#disposition-m8-holistic2-2026-10-14), [3](#disposition-m8-holistic3-2026-10-14), [4](#disposition-m8-holistic4-2026-10-14), [5](#disposition-m8-holistic5-2026-10-14), [6](#disposition-m8-holistic6-2026-10-14), [7](#disposition-m8-holistic7-2026-10-14) and [8](#disposition-m8-holistic8-2026-10-14), with maintainer decisions D16 to D75 |
+| M8 planning, from 2026-09-30 | [Opened as the planning successor](#disposition-m8-opening-2026-09-30); [rebased onto the closed M7 baseline](#disposition-m8-rebase-2026-10-13); [rescoped to the delivered M7 baseline](#disposition-m8-scope-2026-10-13) with four maintainer decisions that settle choices C1 to C3 and supersede P3; [completed for implementation](#disposition-m8-detail-2026-10-13) with P1, P2 and P4 to P8 accepted, service-hosted helpers and provider sign-in added, and only provider registrations and acceptance of the listed fix choices left open; revised after readiness reviews [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), the [final pass](#disposition-m8-final-pass-2026-10-14) and the holistic rounds [1](#disposition-m8-holistic-2026-10-14), [2](#disposition-m8-holistic2-2026-10-14), [3](#disposition-m8-holistic3-2026-10-14), [4](#disposition-m8-holistic4-2026-10-14), [5](#disposition-m8-holistic5-2026-10-14), [6](#disposition-m8-holistic6-2026-10-14), [7](#disposition-m8-holistic7-2026-10-14), [8](#disposition-m8-holistic8-2026-10-14) and [9](#disposition-m8-holistic9-2026-10-14), with maintainer decisions D16 to D77 |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -8455,7 +8455,8 @@ new decision. All five prerequisite ADRs remain Proposed and M8 remains Open.
    `rotate/3`; exchange processes spawned with no secret and running their
    body in `try`; `CredentialCache` taking the whole merged map; `Edges`'
    `sign_in_routes` shape rule; `Preflight` building no default for a
-   `:sign_in` route and ephemeral `ask`'s presence check; and in-host
+   `:sign_in` route and ephemeral `ask`'s presence check (its code decided
+   as D73); and in-host
    `open/4` skipping the environment step.
 
 <a id="disposition-m8-holistic7-2026-10-14"></a>
@@ -8604,4 +8605,65 @@ remain Proposed and M8 remains Open.
    The fix-choice lists of
    [internal review 2](#disposition-m8-internal-review2-2026-10-13) and
    holistic 2 to [7](#disposition-m8-holistic7-2026-10-14) remain listed
+   for acceptance.
+
+<a id="disposition-m8-holistic9-2026-10-14"></a>
+### M8 internal holistic review round 9 answered — 2026-10-14
+
+A ninth internal holistic review round at `77fb815a` found no P1, P2s in
+the OpenAI lane's registration prerequisite, `--resume`'s pre-intent
+outcomes and an owner-less claim after a committed restore, and the
+next-candidate refusals of a failed lane, and P3s across the five ADRs, the
+plan and governance. The maintainer decided D76 and D77 on 2026-10-14, both
+simplifications that remove per-case machinery; the other items were fixed
+without a new decision. All five prerequisite ADRs remain Proposed and M8
+remains Open.
+
+1. **OpenAI registration as step 0 (D76)**, superseding the pre-start-stop
+   parts of D64, D65, D69 and D75: the lane's login and logout is the
+   case's recorded step 0, run after `start`; any failure in it is a
+   consumed failure with no classification, and the only pre-start stop is
+   a missing host prerequisite, the browser confirmation taken first. Step
+   0's transcript heads the lane's owner-only transcript file, whose
+   second-redactor output is the case LOG; the lane counts 6 steps.
+2. **Restore recovery by phase (D77)**, simplifying D71: before the intent
+   record `--resume` commits an exact complete copy or answers not restored
+   or unresolved, printing the `--abandon` command whenever it does not
+   commit and whenever an owner-less claim lies beside a root the plan
+   names; the intent check counts only this transaction's record, reading
+   at most 65,536 bytes; tests assert the printed command, not per-cut exit
+   codes. D66, D67 and D70 are ADR 0051's further reviewed recovery
+   decision, the clause count unchanged; a restore whose available source
+   is itself a restored root, killed after the destination's intent and
+   before the restore writes to the source, is a stated ADR 0072 residual
+   with a probe row.
+3. **Choices made in the fixes without a maintainer decision, listed for
+   acceptance:** on another candidate, the refusals the delivered admission
+   gives a failed lane (`prior_failure_unauthorized` through `:auto` or a
+   join, `post_head_consumed_case` only for a fresh `release-matrix` and
+   lanes admitted as new); `--create` without `--predecessor` creating
+   `created-<campaign>` in `--markers DIR` exclusively and refusing
+   `attempt_evidence_exists`; a `--predecessor` whose genesis campaign is
+   not `m8-closure-*` refused `invalid_matrix_arguments`; campaign numbers
+   as positive decimals without leading zeros; `installed-artifact` step 1
+   printing `installed-artifact: archive PATH SHA256`; the five-element
+   readiness value, its reasons and `Delegation.incomplete/1`'s match
+   landing with W1 at step 4; an ADR 0038 open section carrying the
+   acceptance sentence; the `runtime_page_read` pause placed in the
+   `Store.Local` client function; `doctor`'s `credentials` empty for an
+   invalid file; the test removing the `runtime_page_read` hook after the
+   cut; "provider" read as "route" in ADR 0073's and the plan's binding
+   selection; and the `excluded_env_names` union stated in ADR 0073 at the
+   refresher and the plane. For restore in ADR 0072: a rerun of a completed
+   `--abandon` writing nothing but its continuation record;
+   `{:abandon_claims, plan}` also returning the intent observation, with
+   `{:restore_lookup, root, tx_id}` run in the same guardian; only checked
+   destination entries removed, a failing `rmdir` giving
+   `destination_not_empty` and a rerun rechecking; the `claim_release` line
+   text; the residual window narrowed to before the first source write, with
+   the probe at the `source_retirement` hook; an intent-check read error
+   counting as an intent record; and the `destination_not_empty` failure-row
+   text. The fix-choice lists of
+   [internal review 2](#disposition-m8-internal-review2-2026-10-13) and
+   holistic 2 to [8](#disposition-m8-holistic8-2026-10-14) remain listed
    for acceptance.
