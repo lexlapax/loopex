@@ -939,7 +939,9 @@ for a service that exited 125.
   adapter gains discovery authority, extension-source admission is unchanged,
   and "no test or helper may point at a real one" stands: the CLI test helper
   sets `HOME` to its temporary root beside `LOOPEX_HOME` and fails before any
-  test if either escapes it.
+  test if either escapes it; the attended `m8-operator` record, in the
+  separate macOS user account ADR 0038 names, is that rule's attended opt-in
+  (M8 D87).
 - **ADR 0049, narrowly amended.** `--config` becomes optional on `chat`,
   `config validate` and `config show` when a home is selected, and `loopex
   ask` accepts it and uses only `providers`, for the providers they name

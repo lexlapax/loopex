@@ -22,7 +22,7 @@ not before unrelated work. None leaves a value to be fixed at acceptance.
 
 | Decision | Outcomes | Accepted text it amends or clarifies | Acceptance point |
 | --- | --- | --- | --- |
-| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | 2, 4; the `--service` start for 5 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept): one home-reading exception for `LoopexCli.Home`. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): `--config` optional when a home is selected, and `loopex ask` accepts it, taking only `providers` for the providers they name (D54, D57). [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept), applied: `daemon.readiness` joins the `loopex.experimental/4` manifest's `methods` inventory and result definitions, and the manifest digest is recomputed by ADR 0044's recipe and pinned. Reuses ADRs 0031, 0032 and 0046 | Before the placement lock primitive's extraction with its link publication (step 2), `SignIn.Separation` (step 3), `LoopexCli.Home`, the configuration writers, `ServiceStart` with its service record, status 125, `Service`, `paths`, `doctor`, `daemon.readiness`, or `ask`'s `--config` in `AskOptions` and `Ask.prepare/2` |
+| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | 2, 4; the `--service` start for 5 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept): one home-reading exception for `LoopexCli.Home`, and `m8-operator` as the attended opt-in of its no-real-home test rule (D87). [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): `--config` optional when a home is selected, and `loopex ask` accepts it, taking only `providers` for the providers they name (D54, D57). [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept), applied: `daemon.readiness` joins the `loopex.experimental/4` manifest's `methods` inventory and result definitions, and the manifest digest is recomputed by ADR 0044's recipe and pinned. Reuses ADRs 0031, 0032 and 0046 | Before the placement lock primitive's extraction with its link publication (step 2), `SignIn.Separation` (step 3), `LoopexCli.Home`, the configuration writers, `ServiceStart` with its service record, status 125, `Service`, `paths`, `doctor`, `daemon.readiness`, or `ask`'s `--config` in `AskOptions` and `Ask.prepare/2` |
 | [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | 1, 6; the installed refusal and restore step of 7 | [ADR 0003](../adr/0003-extension-contract-boundary.md#concept) obligation 4: "no compiler" read as "no build toolchain". Applies [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) and ADR 0034 to the relocated companion unchanged | Before the release definition in the umbrella `mix.exs`, `scripts/release/`, the launcher's installed mode, `loopex-verify`, `--relocatable` or `loopex version` |
 | [ADR 0071](../adr/0071-daemon-attached-conversation.md#concept) | 4 (the service's configuration reader), 5 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept): nullable `trace` and `policy` in the status record. [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept): the activation ceiling, which counts helper children as decided on 2026-10-13, with any consequent [ADR 0046](../adr/0046-child-session-tool.md#concept) refusal-order clause ADR 0071 states. [ADR 0055](../adr/0055-remote-session-creation-options.md#concept): creation options on a helper-enabled service. Applies ADRs 0033, 0046, 0056 and 0069 | Before `daemon --config`, `AttachedChat`, `DaemonSession`, `ChatProjection`, the `ExitStatus` block 111 to 115, `Helper.bind_activation_permit/2`, or any helper-parent creation in the daemon |
 | [ADR 0072](../adr/0072-store-readiness-marker-backup-and-restore.md#concept) | 3, 7 | [ADR 0051](../adr/0051-current-format-physical-restore.md#concept), four clauses: the absence of a backup CLI, the latest-backup-only restriction relaxed by `--discard-later-work` for a lost source, the stranded owner-less claim that `store restore --abandon` removes (D68), and the persisted intent temporary, which `--abandon` alone reads as absence when it does not decode beside an absent `intent` (D70) (the intent check `--abandon` shares with `--resume` writes nothing, and on `--resume` only chooses its printed command and the `restore_abandoned` refusal; D71, D74, D77, D78). M8's `Restore.restore/2` leaves the disposable helper job index out of its audit index (D29), which no ADR 0051 sentence governs; [ADR 0056](../adr/0056-host-helper-ledger-recipe.md#concept)'s complete helper-namespace audit is narrowly amended for it (D35). [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept): `store adopt` may replace an executor ledger generation bound through the selected alias with a fresh-epoch generation bound to the physical path, carrying its open authority unchanged (D45, D48), the resource-pack receipts ledger only when it holds neither an open entry nor a receipt (D55, D59). Takes the operator backup and restore work out of Proposed ADR 0036 | Before the `loopex-placement-v2` lock record and the `loopex_store_writer_v3` writer marker (D33, step 2), `RootFormat`, the marker checks in `Placement` and `compose/1`, `StoreAdmin`, `LoopexCli.Store`, the `RestoreCodec` discard form, the format-1 fixture test, the `ExitStatus` block 116 to 119, or status 124 |
@@ -61,7 +61,8 @@ outcome (technical lines 487-489 and 611, concept lines 150-153 and
 182-183; line 458, the same rule as lines 228-230, is quoted in ADR 0072's
 sixth amendment; D77), leaving its transition unchanged. Through ADR 0038, D10
 reads ADR 0003's "no compiler" as "no build toolchain". Through ADR 0037,
-D54 and D57 extend ADR 0049's `--config` to `ask`. Through ADR 0073, D14
+D87 makes `m8-operator` the attended opt-in of ADR 0003's no-real-home test
+rule, and D54 and D57 extend ADR 0049's `--config` to `ask`. Through ADR 0073, D14
 adds `provider_sign_in_required` to ADR 0029's bounded vocabulary, D42 adds
 a `daemon.stopping` reason to ADR 0032, D37, D40, D56 and D61 widen ADR
 0039's host-VM credential audience together with the vision and `AGENTS.md`
@@ -167,13 +168,15 @@ Constraints that hold across workstreams:
   The service adds no service-wide slot; the router's 4,096 shared rows and
   ADR 0032's activation ceiling bound it.
 - **No credential in tests or logs.** Every test except `m8-operator`
-  uses a temporary `HOME` and keychains and a temporary state root (a temporary `LOOPEX_HOME`, or, for the
-  `installed-artifact` and `real-sign-in-*` lanes, the root named by the
-  configuration file `init` writes under their temporary `HOME`,
-  `real-sign-in-anthropic` writing none, which D86 reads as satisfying the
-  temporary-`LOOPEX_HOME` rule); `m8-operator` alone runs in the separate
-  macOS user account ADR 0038 names, the attended opt-in of vision-technical
-  §23.2 (D86); apart from the read-only absence query below, no test touches
+  uses a temporary `HOME` and keychains and a temporary state root (a
+  temporary `LOOPEX_HOME` or a temporary root named by `--state-root` or
+  `--config`, or, for the `installed-artifact` and `real-sign-in-*` lanes,
+  the root named by the configuration file `init` writes under their
+  temporary `HOME`, whose `$HOME/.loopex` D86 reads as satisfying the
+  temporary-`LOOPEX_HOME` rule (`real-sign-in-anthropic` writes no file and
+  uses no root)); `m8-operator` alone runs in the separate macOS user account
+  ADR 0038 names, the attended opt-in of vision-technical §23.2 (D86) and of
+  ADR 0003's no-real-home test rule (D87); apart from the read-only absence query below, no test touches
   a real keyring or login keychain.
   The attended `real-sign-in-*` lanes are no exception: each signs in under
   its temporary `HOME` with `--store file` (ADR 0073's owner-only file
@@ -302,14 +305,16 @@ Concept: [Verification](M8.md#concept-plan-verification).
 Test files are new unless marked extended. "Fast" means `bash
 scripts/check.sh`; release lanes run under `bash scripts/check-release.sh
 --only LANE` before a merge that changes their boundary and once in the
-closure matrix. Every case uses a temporary `HOME` and workspaces and a
-temporary state root (a temporary `LOOPEX_HOME`, or, for the
-`installed-artifact` and `real-sign-in-*` lanes, the root named by the
-configuration file `init` writes under their temporary `HOME`,
-`real-sign-in-anthropic` writing none, which D86 reads as satisfying the
-temporary-`LOOPEX_HOME` rule); `m8-operator` alone runs in the separate
-macOS user account ADR 0038 names, the attended opt-in of vision-technical
-§23.2 (D86).
+closure matrix. Every case except `m8-operator` uses a temporary `HOME` and
+workspaces and, where it has one, a temporary state root (a temporary
+`LOOPEX_HOME` or a temporary root named by `--state-root` or `--config`, or,
+for the `installed-artifact` and `real-sign-in-*` lanes, the root named by
+the configuration file `init` writes under their temporary `HOME`, whose
+`$HOME/.loopex` D86 reads as satisfying the temporary-`LOOPEX_HOME` rule
+(`real-sign-in-anthropic` writes no file and uses no root)); `m8-operator`
+alone runs in the separate macOS user account ADR 0038 names, the attended
+opt-in of vision-technical §23.2 (D86) and of ADR 0003's no-real-home test
+rule (D87).
 
 **Closure matrix (D18, revised).** The full `bash scripts/check-release.sh`
 runs once on the Linux x86-64 host `serenity`, with the M8 attempts index
@@ -354,8 +359,9 @@ checked where they land and recorded there: items 11 to 15 by
 by `sign_in_model_admission_test.exs` and `sign_in_refresh_test.exs`, and
 item 16 by the tagged `sign_in_keychain_test.exs`. Items 2 and 5 are settled by the
 provider actions [below](#technical-plan-open), which gate only the
-`real-sign-in-openai` and `real-sign-in-gemini` lanes. None becomes a silent
-default.
+`real-sign-in-*` lanes: item 1 `real-sign-in-openai`, item 2's client
+`real-sign-in-gemini`, and item 2's Google project both Google lanes. None
+becomes a silent default.
 
 Under D16, closing outcome 8 requires positive proof from
 `real-sign-in-openai`, `real-sign-in-gemini` and `real-sign-in-gemini-adc`.
@@ -662,11 +668,13 @@ unchanged (`git diff main m8 -- apps scripts` is empty); `matrix.ex` below is
    sequence without its `export PATH=…` line, running `BIN version` in place of
    `loopex version`, so `BIN` is the `loopex` every step runs; each lane
    except `real-sign-in-anthropic` then writes its configuration file with
-   `BIN init` and `BIN config set`, binding only its route, `oauth` with
-   source `adc` for `real-sign-in-gemini-adc` and `loopex` otherwise (for
-   `vertex` with the maintainer-owned `project` and `location` `global`),
-   and selecting its model; a failure there is a consumed failure of the case
-   (D76). The operator reruns `service stop` until it reports `stopped`
+   `BIN init`, whose required environment binding names a provider without
+   sign-in, then with `BIN config set` binds its route, `oauth` with source
+   `adc` for `real-sign-in-gemini-adc` and `loopex` otherwise (for `vertex`
+   with the maintainer-owned `project` and `location` `global`), sets its
+   model to that route, and replaces `/providers` with that route's binding
+   alone, so the file binds only its route; a failure there is a consumed
+   failure of the case (D76). The operator reruns `service stop` until it reports `stopped`
    before `rm -rf`; a missing `BIN`, or a refusal `configuration_not_found`
    in a `HOME` with no configuration file (the `real-sign-in-anthropic`
    lane's, or one whose lane was killed before its `init`), means no
@@ -1165,7 +1173,7 @@ on them. A lane whose action is not done by the
 closure candidate is deferred under D36, its route shipping disabled (D43),
 or blocks closure. Acceptance of the fix choices the
 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13)
-and holistic 2 to [16](../process/agent-context-map.md#disposition-m8-holistic16-2026-10-14)
+and holistic 2 to [17](../process/agent-context-map.md#disposition-m8-holistic17-2026-10-14)
 dispositions list also remains open.
 
 1. **OpenAI client.** Confirm that Loopex registers by Sign in with ChatGPT's

@@ -2085,10 +2085,12 @@ at ADR 0038's documented location there by ADR 0038's install sequence
 without its `export PATH=…` line, running `BIN version` in place of
 `loopex version`, so `BIN` is the `loopex` every step runs; each lane except
 `real-sign-in-anthropic` then writes its configuration file with `BIN
-init` and `BIN config set`, binding only its route, `oauth` with source `adc` for
+init`, whose required environment binding names a provider without sign-in,
+then with `BIN config set` binds its route, `oauth` with source `adc` for
 `real-sign-in-gemini-adc` and `loopex` otherwise (for `vertex` with the
-maintainer-owned `project` and `location` `global`), and
-selecting its model; a failure there is a consumed failure of the case (D76). The
+maintainer-owned `project` and `location` `global`), sets its model to that
+route, and replaces `/providers` with that route's binding alone, so the file
+binds only its route; a failure there is a consumed failure of the case (D76). The
 operator reruns `service stop` until it reports `stopped` before `rm -rf`;
 a missing `BIN`, or a refusal `configuration_not_found` in a `HOME` with
 no configuration file (the `real-sign-in-anthropic` lane's, or one whose
@@ -2524,7 +2526,7 @@ outcome gates a lane.
 | 2 | Whether OpenAI requires a partner client ID rather than dynamic registration | Settled by the maintainer's provider action under [open item 1](0073-provider-oauth-sign-in.md#concept-adr-0073-open), which gates `real-sign-in-openai`; the lane does not settle it. Its recorded step (0), an attended `auth login openai` and `auth logout openai` in the lane's own `HOME` after the case starts, performs the dynamic registration; any failure in it, OpenAI refusing the registration included, is a consumed failure of the case (D76). A partner client would amend this record |
 | 3 | A documented allowed-model list for plan usage | Implementation. Only the per-account listing is documented and is what the route uses, through `model_list`; `sign_in_model_admission_test.exs` refuses an unlisted model with `provider_route_unavailable` |
 | 4 | An official OpenAI statement of the launch date | None needed. No rule depends on the date; it is research context only |
-| 5 | Whether Google classifies `cloud-platform` as sensitive or restricted | Settled by the maintainer's provider action under [open item 2](0073-provider-oauth-sign-in.md#concept-adr-0073-open), which gates `real-sign-in-gemini`; the lane does not record it. It sets the Google client's verification path, not code; the `adc` source does not depend on it |
+| 5 | Whether Google classifies `cloud-platform` as sensitive or restricted | Settled by the maintainer's provider action under [open item 2](0073-provider-oauth-sign-in.md#concept-adr-0073-open), whose client gates `real-sign-in-gemini`; the lane does not record it. It sets the Google client's verification path, not code; the `adc` source does not depend on it |
 | 6 | Google's stated access-token lifetime | Implementation. The refresher reads `expires_in`, assumes no fixed value and scales the custody skew with it; `sign_in_refresh_test.exs` covers a 30 s lifetime and one below the 10 s minimum |
 | 7 | The ADC `authorized_user` member names, and that gcloud's default login grants `openid` | Implementation. `sign_in_adc_test.exs` fixes the grammar; the `real-sign-in-gemini-adc` lane reads a file written by real gcloud and must pass the grammar and return a verifiable ID token. A difference amends the grammar, never silently widens it |
 | 8 | The regional Vertex host form | Acceptance, checked 2026-10-13: Google's Vertex AI [locations](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) page gives `https://{LOCATION}-aiplatform.googleapis.com` beside the global `https://aiplatform.googleapis.com` |
