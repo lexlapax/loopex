@@ -497,7 +497,9 @@ the host's certificate bundle bind-mounted read-only at
 in an OpenSSL), and the same two credential variables passed by name alone,
 `docker run --env ANTHROPIC_API_KEY --env OPENAI_API_KEY`, so no value
 enters argv, and the retained M7 root's archive that step 5 uses
-bind-mounted read-only. It asserts the
+bind-mounted read-only. `smoke.sh` runs on the host and runs steps 1 to 6
+in the container, with `<out-dir>` bind-mounted read-only at the same
+absolute path. It asserts the
 same absent commands, records `dpkg -l`, and finds no `beam.smp` or `erl`
 outside the install. The attended outcome-6 record on macOS uses a separate
 macOS user account whose shell profile loads no mise or Homebrew.

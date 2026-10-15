@@ -24,7 +24,9 @@ Technical depth: [Build recipe, artifact contents, install and smoke proofs](003
   the recovery of an M6 or M7 root stated as adoption or the build that wrote
   it, and the installed lane's archive line named, after the ninth internal
   review on 2026-10-14; the archive line's path stated on the host that runs
-  the lane and its exit status on a failed step, after the tenth internal review on 2026-10-14
+  the lane and its exit status on a failed step, after the tenth internal review on 2026-10-14;
+  `smoke.sh` stated to run on the host and its steps in the Linux container,
+  after the eleventh internal review on 2026-10-14
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing. It applies [ADR 0003](0003-extension-contract-boundary.md#concept)'s
   rule that a minimal runtime distribution carries no compiler, and
@@ -216,7 +218,7 @@ is never mistaken for a plan.
 
 ## Open for the Maintainer
 
-None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 10](../process/agent-context-map.md#disposition-m8-holistic10-2026-10-14) dispositions list for it.
+None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 11](../process/agent-context-map.md#disposition-m8-holistic11-2026-10-14) dispositions list for it.
 
 ## Governance Record
 
