@@ -228,7 +228,7 @@ table has a gap. ADR 0037's refusal of a state root that overlaps
 the sign-in directory, and of an unusable `HOME` (`home_unavailable`), and
 ADR 0073's refusal of a disabled sign-in route (`sign_in_unavailable`, D52)
 reuse this record's 111, `configuration_invalid`.
-Nothing in this record remains open. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 11](../process/agent-context-map.md#disposition-m8-holistic11-2026-10-14) dispositions list for it.
+Nothing in this record remains open. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 12](../process/agent-context-map.md#disposition-m8-holistic12-2026-10-14) dispositions list for it.
 
 ## Governance Record
 

@@ -766,10 +766,10 @@ unchanged (`git diff main m8 -- apps scripts` is empty); `matrix.ex` below is
    `real-sign-in-openai` step 0's transcript heads (item 3); at its end it
    passes that file through a second redactor run, given those values on
    descriptor 3 and applying ADR 0073's JWS-shaped pattern, writes only that
-   run's output to standard output, deletes the file and, when every step
+   run's output to standard output and, when every step
    passed, prints its `PASS steps=N` line last, so the redacted transcript
-   ends with it; it neither stops the service it leaves nor deletes its
-   temporary `HOME`, whose path and cleanup commands it printed to the
+   ends with it; it neither stops the service it leaves nor deletes the
+   transcript file or its temporary `HOME`, whose path and cleanup commands it printed to the
    terminal before its first step (item 3, D82). `m8-operator`'s record is
    made in the separate macOS user account ADR 0038 names: the lane hands
    that account the verified archive, waits at the terminal while the

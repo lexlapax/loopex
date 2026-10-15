@@ -8796,8 +8796,8 @@ remains Open.
 3. **Choices made in the fixes without a maintainer decision, listed for
    acceptance:** the home line and cleanup commands printed to the
    terminal rather than to standard output; the lane stated as neither
-   stopping the service it leaves nor deleting its `HOME`, while still
-   deleting its redacted transcript file after the second redactor run.
+   stopping the service it leaves nor deleting its transcript file or its
+   `HOME`, which the operator's `rm -rf` removes (D82 read literally).
    For restore in ADR 0072: in the residual window for an available source
    that is itself a restored root, the same remedy as for a damaged intent
    record, the backup restored again into a new destination with `--source

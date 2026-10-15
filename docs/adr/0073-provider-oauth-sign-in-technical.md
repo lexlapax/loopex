@@ -2061,7 +2061,7 @@ first step each `real-sign-in-*` lane prints to the terminal
 commands for it: `HOME=PATH loopex service stop`; for `real-sign-in-gemini-adc`,
 `HOME=PATH gcloud auth application-default revoke`; revocation at the
 provider of any other leftover grant; then `rm -rf PATH`. The lane
-neither stops the service it leaves nor deletes its `HOME`: after it
+neither stops the service it leaves nor deletes anything in its `HOME`: after it
 ends, by pass, failure or kill, the operator runs those commands, a
 stated operator-cleanup residual, and the lane's pass or fail does not
 depend on them (D82). A login's grant is revoked only when its logout

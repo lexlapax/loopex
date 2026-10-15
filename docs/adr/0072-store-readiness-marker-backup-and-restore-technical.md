@@ -2071,6 +2071,6 @@ restored root. The tenth review's were decided as D78: one intent record,
 the intent check's, for `--abandon` and `--resume`.
 
 Acceptance of this record includes the fix choices the M8 internal review 2
-and holistic 2 to 11 dispositions list for it
+and holistic 2 to 12 dispositions list for it
 ([internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13),
-[holistic 11](../process/agent-context-map.md#disposition-m8-holistic11-2026-10-14)).
+[holistic 12](../process/agent-context-map.md#disposition-m8-holistic12-2026-10-14)).
