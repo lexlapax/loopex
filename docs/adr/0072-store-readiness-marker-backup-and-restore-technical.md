@@ -1197,8 +1197,11 @@ and both roots stay closed; M8 gives that transaction nothing beyond
 leaving them. As for a damaged intent record, the operator may restore the
 backup again into a new destination with `--source lost`, the source moved
 aside first: that restore claims only its destination
-(`workflow.ex:1858-1870`) and checks the moved source by `lstat` alone
-(`restore/io.ex:1394-1411`), so the stuck claims never stop it. The probe row of the evidence plan asserts that outcome at the
+(`workflow.ex:1858-1870`) and checks only that the captured source path is
+absent, by `lstat` (`restore/io.ex:1394-1411`), so the stuck claims never stop
+it. This is a new transaction under its own attestation, not a
+re-presentation or replacement of the stuck one, whose claims and fence ADR
+0051 keeps (concept `:151-153`, `:179-182`); no ADR 0051 clause is amended. The probe row of the evidence plan asserts that outcome at the
 `source_retirement` hook. For an available source holding restore lineage,
 that is the only cut tested; no row kills such a restore after its first
 write to the source.
@@ -1433,7 +1436,7 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `attestation_required` | restore, adopt | Restore: `--source` or `--old-writer` missing, or `--resume` or `--abandon` without `--previous-restore`. Adopt: `--old-writer stopped` missing | State them |
 | `discard_requires_lost_source` | restore | `--discard-later-work` with `--source available` | Move the original root aside and restore with `--source lost`, or drop the flag if the backup is the latest state |
 | `old_writer_running`, `previous_restore_running` | restore | A live holder or earlier restore process | Stop it |
-| `restore_not_abandonable` | restore `--abandon` | The transaction reached its intent record, or committed (D66, D67) | `--resume TX_ID`; when its intent record is damaged or unreadable (D78), ADR 0051 leaves it unknown and its claims stay; in the [residual window](#technical-adr-0072-restore), `--resume` does not commit and the claims stay (D77); in either case, restore the backup again into a new destination with `--source lost`, an available source moved aside first (a holistic 11 fix choice) |
+| `restore_not_abandonable` | restore `--abandon` | The transaction reached its intent record, or committed (D66, D67) | `--resume TX_ID`; when its intent record is damaged or unreadable (D78), ADR 0051 leaves it unknown and its claims stay; in the [residual window](#technical-adr-0072-restore), `--resume` does not commit and the claims stay (D77); in either case, restore the backup again into a new destination with `--source lost`, an available source moved aside first (a holistic 11 fix choice for a damaged intent record, a holistic 12 fix choice for the residual window) |
 | `restore_abandoned` | restore `--resume` | A listed `continuation-N` records an abandonment and the transaction has no intent record (D71, D74) | Rerun `--abandon TX_ID` if it stopped part-way; start a new restore without `--resume` |
 | `restore_conflict` | restore `--abandon` | A claim directory beside a root the plan names holds another transaction's `owner`, an `owner` that does not decode, or another entry, or an acquisition published its `owner` while the directory was being removed; names the claim | Finish the other transaction with `--resume` or end it with `--abandon` first, then rerun; a claim whose `owner` does not decode, or that holds another entry, stays stranded under ADR 0051 |
 | `source_absent`, `source_not_absent` | restore | Path contradicts `--source` | State the true branch |

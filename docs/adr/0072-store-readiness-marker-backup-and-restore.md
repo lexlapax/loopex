@@ -394,7 +394,9 @@ restore's first write to the source, is not resumed, and `--abandon` refuses it,
 its claims stay and both roots stay closed. M8 gives that transaction
 nothing beyond leaving them; it is a residual of this record (D77). As for
 a damaged intent record, the operator may restore the backup again into a
-new destination with `--source lost`, the source moved aside first. For an
+new destination with `--source lost`, the source moved aside first (a
+[holistic 12](../process/agent-context-map.md#disposition-m8-holistic12-2026-10-14)
+fix choice). For an
 available source holding restore lineage, M8 proves the outcome only at the
 probe's cut; a kill after the restore's first write to the source is
 untested.
