@@ -564,7 +564,8 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
    revocation, may stay valid; a passing Google lane revokes its grant (D79,
    D80, D83). The `adc` lane's gcloud login leaves a Google grant that
    Loopex's sign-out never touches, on every run (D81). Each sign-in lane,
-   and each cleanup command it prints, runs under `env -i` with only
+   and each `loopex` and `gcloud` cleanup command it prints, runs under
+   `env -i` with only
    `HOME`, `PATH`, `TERM` and `LANG`, in a temporary home outside the
    release runner's own temporary directories, where the lane installs the
    verified archive. Before its first step the lane prints that home's

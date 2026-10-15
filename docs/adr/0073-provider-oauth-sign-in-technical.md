@@ -2040,13 +2040,17 @@ are gated on their provider's client, and verification items 2 and 5 are
 settled by the maintainer's provider actions that gate them. Before its
 case starts, and with no candidate code run, each `real-sign-in-*` lane
 checks its host prerequisites: first the operator's confirmation at the
-terminal that a browser can reach the login's loopback port, locally or
-forwarded with `ssh -L`, for the `real-sign-in-openai` and
-`real-sign-in-gemini` logins, and for `real-sign-in-gemini-adc` that
-gcloud's login can reach a browser; then the compiled Google client for
+terminal that the operator's browser can open the URL each login prints
+and reach its loopback port, locally or forwarded with `ssh -L`, for the
+`real-sign-in-openai` and `real-sign-in-gemini` logins, and for
+`real-sign-in-gemini-adc` that the operator can complete gcloud's
+`--no-browser` flow; then the compiled Google client for
 `real-sign-in-gemini`, read from the candidate's source of
 `Loopex.LLM.ReqLLM.SignIn.Profiles`, and `gcloud` for
-`real-sign-in-gemini-adc`; and, for a reused `installed-artifact` case,
+`real-sign-in-gemini-adc`; for both Google lanes, the maintainer-owned
+Google Cloud project ID, given to the lane before `start` and checked
+against the `vertex` `project` pattern above; and, for a reused
+`installed-artifact` case,
 the archive and its log at their recorded SHA-256 (the M8 plan's release
 check, item 5). A missing host prerequisite is the lane's only pre-start
 stop: `not_dispatched`, evidence unavailable, resumable on the same
@@ -2054,11 +2058,16 @@ commit, except that the compiled client is fixed by the candidate's source,
 so its stop resumes only on a candidate that carries it or defers the lane
 under D36. Every step runs after `start`; any failure in a step is a
 consumed failure of the case, and a run killed after `start` leaves the
-case started, which is consumed (D30, D76). Each lane runs every step
-under `env -i` with only `HOME=PATH` and the `PATH`, `TERM` and `LANG`
-variables (D85), its home `PATH` created owner-only by `mktemp -d`
-outside the release runner's own temporary directories, which its exit
-trap removes, and with `--store file` (D84). After `start` each
+case started, which is consumed (D30, D76). Each lane runs every step,
+its install and its configuration writes under `env -i` with only
+`HOME=PATH` and the `PATH`, `TERM` and `LANG` variables (D85), its home
+`PATH` created owner-only by `mktemp -d` outside the release runner's own
+temporary directories, which its exit trap removes, and with `--store
+file` (D84). Here `PATH` alone names the lane's home directory; `"$PATH"`
+and "the `PATH` variable" name the search path, printed as its literal
+value. Every Loopex login a lane runs adds `--no-browser`, so it prints
+its URL for the operator's browser, and the `real-sign-in-gemini-adc`
+gcloud login runs with `--no-browser`. After `start` each
 `real-sign-in-*` lane prints to the terminal `<lane>: home PATH`, naming
 that `HOME`, and the operator's cleanup commands for it, bound to the
 lane, with the values of the `PATH`, `TERM` and `LANG` variables it uses
@@ -2069,11 +2078,13 @@ PATH="$PATH" TERM="$TERM" LANG="$LANG" BIN service stop`, where `BIN` is
 application-default revoke`; revocation at the provider of any other
 leftover grant; then `rm -rf PATH` (D82, D84, D85). Then, before its first
 step, it extracts the verified archive under that `HOME` and installs it
-at ADR 0038's documented location there by ADR 0038's install sequence,
-so `BIN` is the `loopex` every step runs; each lane except
+at ADR 0038's documented location there by ADR 0038's install sequence
+without its `PATH` line, running `BIN version` in place of `loopex
+version`, so `BIN` is the `loopex` every step runs; each lane except
 `real-sign-in-anthropic` then writes its configuration file with `BIN
-init` and `BIN config set`, binding only its route, `oauth`, and selecting
-its model; a failure there is a consumed failure of the case (D76). The
+init` and `BIN config set`, binding only its route, `oauth` (for `vertex`
+with the maintainer-owned `project` and `location` `global`), and
+selecting its model; a failure there is a consumed failure of the case (D76). The
 operator reruns `service stop` until it reports `stopped` before `rm -rf`;
 a missing `BIN`, or a refusal `configuration_not_found` in a `HOME` with
 no configuration file (the `real-sign-in-anthropic` lane's, or one whose
