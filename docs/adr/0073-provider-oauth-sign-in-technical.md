@@ -406,7 +406,7 @@ Backends:
      a temporary keychain with `security create-keychain`, sets that key,
      and passes the keychain to `add-generic-password`,
      `find-generic-password` and `delete-generic-password` as their keychain
-     argument. No automated test touches the login keychain; the
+     argument. No automated test writes or deletes in the login keychain; the
      `real-sign-in-*` release lanes use `--store file`, and the only contact
      with a real keychain is the read-only absence query of the removal
      steps below.

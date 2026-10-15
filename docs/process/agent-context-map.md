@@ -9044,7 +9044,8 @@ decision. All five prerequisite ADRs remain Proposed and M8 remains Open.
 1. **Choices made in the fixes without a maintainer decision, listed for
    acceptance:** the `m7-adopt` lane keeps the runner's own `MIX_HOME`,
    `MIX_ARCHIVES` and `HEX_HOME` beside its temporary `HOME`, which covers
-   step 2, its shape check and steps 3 to 6; ADR 0037's concept item 8 and
+   step 2, its shape check and steps 3 to 6 (superseded by holistic 19:
+   private Mix and Hex homes); ADR 0037's concept item 8 and
    overview name the attended `m8-operator` record as the opt-in of its
    temporary-home rule (D87), and the ADR index says so for ADR 0003; the
    sign-in lanes bind their route with one `config set` of the whole
@@ -9088,7 +9089,13 @@ Proposed and M8 remains Open.
    decided wording is restored; holistic 17 item 2 carries round-18 wording
    written in place, and its replaced Google-project clause is now marked;
    and holistic 15's state-root mark covers only the `installed-artifact`
-   part. The fix-choice lists of
+   part. A verification pass on these fixes added: `MIX_ARCHIVES` set to
+   `T/mix-home/archives` and `/usr/bin` and `/bin` after the toolchain
+   directories in the `m7-adopt` environment, as the fixture does; step 6's
+   directories and environment made part of its host prerequisite whenever
+   `m7-adopt` does not run in the invocation, a resumed matrix included;
+   "writes or deletes in" for the login keychain; and ADR 0037's temporary
+   state-root list aligned with the plan's. The fix-choice lists of
    [internal review 2](#disposition-m8-internal-review2-2026-10-13) and
    holistic 2 to [18](#disposition-m8-holistic18-2026-10-14) remain listed
    for acceptance.

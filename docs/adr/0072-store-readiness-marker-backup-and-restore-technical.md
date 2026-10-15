@@ -1571,8 +1571,9 @@ a root the M7 build writes in the same run and D33's cross-version records
 against the real `v0.4.0` build. Host prerequisites (D34), whose provider
 calls are not attempt-recorded, run before a label's `start`: steps 1 and 2
 and the shape check before `m7-adopt`'s, and step 6's time-zone
-precondition before `m7-adopt-lock`'s, preceded by step 1 when `m7-adopt`
-is not selected. A failed build stops the first selected label; a failed
+precondition before `m7-adopt-lock`'s, preceded by step 1 and by step 2's
+directories and environment when `m7-adopt` does not run in this
+invocation (not selected, or skipped as completed in a resumed matrix). A failed build stops the first selected label; a failed
 M7 write, or a shape check that answers `unavailable` or prints no verdict
 line, stops `m7-adopt`; a failed time-zone precondition stops
 `m7-adopt-lock`. In an indexed run each stop retains a refusal log and
@@ -1601,9 +1602,11 @@ candidate.
 2. **Write.** In a temporary directory `T` whose path has no symbolic-link
    component, with `LOOPEX_HOME` unset, `HOME` the new empty directory
    `T/home`, `MIX_HOME` a private `T/mix-home` holding copies of the
-   runner's Mix archives and per-Elixir rebar, `HEX_HOME` a new empty
-   `T/hex` with `HEX_OFFLINE=1`, and `PATH` naming the toolchain pair's own
-   `bin` directories, as `provider_build_fixture.exs` does, for this step,
+   runner's Mix archives and per-Elixir rebar, `MIX_ARCHIVES`
+   `T/mix-home/archives`, `HEX_HOME` a new empty `T/hex` with
+   `HEX_OFFLINE=1`, and `PATH` naming the toolchain pair's own `bin`
+   directories, then `/usr/bin` and `/bin`, as `provider_build_fixture.exs`
+   does, for this step,
    its shape check and steps 3 to 6, so that the Mix runs of the shape
    check and of steps 5 and 6 find Hex and rebar without writing the
    runner's; `T/workspace` is a fresh copy of M7's
@@ -1719,9 +1722,10 @@ otherwise is recorded fail or unavailable, as plan item 7 states.
    `start`, the host prerequisite requires `TZ=America/Los_Angeles ps -o
    lstart= -p P` and `TZ=UTC0 ps -o lstart= -p P` to differ for the
    runner's own OS PID `P`, so the cases cannot pass vacuously on a host
-   without that zone's data. When `m7-adopt` is not selected, the lane
-   first creates `T` and `T/home` as step 2 does and sets the same
-   environment. The test file's three `lock` cases (`mix test
+   without that zone's data. When `m7-adopt` does not run in this
+   invocation (not selected, or skipped as completed in a resumed matrix),
+   that host prerequisite first creates `T`, `T/home`, `T/mix-home` and
+   `T/hex` as step 2 does and sets the same environment. The test file's three `lock` cases (`mix test
    --only m7_adopt:lock`), under `without_credential` and `TZ=UTC`, with
    step 1's tree in `LOOPEX_M7_ADOPT_V040_TREE`, run the `v0.4.0` build's
    own code through `MIX_ENV=prod mix run --no-start -e` in that tree under
