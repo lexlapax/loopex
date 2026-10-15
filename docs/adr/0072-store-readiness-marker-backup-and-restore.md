@@ -384,7 +384,8 @@ unless a claim lacks its owner record (D78). A transaction past its intent recor
 `--resume`, even after a refused `--abandon` (D74), unless its intent
 record is damaged or unreadable, which ADR 0051 leaves unresolved: its
 claims stay, its roots stay closed, and the operator restores the backup
-again into a new destination (D78), and except in one window
+again into a new destination with `--source lost`, an available source
+moved aside first (D78), and except in one window
 that has no path in M8: a restore whose available source is itself a
 restored root, killed after the destination's intent record and before the
 restore's first write to the source, is not resumed, and `--abandon` refuses it, so

@@ -1427,7 +1427,7 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `attestation_required` | restore, adopt | Restore: `--source` or `--old-writer` missing, or `--resume` or `--abandon` without `--previous-restore`. Adopt: `--old-writer stopped` missing | State them |
 | `discard_requires_lost_source` | restore | `--discard-later-work` with `--source available` | Move the original root aside and restore with `--source lost`, or drop the flag if the backup is the latest state |
 | `old_writer_running`, `previous_restore_running` | restore | A live holder or earlier restore process | Stop it |
-| `restore_not_abandonable` | restore `--abandon` | The transaction reached its intent record, or committed (D66, D67) | `--resume TX_ID`; when its intent record is damaged or unreadable, ADR 0051 leaves it unknown and its claims stay: restore the backup again into a new destination (D78) |
+| `restore_not_abandonable` | restore `--abandon` | The transaction reached its intent record, or committed (D66, D67) | `--resume TX_ID`; when its intent record is damaged or unreadable, ADR 0051 leaves it unknown and its claims stay: restore the backup again into a new destination with `--source lost`, an available source moved aside first (D78) |
 | `restore_abandoned` | restore `--resume` | A listed `continuation-N` records an abandonment and the transaction has no intent record (D71, D74) | Rerun `--abandon TX_ID` if it stopped part-way; start a new restore without `--resume` |
 | `restore_conflict` | restore `--abandon` | A claim directory beside a root the plan names holds another transaction's `owner`, an `owner` that does not decode, or another entry, or an acquisition published its `owner` while the directory was being removed; names the claim | Finish the other transaction with `--resume` or end it with `--abandon` first, then rerun; a claim whose `owner` does not decode, or that holds another entry, stays stranded under ADR 0051 |
 | `source_absent`, `source_not_absent` | restore | Path contradicts `--source` | State the true branch |
@@ -1446,7 +1446,7 @@ lock (the cut table above); for backup, at most a staging directory beside
 0051's own uncertainty, resolved by `--resume` from the intent record on,
 except a damaged or unreadable intent record, which ADR 0051 `:458` leaves
 unknown (claims retained, roots closed; restore the backup again into a new
-destination), and the [residual window](#technical-adr-0072-restore) of an
+destination with `--source lost`, an available source moved aside first), and the [residual window](#technical-adr-0072-restore) of an
 available source that is a restored root, and by `--abandon` before it,
 after which `--resume` refuses `restore_abandoned`; `--abandon` also
 removes a claim left without its owner record, after which a transaction
