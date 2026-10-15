@@ -744,8 +744,9 @@ path resolution changes, and the digest verification before launch is kept.
 
 **Recovery.** Before 1.0 there is no binary rollback or older-root upgrade,
 under the maintainer's pre-1.0 current-contract rule. An unsupported root is
-refused before any write, and recovery restores a backup under the build
-whose format the root is in. Keeping the previous install directory until a
+refused before any write, and recovery restores a backup under a build that
+reads the root's format; the M6 and M7 builds provide no operator restore,
+so a root they wrote is adopted. Keeping the previous install directory until a
 replacement serves is the only "switch back", and it is safe only because the
 refused root was never written. No earlier build is assumed to contain a
 restore command, an installed layout or the marker check.
@@ -784,7 +785,8 @@ runtime mise installs; Linux x86-64 with a glibc 2.35 base built from source
 in an `ubuntu:22.04` container with OpenSSL 3 linked statically, never from
 the build host's runtime; the macOS quarantine-removal step after manifest
 verification, without signing or notarization; and current-format roots only,
-with recovery by backup and restore under the matching build; and the
+with recovery by backup and restore under a build that reads its format (an
+M7-written root is adopted, ADR 0072); and the
 clarifying reading of ADR 0003's "no compiler" as "no build toolchain", with
 the OTP `compiler` application shipped as a runtime dependency of Elixir.
 

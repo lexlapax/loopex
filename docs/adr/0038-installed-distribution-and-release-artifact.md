@@ -128,7 +128,9 @@ minimal runtime distribution carries no compiler.
    refuses any other root before writing to it, under ADR 0072. Before 1.0
    there is no upgrade of an older root and no switching back to an earlier
    release over a root this release wrote. Recovery is a backup restored under
-   the build whose format the root is in, with ADR 0072's commands.
+   a build that reads the root's format, with ADR 0072's commands for the
+   current format; the M6 and M7 builds provide no operator restore, so a
+   root they wrote is adopted.
 8. **macOS uses a documented quarantine-removal step, not signing.** The
    maintainer chose on 2026-10-13 that the macOS archive is neither signed nor
    notarized. The operator verifies the archive against its checksum file,
@@ -202,8 +204,9 @@ Before 1.0 there is no binary rollback over a newer root, and no earlier build
 is claimed to refuse one safely. Replacing an install leaves every root
 untouched. If a later build refuses a root by name, the root is byte-identical
 and the previous install directory, kept until the new build serves, still
-opens it. Recovery from an unservable root restores a backup under the
-matching build with ADR 0072's commands. The installed demonstration proves the
+opens it. Recovery from an unservable root restores a backup under a build
+that reads its format, with ADR 0072's commands for the current format; the
+M6 and M7 builds provide no operator restore. The installed demonstration proves the
 refusal and the same-build restore together, so that "restart the old binary"
 is never mistaken for a plan.
 

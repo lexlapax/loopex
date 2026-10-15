@@ -48,7 +48,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0036 | Daemon-grade store engine and migration | Proposed | [Decision](0036-daemon-grade-store-engine-and-migration.md#concept) | [Technical depth](0036-daemon-grade-store-engine-and-migration-technical.md#technical-depth) |
 | 0037 | Host configuration and path discovery | Proposed | [Decision](0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
 | 0038 | Installed distribution and release artifact | Proposed | [Decision](0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
-| 0039 | Ephemeral embedded profile | Accepted (startup-handler order, named-root and unknown-ownership clauses narrowly superseded by 0040; M7 startup options and provider bindings narrowly amended by 0042–0045, 0048 and 0049; host-opened sign-in custody, the fixed provider prefix and in-process route tables gaining `chatgpt` and `vertex` with `claude` still refused, the ephemeral startup option `:sign_in_routes` in its closed option set, the pre-call refusal, `ask`'s status-1 codes and the host-VM credential audience amended by Proposed 0073 on its acceptance, M8 D37, D38, D40, D50, D56 and D61) | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
+| 0039 | Ephemeral embedded profile | Accepted (startup-handler order, named-root and unknown-ownership clauses narrowly superseded by 0040; M7 startup options and provider bindings narrowly amended by 0042–0045, 0048 and 0049; host-opened sign-in custody, the fixed provider prefix and in-process route tables gaining `chatgpt` and `vertex` with `claude` still refused, the ephemeral startup option `:sign_in_routes` in its closed option set, the pre-call refusal, `ask`'s status-1 codes, ephemeral `ask`'s `provider_credential_required` for a sign-in model whose route has no binding, a code M6 gave only durable `ask`, and the host-VM credential audience amended by Proposed 0073 on its acceptance, M8 D37, D38, D40, D50, D56, D61 and D73) | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
 | 0040 | Ephemeral startup interrupt and unnamed root | Accepted | [Decision](0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept) | [Technical depth](0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth) |
 | 0041 | Session lineage projection and context budget | Accepted | [Decision](0041-session-lineage-projection-and-context-budget.md#concept) | [Technical depth](0041-session-lineage-projection-and-context-budget-technical.md#technical-depth) |
 | 0042 | Host-composed instructions | Accepted | [Decision](0042-host-composed-instructions.md#concept) | [Technical depth](0042-host-composed-instructions-technical.md#technical-depth) |
@@ -60,7 +60,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0048 | Host provider routing and credential bindings | Accepted (credential forms, the binding plane's closed member set, which gains the optional `sign_in_routes` member with `model_options` unchanged, ephemeral clause, live rotation and durable `ask`'s resolution of only the bindings its models use, an unused binding's unset value not failing it and every merged name staying in the exclusion set (D60), amended by Proposed 0073 on its acceptance, M8) | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
 | 0049 | Explicit host configuration | Accepted (policy terminal public-event encoding amended by 0052; immutable creation selections amended by 0055; `--config` requirement and `ask`'s `--config` (M8 D54, D57), status record, schema members, durable chat's credential form and failed-terminal reason amended by Proposed 0037, 0071 and 0073 on their acceptance, M8) | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
 | 0050 | Model-port configuration preparation | Accepted (initial-creation invocation and custody amended by 0055) | [Decision](0050-host-configuration-preparation.md#concept) | [Technical depth](0050-host-configuration-preparation-technical.md#technical-depth) |
-| 0051 | Current-format physical restore | Accepted (backup-CLI, latest-backup and stranded owner-less claim clauses amended by Proposed 0072 on its acceptance, M8, the last by D68) | [Decision](0051-current-format-physical-restore.md#concept) | [Technical depth](0051-current-format-physical-restore-technical.md#technical-depth) |
+| 0051 | Current-format physical restore | Accepted (backup-CLI, latest-backup, stranded owner-less claim and persisted intent temporary clauses amended by Proposed 0072 on its acceptance, M8, the last two by D68 and D70) | [Decision](0051-current-format-physical-restore.md#concept) | [Technical depth](0051-current-format-physical-restore-technical.md#technical-depth) |
 | 0052 | Policy interaction public events | Accepted | [Decision](0052-policy-interaction-public-events.md#concept) | [Technical depth](0052-policy-interaction-public-events-technical.md#technical-depth) |
 | 0053 | Current configure request | Accepted | [Decision](0053-current-configure-request.md#concept) | [Technical depth](0053-current-configure-request-technical.md#technical-depth) |
 | 0054 | Compaction activity progress | Accepted | [Decision](0054-compaction-activity-progress.md#concept) | [Technical depth](0054-compaction-activity-progress-technical.md#technical-depth) |
@@ -259,11 +259,13 @@ engine experiment; 0036 keeps the engine selection, migration and capacity
 refusal for the M9 draft. The maintainer accepted that split, the M8 plan's
 proposal P2, on 2026-10-13. 0072 adds the current-format root marker,
 `store adopt`, `store backup` and `store restore`, and on acceptance amends
-exactly three clauses of accepted ADR 0051: its statement that no backup CLI
+exactly four clauses of accepted ADR 0051: its statement that no backup CLI
 is added; its latest-backup-only restriction, which `--discard-later-work`
-relaxes for a lost source; and its rule that an owner-less claim is
+relaxes for a lost source; its rule that an owner-less claim is
 stranded, which `store restore --abandon` relaxes for a claim directory
-holding nothing or only `owner.tmp` (D68). M8 changes `restore/2` to leave the disposable
+holding nothing or only `owner.tmp` (D68); and its rule that a persisted
+intent temporary counts as possible intent, which `--abandon` alone relaxes
+for an `intent.tmp` that does not decode beside an absent `intent` (D70). M8 changes `restore/2` to leave the disposable
 helper job index out of its audit index, as adopt and backup do, while still
 copying it (D29); no ADR 0051 sentence governs that, and it narrowly amends
 ADR 0056's complete helper-namespace audit (D35). It also narrowly amends ADR
@@ -291,7 +293,7 @@ gcloud's Application Default Credentials file. On acceptance it amends named
 clauses of accepted ADRs 0018, 0019, 0021, 0029, 0032, 0034, 0039, 0043, 0048 and
 0049, including ADR 0032's closed `daemon.stopping` reasons (D42), ADR 0019's closed private-protocol kinds, ADR 0034's
 custody-refusal row and `:expired` reason, ADR 0039's provider prefix and in-process route tables, its pre-call refusal, `ask`
-status-1 diagnostics and, by D37, its host-VM
+status-1 diagnostics, with ephemeral `ask`'s `provider_credential_required` (D73), and, by D37, its host-VM
 credential audience, whose one common exception text replaces at acceptance the seven copies ADR 0039 requires in the vision pair and `AGENTS.md` (D40), with the vision's other credential passages and `AGENTS.md`'s credential sentence qualified (D56, D61), ADR 0034's Direct marker extended to the sign-in requests (D62), ADR 0048's binding plane's closed member set, which gains the optional `sign_in_routes` member with `model_options` unchanged, its ephemeral clause and its resolution of every configured binding, which durable `ask` narrows to its models' bindings (D60), ADR 0049's closed terminal schema and durable chat's `env`-only credential, the new public failure reason `provider_sign_in_required` in ADR
 0029's bounded vocabulary, ADR 0018's Model callback boundary, settlement
 categories and valid-combination table and terminal precedence, ADR 0021's settled-attempt result
