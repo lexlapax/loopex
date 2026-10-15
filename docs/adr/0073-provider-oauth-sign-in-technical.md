@@ -345,7 +345,9 @@ each `SignIn.Route`. No default is computed: an `oauth` binding that reaches
 other than through a borrowed plane, refuses `provider_sign_in_required`
 (D50). The refresher keeps the
 context for its life and passes it to every store call. It also keeps the
-`excluded_env_names` of the whole bindings map its opener was given, and
+`excluded_env_names` its opener gives it (for `open/4`, the union of its
+option and the bindings' names; for the daemon, those of the whole
+bindings map), and
 `auth` the list its selected configuration's
 bindings give (`LOOPEX_PROVIDER_API_KEY` alone without one): the refresh
 lock's process probe and every keyring child are spawned with each of those
@@ -692,8 +694,10 @@ starts no route, and neither does composition:
 route only through a borrowed plane. The process that opens the bindings
 starts each route right after the custodies, linked to a process that traps
 exits, and stops it. It gives `SignIn.Route.start_link/1` the sign-in
-context, the route's custody reference, the `excluded_env_names` of the
-whole bindings map and the route's executor: the companion, with the launch
+context, the route's custody reference, the `excluded_env_names` its
+opener gives it (for `open/4`, the union of its option and the bindings'
+names; for the daemon, those of the whole bindings map) and the route's
+executor: the companion, with the launch
 options and cleanup period [the companion executor](#technical-adr-0073-exchange)
 names, or in-host. `start_link/1` returns only after
 refresher steps 1 and 2 below, so a route that refuses its start makes the
@@ -730,14 +734,14 @@ does, and reports the route's class.
   which opens `open/0`'s single-credential bindings, every compiled hosted
   provider bound to `LOOPEX_PROVIDER_API_KEY` (`credential_cache.ex` :21-36,
   `credential_plane.ex` :157-163). It instead merges those bindings with
-  the file's `providers` and keeps only the bindings of the providers its
-  model and maintenance model use (D60), because `load_bindings/2` opens
+  the file's `providers` and keeps only the bindings of the routes (model
+  prefixes) its model and maintenance model use (D60), because `load_bindings/2` opens
   all or nothing (:65-76, :124-129, :203-209). A model whose route has
   no binding in the merge, such as a sign-in route the file does not name,
   refuses `provider_credential_required` before any credential or route is
   opened (after placement, as today), as durable `ask` refuses a missing
   key today (`durable_ask.ex` :88-93, :224-235).
-  It passes `CredentialCache` the whole merged map, the kept providers and
+  It passes `CredentialCache` the whole merged map, the kept routes and
   its sign-in context. `CredentialCache` validates the whole map, opens
   only the kept bindings with `open/4` and the companion executor where it
   calls `open/0` and `open/1` today (:21-56), and gives the plane and the
@@ -757,8 +761,8 @@ does, and reports the route's class.
 - Ephemeral `ask` passes `Ephemeral.start_session/1` as
   `:provider_bindings` the reference route of each compiled provider whose
   credential kind is not `:sign_in`, the one `Preflight` builds for the
-  model's provider when given none (`preflight.ex` :132-139), merged with
-  the file's `providers`, less every `oauth` binding of a provider that
+  model's route when given none (`preflight.ex` :132-139), merged with
+  the file's `providers`, less every `oauth` binding of a route that
   neither its model nor its maintenance model uses (D63), so it opens only
   the sign-in routes they use and a signed-out binding of another route
   does not refuse it; with no
@@ -2019,7 +2023,7 @@ use temporary homes and never touch a real keyring.
 | `apps/loopex/test/sign_in_required_settlement_test.exs` | `{:not_dispatched, "provider_sign_in_required"}` settles attempt one as `not_dispatched`, accounting `none`, next `terminal` with no retry; the run ends `failed` with that reason; the record replays. **Route availability changes between attempts:** attempt one settles `not_dispatched`/`model_call_failed` with `retry`, custody then becomes `:missing`, and attempt two settles terminal with `provider_sign_in_required`; the two-attempt history replays to the same terminal. **Termination precedence:** the category settled with an `abort` termination ends the run `cancelled` and with a `deadline` termination `bound_reached`, never `failed` with the reason, and each replays to the same terminal. The category with `dispatched_or_unknown`, accounting other than `none`, `next` other than `terminal`, or a termination other than abort or deadline is invalid history; a maintenance run reports the category |
 | `apps/loopex_protocol/test/session_v2_schema_test.exs` (extended) | The `daemon.stopping` reason list includes `fatal:sign_in_route_lost` with its literal vector (D42) |
 | `apps/loopex_protocol/test/sign_in_required_vectors_test.exs` | The new vectors encode and decode on `loopex.experimental/3` and `/4`; the reason with a nonnull `failure`, or as a failure category with `retryable` `true`, is refused; the regenerated manifests and schema proof match |
-| `apps/loopex_cli/test/ask_sign_in_test.exs` | Ephemeral `ask` on a sign-in route through the fake server; refresh in host VM; the route's `excluded_env_names` are those of the whole merged map, so a recording fake keyring child sees none of its variables; every route stopped by `close/1` before the command returns. **Lost during the run:** a 10 s token whose refresh, due 5 s after start, the fake server answers `invalid_grant` while it holds the run's first model reply, a tool call, for 6 s; the second model call meets custody `:missing`, and ephemeral `ask` reports `failed` with `provider_sign_in_required` in `loopex.ask/1` and in text with the `auth login` hint, exit 2; the cleanup owner admits the refusal and the session is not sealed. Durable `ask` reports the same through its follow reader. **Foreground refusals (D50):** each `ask` over an absent, inconsistent and `sign_in_required` pair, and an ephemeral `ask` with an `oauth` binding of its model's provider and no usable `HOME`, reports status 1 `provider_sign_in_required` with the hint; a disabled source reports status 1 `sign_in_unavailable`; an unavailable and an unsafe store report status 1 `composition_unavailable`; none writes standard output, and the fake server sees no model request; chat refuses each with its startup line and exit 1. **Selected file (D54, D57):** durable and ephemeral `ask` with no `--config` use the `oauth` binding of the home's `config.json`, and with `--config` that file's, the file's `paths.state_root` left uncreated; with a file that names only `chatgpt`, an `openai:` model still runs through durable `ask`'s `LOOPEX_PROVIDER_API_KEY` binding and ephemeral `ask`'s `OPENAI_API_KEY` reference route, and durable `ask` with `LOOPEX_PROVIDER_API_KEY` unset runs the `chatgpt:` model and refuses the `openai:` model `provider_credential_required`; with no file each uses its delivered environment route; an invalid selected file reports status 1 `command_failed` with no session started. **Durable `ask` opens only what it uses (D60):** after `loopex init --provider openai --credential-env OPENAI_API_KEY`, with its other required flags, with only `LOOPEX_PROVIDER_API_KEY` set, durable `ask --state-root R --model anthropic:…` runs, and a `chatgpt:` model the file does not name refuses `provider_credential_required` with no credential or route opened; with that file's unused `OPENAI_API_KEY` set, the plane's `excluded_env_names` names it, it stays set in the host VM, and a tool job's environment lacks it. Ephemeral `ask` with a `chatgpt:` model and no binding for it, with no file and with a file that does not name it, refuses status 1 `provider_credential_required` with nothing opened. **Ephemeral `ask` opens only the routes it uses (D63):** with a file whose signed-out `chatgpt` `oauth` binding has no stored sign-in, ephemeral `ask --model openai:…` runs through its `OPENAI_API_KEY` reference route and starts no sign-in route. **Legacy commands (D58):** `run`, `resume` and `skill` without `--service`, through `LoopexCli.dispatch/2` with the host option `:provider_bindings` holding an `oauth` binding of the model's route, as `offline_provider_bindings_test.exs` :50 passes bindings, print the two D58 lines and exit 1 having started nothing, and with an `oauth` binding of another route they run |
+| `apps/loopex_cli/test/ask_sign_in_test.exs` | Ephemeral `ask` on a sign-in route through the fake server; refresh in host VM; the route's `excluded_env_names` are those of the whole merged map, so a recording fake keyring child sees none of its variables; every route stopped by `close/1` before the command returns. **Lost during the run:** a 10 s token whose refresh, due 5 s after start, the fake server answers `invalid_grant` while it holds the run's first model reply, a tool call, for 6 s; the second model call meets custody `:missing`, and ephemeral `ask` reports `failed` with `provider_sign_in_required` in `loopex.ask/1` and in text with the `auth login` hint, exit 2; the cleanup owner admits the refusal and the session is not sealed. Durable `ask` reports the same through its follow reader. **Foreground refusals (D50):** each `ask` over an absent, inconsistent and `sign_in_required` pair, and an ephemeral `ask` with an `oauth` binding of its model's route and no usable `HOME`, reports status 1 `provider_sign_in_required` with the hint; a disabled source reports status 1 `sign_in_unavailable`; an unavailable and an unsafe store report status 1 `composition_unavailable`; none writes standard output, and the fake server sees no model request; chat refuses each with its startup line and exit 1. **Selected file (D54, D57):** durable and ephemeral `ask` with no `--config` use the `oauth` binding of the home's `config.json`, and with `--config` that file's, the file's `paths.state_root` left uncreated; with a file that names only `chatgpt`, an `openai:` model still runs through durable `ask`'s `LOOPEX_PROVIDER_API_KEY` binding and ephemeral `ask`'s `OPENAI_API_KEY` reference route, and durable `ask` with `LOOPEX_PROVIDER_API_KEY` unset runs the `chatgpt:` model and refuses the `openai:` model `provider_credential_required`; with no file each uses its delivered environment route; an invalid selected file reports status 1 `command_failed` with no session started. **Durable `ask` opens only what it uses (D60):** after `loopex init --provider openai --credential-env OPENAI_API_KEY`, with its other required flags, with only `LOOPEX_PROVIDER_API_KEY` set, durable `ask --state-root R --model anthropic:…` runs, and a `chatgpt:` model the file does not name refuses `provider_credential_required` with no credential or route opened; with that file's unused `OPENAI_API_KEY` set, the plane's `excluded_env_names` names it, it stays set in the host VM, and a tool job's environment lacks it. Ephemeral `ask` with a `chatgpt:` model and no binding for it, with no file and with a file that does not name it, refuses status 1 `provider_credential_required` with nothing opened. **Ephemeral `ask` opens only the routes it uses (D63):** with a file whose signed-out `chatgpt` `oauth` binding has no stored sign-in, ephemeral `ask --model openai:…` runs through its `OPENAI_API_KEY` reference route and starts no sign-in route. **Legacy commands (D58):** `run`, `resume` and `skill` without `--service`, through `LoopexCli.dispatch/2` with the host option `:provider_bindings` holding an `oauth` binding of the model's route, as `offline_provider_bindings_test.exs` :50 passes bindings, print the two D58 lines and exit 1 having started nothing, and with an `oauth` binding of another route they run |
 | `apps/loopex_cli/test/sign_in_route_lost_test.exs` | Through the test-built command in a child OS process, making the `SignIn.Route` exit through the `LOOPEX_TEST_SIGN_IN_ROUTE_EXIT` seam while a run is in progress in foreground chat, durable `ask` and ephemeral `ask` prints `loopex: sign_in_route_lost` and exits 1, with no process group the command started left running, `ask` writing no standard output in text or JSON mode; each durable run has no terminal and a later resume recovers it; ephemeral `ask`'s temporary root is left. **Normal exit during an exchange (D41):** chat ending at end of input, and each `ask` finishing its run, while the route's exchange is delayed 5,000 ms, exit only after the write, ephemeral `ask`'s stop request having returned within its 11,000 ms, and a newly started route refreshes with the rotated token. **Interrupt during an exchange:** an interrupt while the exchange is delayed past the backstop exits at the backstop, and the rotated token is lost, a later start refusing `provider_sign_in_required` (D51), the documented residual |
 | `apps/loopex_composition/test/sign_in_model_admission_test.exs` | The admission cases of [`chatgpt` model admission](#technical-adr-0073-model-admission). A switch made while the route waits for its lock, held by another OS process, and while a recording fake keyring child of the route never exits, is admitted or refused within 100 ms from the route's table |
 
@@ -2031,44 +2035,28 @@ last line of its redacted retained output, which the release runner's
 script-lane judge checks. `real-sign-in-openai` and `real-sign-in-gemini`
 are gated on their provider's client, and verification items 2 and 5 are
 settled by the maintainer's provider actions that gate them. Before its
-case starts, each lane checks its host prerequisites: a browser for the
-`real-sign-in-openai` and `real-sign-in-gemini` logins, which is the
-operator confirming at the terminal that a browser can reach the login's
-loopback port, locally or forwarded with `ssh -L`, and for
-`real-sign-in-gemini-adc` that gcloud's login can reach a browser; the
-compiled Google client for `real-sign-in-gemini`; `gcloud` for
-`real-sign-in-gemini-adc`; and, for `real-sign-in-openai`, Loopex's
-dynamic client registration with OpenAI, which the lane performs (D64,
-D65): an attended `auth login openai` followed by `auth logout openai`,
-in the lane's own temporary `HOME`, so the generation floor keeps the
-issued `oaiapp_...` client.
-Only a missing host prerequisite and D65's two registration failures (an
-authorize error for `dynamic_agent_client`, or a callback that returns no
-issued client) are a pre-start stop: `not_dispatched`, evidence
-unavailable, resumable on the same commit, never a consumed failure
-(D69). The authorize request runs in the operator's browser and the
-login makes no network call before its callback, so D69's transport
-failure before OpenAI answers has no instance the runner or CLI observes
-beyond the missing-prerequisite check; a login that ends with no
-callback, its loopback wait expiring, is a candidate failure, since the
-operator confirmed before `start` that a browser can reach the loopback
-port (D75). Any other failure of the OpenAI prerequisite, such as its ID
-token's audience or nonce, its scope, its model list's failure or bound,
-its store write or its logout, is a candidate failure: the runner starts
-the case and records it as a consumed failure of step (1), with the
-prerequisite's redacted output as its LOG (D69). The prerequisite's
-login is `loopex auth login openai --store file`, and the lane reads the
-file store's record after it, as after step (1)'s. On success the runner
-writes the prerequisite's transcript at the head of the case's LOG,
-where the lane's end-of-run redaction redacts it with step (1)'s output;
-on a pre-start stop or a candidate failure the runner passes it through
-the second redactor run and sends that output as LOG, to `stop KEY LOG`
-or to the failed case's `finish`. A prerequisite killed between its
-login and its logout leaves that temporary home's tokens unrevoked; the
-operator revokes them at OpenAI, a stated lane residual. Each lane runs
-in a temporary `HOME` with `--store file`:
+case starts, and with no candidate code run, each lane checks its host
+prerequisites: first the operator's confirmation at the terminal that a
+browser can reach the login's loopback port, locally or forwarded with
+`ssh -L`, for the `real-sign-in-openai` and `real-sign-in-gemini` logins,
+and for `real-sign-in-gemini-adc` that gcloud's login can reach a
+browser; then the compiled Google client for `real-sign-in-gemini` and
+`gcloud` for `real-sign-in-gemini-adc`. A missing host prerequisite is
+the lane's only pre-start stop: `not_dispatched`, evidence unavailable,
+resumable on the same commit. Every step runs after `start`; any failure
+in a step is a consumed failure of the case, and a run killed after
+`start` leaves the case started, which is consumed (D30, D76). Each lane
+runs in a temporary `HOME` with `--store file`:
 
-- `real-sign-in-openai`, `steps=5`: (1) an attended `auth login openai`,
+- `real-sign-in-openai`, `steps=6`: (0) Loopex's dynamic client
+  registration with OpenAI (D64, D65, D76): an attended `loopex auth login
+  openai --store file` followed by `loopex auth logout openai`, so the
+  generation floor keeps the issued `oaiapp_...` client (D23); any failure
+  in it, OpenAI refusing the registration included, is a consumed failure
+  of the case like any other step's, and a run killed between its login and
+  its logout leaves that temporary home's tokens unrevoked, which the
+  operator revokes at OpenAI, a stated lane residual; (1) an attended
+  `auth login openai`,
   which must authorize under the floor's issued client, whose callback
   must return that same client, and whose model list, fetched before the
   login's write, must be recorded non-empty within its bounds and name
@@ -2081,7 +2069,7 @@ in a temporary `HOME` with `--store file`:
   (5) a second login under the generation floor, which must authorize under
   the floor's issued client, write a generation above the floor and record
   the list again. The lane also records verification items 11 to 15,
-  items 11 and 12 in steps (1) and (5), not in the prerequisite.
+  items 11 and 12 in steps (1) and (5), not in step (0).
 - `real-sign-in-gemini`, `steps=4`: (1) an attended `auth login gemini`
   through the compiled Google client and the `loopex` source, whose
   `vertex` project check against a maintainer-owned project must pass;
@@ -2467,7 +2455,7 @@ outcome gates a lane.
 | # | Item | Disposition |
 | --- | --- | --- |
 | 1 | Whether an OpenAI refresh immediately invalidates the previous refresh token | None needed. The design assumes it does (lock, read-back, `roll_forward`), and `sign_in_refresh_test.exs` proves that worst case; no product path presents a rotated-away token to learn the answer |
-| 2 | Whether OpenAI requires a partner client ID rather than dynamic registration | Settled by the maintainer's provider action under [open item 1](0073-provider-oauth-sign-in.md#concept-adr-0073-open), which gates `real-sign-in-openai`; the lane does not record it. Its prerequisite, an attended `auth login openai` and `auth logout openai` in the lane's own `HOME`, performs the dynamic registration before the case starts. An authorize error for `dynamic_agent_client` or a callback that returns no issued client is a pre-start stop with the evidence unavailable, not a failed case; any other prerequisite failure, a login that ends with no callback included, is a consumed failure of step (1) (D64, D65, D69, D75). A partner client would amend this record |
+| 2 | Whether OpenAI requires a partner client ID rather than dynamic registration | Settled by the maintainer's provider action under [open item 1](0073-provider-oauth-sign-in.md#concept-adr-0073-open), which gates `real-sign-in-openai`; the lane does not record it. Its recorded step (0), an attended `auth login openai` and `auth logout openai` in the lane's own `HOME` after the case starts, performs the dynamic registration; any failure in it, OpenAI refusing the registration included, is a consumed failure of the case (D64, D65, D76). A partner client would amend this record |
 | 3 | A documented allowed-model list for plan usage | Implementation. Only the per-account listing is documented and is what the route uses, through `model_list`; `sign_in_model_admission_test.exs` refuses an unlisted model with `provider_route_unavailable` |
 | 4 | An official OpenAI statement of the launch date | None needed. No rule depends on the date; it is research context only |
 | 5 | Whether Google classifies `cloud-platform` as sensitive or restricted | Settled by the maintainer's provider action under [open item 2](0073-provider-oauth-sign-in.md#concept-adr-0073-open), which gates `real-sign-in-gemini`; the lane does not record it. It sets the Google client's verification path, not code; the `adc` source does not depend on it |
@@ -2477,7 +2465,7 @@ outcome gates a lane.
 | 9 | Anthropic's Commercial Terms text and exact policy dates | None needed. The `claude:` route is disabled and proved by its tested refusal; the dates matter only to a future amendment that enables it |
 | 10 | Each provider's ID-token issuer, JWKS URI and signing algorithm | Acceptance, checked 2026-10-13 against both discovery documents, as recorded under [ID-token verification](#technical-adr-0073-id-token) |
 | 11 | That OpenAI's ID token carries `aud` equal to the issued `oaiapp_...` client, and that the callback returns that issued client ID | Implementation. `real-sign-in-openai` steps (1) and (5) verify that the callback returns the floor's issued client and verify the real ID token under check 5 against it; a different client or audience fails the lane and amends this record |
-| 12 | That OpenAI honors the OIDC `nonce`, and accepts a later authorize under the issued client instead of `dynamic_agent_client` | Implementation. `real-sign-in-openai` step (1) authorizes under the floor's issued client the prerequisite left and verifies check 7 on the real token; step (5) signs in again under it after step (4)'s logout |
+| 12 | That OpenAI honors the OIDC `nonce`, and accepts a later authorize under the issued client instead of `dynamic_agent_client` | Implementation. `real-sign-in-openai` step (1) authorizes under the floor's issued client step (0) left and verifies check 7 on the real token; step (5) signs in again under it after step (4)'s logout |
 | 13 | That OpenAI accepts `resource=https://api.openai.com/v1` on refresh | Implementation. The lane's forced refresh sends it and must succeed |
 | 14 | That `GET /v1/models` answers a plan access token with entries carrying `visibility` | Implementation. The lane's login runs `model_list` before its write and must record a non-empty list within its bounds that names the lane's model; a failure fails the login with nothing written (D25) |
 | 15 | That the plan token's model list fits 256 ids of at most 128 bytes | Implementation. The same lane case; an over-bound real list fails `sign_in_failed` and amends the bound |
