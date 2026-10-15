@@ -33,8 +33,9 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   (D62) and ephemeral `ask`'s opening of only the sign-in routes it uses
   (D63), and after them the OpenAI registration as a lane prerequisite
   (D64), refined by its mechanism (D65), and after them the narrowed
-  pre-start stop of that prerequisite (D69) and ephemeral `ask`'s refusal
-  of an unbound sign-in model (D73)
+  pre-start stop of that prerequisite (D69), refined for a login that ends
+  with no callback (D75), and ephemeral `ask`'s refusal of an unbound
+  sign-in model (D73)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -548,13 +549,15 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
    `real-sign-in-openai` lane performs this registration before its case
    starts, by an attended sign-in and sign-out in the lane's own temporary
    home, which keeps the issued client. Only a missing host prerequisite,
-   OpenAI refusing the registration, a sign-in that returns no issued
-   client, or a network failure before OpenAI answers the sign-in request
-   stops the lane with the evidence unavailable, resumable on the same
-   commit, and is not a failed case (D69). Any other failure of this
-   prerequisite, such as an ID token or model list that fails its checks,
-   a failed store write or a failed sign-out, is a failed case: the lane
-   records it as a consumed failure of its first step (D69). A prerequisite
+   OpenAI refusing the registration, or a sign-in that returns no issued
+   client stops the lane with the evidence unavailable, resumable on the
+   same commit, and is not a failed case (D69). The sign-in request runs
+   in the operator's browser, so the lane observes no network failure of
+   its own before OpenAI answers; a sign-in that never returns to Loopex
+   is a failed case (D75). Any other failure of this prerequisite, such as
+   an ID token or model list that fails its checks, a failed store write
+   or a failed sign-out, is a failed case: the lane records it as a
+   consumed failure of its first step (D69). A prerequisite
    interrupted between its sign-in and sign-out leaves that home's tokens
    unrevoked, for the operator to revoke at OpenAI. The case's first sign-in
    then uses that issued client.
@@ -583,7 +586,7 @@ own lane, which always runs, and a missing Google client disables only the
 `loopex` source of `vertex:`. The disabled `claude:` route is proved by its
 tested refusal and needs no deferral.
 
-Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 7 dispositions](../process/agent-context-map.md#disposition-m8-holistic7-2026-10-14) list for it.
+Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 8](../process/agent-context-map.md#disposition-m8-holistic8-2026-10-14) dispositions list for it.
 
 ## Governance Record
 

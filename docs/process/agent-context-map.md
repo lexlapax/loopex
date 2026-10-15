@@ -368,7 +368,7 @@ end of the file.
 | M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27); [implementation start](#disposition-m6-implementation-start-2026-09-27) |
 | M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30), [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30) and [proposed rollback retarget](#disposition-m7-round5-rollback-proposal-2026-09-30); [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) and [proposed logical-matrix rule](#disposition-m7-round6-matrix-proposal-2026-09-30); earlier choices remain recorded in the [M7 plan](../plans/M7.md#concept) |
 | M7 acceptance, 2026-09-30 | [Plan pair, ADRs 0041–0049 and paired vision amendments accepted](#disposition-m7-acceptance-2026-09-30); implementation may begin under the accepted ownership sequence |
-| M8 planning, from 2026-09-30 | [Opened as the planning successor](#disposition-m8-opening-2026-09-30); [rebased onto the closed M7 baseline](#disposition-m8-rebase-2026-10-13); [rescoped to the delivered M7 baseline](#disposition-m8-scope-2026-10-13) with four maintainer decisions that settle choices C1 to C3 and supersede P3; [completed for implementation](#disposition-m8-detail-2026-10-13) with P1, P2 and P4 to P8 accepted, service-hosted helpers and provider sign-in added, and only provider registrations and acceptance of the listed fix choices left open; revised after readiness reviews [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), the [final pass](#disposition-m8-final-pass-2026-10-14) and the holistic rounds [1](#disposition-m8-holistic-2026-10-14), [2](#disposition-m8-holistic2-2026-10-14), [3](#disposition-m8-holistic3-2026-10-14), [4](#disposition-m8-holistic4-2026-10-14), [5](#disposition-m8-holistic5-2026-10-14), [6](#disposition-m8-holistic6-2026-10-14), [7](#disposition-m8-holistic7-2026-10-14) and [8](#disposition-m8-holistic8-2026-10-14), with maintainer decisions D16 to D73 |
+| M8 planning, from 2026-09-30 | [Opened as the planning successor](#disposition-m8-opening-2026-09-30); [rebased onto the closed M7 baseline](#disposition-m8-rebase-2026-10-13); [rescoped to the delivered M7 baseline](#disposition-m8-scope-2026-10-13) with four maintainer decisions that settle choices C1 to C3 and supersede P3; [completed for implementation](#disposition-m8-detail-2026-10-13) with P1, P2 and P4 to P8 accepted, service-hosted helpers and provider sign-in added, and only provider registrations and acceptance of the listed fix choices left open; revised after readiness reviews [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), the [final pass](#disposition-m8-final-pass-2026-10-14) and the holistic rounds [1](#disposition-m8-holistic-2026-10-14), [2](#disposition-m8-holistic2-2026-10-14), [3](#disposition-m8-holistic3-2026-10-14), [4](#disposition-m8-holistic4-2026-10-14), [5](#disposition-m8-holistic5-2026-10-14), [6](#disposition-m8-holistic6-2026-10-14), [7](#disposition-m8-holistic7-2026-10-14) and [8](#disposition-m8-holistic8-2026-10-14), with maintainer decisions D16 to D75 |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -8536,8 +8536,10 @@ An eighth internal holistic review round at `30e127f0` found no P1, P2s in
 the OpenAI prerequisite's pre-start stop, `--resume`'s pre-intent outcomes,
 an abandoned torn intent temporary, the startup-slice readiness test and the
 same-candidate refusals of a failed lane, and P3s across the five ADRs, the
-plan and governance. The maintainer decided D69 to D73 on 2026-10-14; the
-other items were fixed without a new decision. All five prerequisite ADRs
+plan and governance. The maintainer decided D69 to D73 on 2026-10-14, and
+D74 and D75 the same day for the `restore_abandoned` gate and the OpenAI
+prerequisite's missing callback; the other items were fixed without a new
+decision. All five prerequisite ADRs
 remain Proposed and M8 remains Open.
 
 1. **OpenAI prerequisite (D69)**, narrowing holistic 7's fix choice: only a
@@ -8545,7 +8547,8 @@ remain Proposed and M8 remains Open.
    transport failure before OpenAI answers the authorize request are the
    pre-start stop; any other prerequisite failure is a consumed failure of
    step 1 with the prerequisite's redacted output as its LOG. The login uses
-   `--store file`, and its transcript heads the case's LOG.
+   `--store file`, and its transcript heads the case's LOG. Refined by D75
+   (item 7).
 2. **Torn intent temporary (D70):** for `store restore --abandon` only, an
    `intent.tmp` that does not decode beside an absent `intent` is absence,
    ADR 0072's sixth amendment and ADR 0051's fourth amended clause.
@@ -8553,14 +8556,24 @@ remain Proposed and M8 remains Open.
    `inventory_mismatch` (exit 1) or `commit_unknown` (exit 2), claim
    retained, print the `--abandon` command; the continuation record gains
    `action`, and `--resume` refuses `restore_abandoned` after an
-   abandonment.
+   abandonment, narrowed by D74 (item 6).
 4. **Rehearsal campaigns (D72):** a discarded `m8-rehearsal-N` index is not
    an M8 campaign under D47; `--create` admits only `m8-closure-M` or
    `m8-rehearsal-N`, and only `m8-closure-*` counts toward closure.
 5. **Ephemeral `ask` (D73):** a sign-in model whose route has no binding is
    refused `provider_credential_required`, part of ADR 0073's ADR 0039
    amendment.
-6. **Choices made in the fixes without a maintainer decision, listed for
+6. **`restore_abandoned` (D74)**, narrowing D71: `--resume` refuses it only
+   when an abandon continuation is listed and the transaction has no intent
+   record; a transaction past its intent record, or committed, still
+   finishes with `--resume`, even after a refused `--abandon`.
+7. **Missing callback (D75)**, refining D69: the authorize request runs in
+   the operator's browser and the login makes no network call before its
+   callback, so D69's transport failure before OpenAI answers has no
+   instance the runner or CLI observes beyond the missing-prerequisite
+   check; a login that ends with no callback, its loopback wait expiring,
+   is a candidate failure of step 1.
+8. **Choices made in the fixes without a maintainer decision, listed for
    acceptance:** the `late_startup_failure` hook (94);
    `classification_slice_ms` limited to further slices; `doctor` printing
    `null` root and service for a file that does not validate; the in-flight
@@ -8573,11 +8586,22 @@ remain Proposed and M8 remains Open.
    names; `CaseRunner`'s `--concept` refused `invalid_m7_fixture_arguments`
    unless it is `docs/plans/M8.md` under its root; and `mix
    loopex.m7_evidence` checking `docs/plans/M8.md`'s `index-head:` lines.
+   For restore in ADR 0072: `Restore.abandon/2` kept `@doc false`, with
+   `StoreAdmin` its only caller and `store restore --abandon` the surface,
+   and its closed results, which never include `commit_unknown`; the
+   `{:abandon_claims, plan}` `Restore.IO` operation, which lists and
+   classifies the claim directories and captures each held claim's release
+   custody without the lookup reducer; `--abandon` checking every entry
+   under `DESTINATION` against the baseline's paths and the administrative
+   names, refusing `destination_not_empty` naming any other with nothing
+   removed; `StoreAdmin.closed/2` taking the root and the probe; the
+   `restore_conflict` row for `--abandon`; `--abandon` publishing its
+   `continuation-N` beside the backup, as `--resume` does, and writing
+   nothing in either root but removals; and the intent check reading the
+   destination's lineage directory read-only. Delivered behavior noted: a
+   complete copy of a backup holding an earlier restore's lineage cannot be
+   continued by `--resume` before the intent record; `--abandon` ends it.
    The fix-choice lists of
    [internal review 2](#disposition-m8-internal-review2-2026-10-13) and
    holistic 2 to [7](#disposition-m8-holistic7-2026-10-14) remain listed
    for acceptance.
-7. **Open for the maintainer:** the authorize request runs in the
-   operator's browser, so the CLI sees a transport failure before OpenAI
-   answers only as the loopback wait ending with no callback, which D69
-   counts as a candidate failure.

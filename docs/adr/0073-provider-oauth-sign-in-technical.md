@@ -2042,12 +2042,17 @@ dynamic client registration with OpenAI, which the lane performs (D64,
 D65): an attended `auth login openai` followed by `auth logout openai`,
 in the lane's own temporary `HOME`, so the generation floor keeps the
 issued `oaiapp_...` client.
-Only a missing host prerequisite, D65's two registration failures (an
+Only a missing host prerequisite and D65's two registration failures (an
 authorize error for `dynamic_agent_client`, or a callback that returns no
-issued client) and a transport failure before OpenAI answers the
-authorize request are a pre-start stop: `not_dispatched`, evidence
+issued client) are a pre-start stop: `not_dispatched`, evidence
 unavailable, resumable on the same commit, never a consumed failure
-(D69). Any other failure of the OpenAI prerequisite, such as its ID
+(D69). The authorize request runs in the operator's browser and the
+login makes no network call before its callback, so D69's transport
+failure before OpenAI answers has no instance the runner or CLI observes
+beyond the missing-prerequisite check; a login that ends with no
+callback, its loopback wait expiring, is a candidate failure, since the
+operator confirmed before `start` that a browser can reach the loopback
+port (D75). Any other failure of the OpenAI prerequisite, such as its ID
 token's audience or nonce, its scope, its model list's failure or bound,
 its store write or its logout, is a candidate failure: the runner starts
 the case and records it as a consumed failure of step (1), with the
@@ -2462,7 +2467,7 @@ outcome gates a lane.
 | # | Item | Disposition |
 | --- | --- | --- |
 | 1 | Whether an OpenAI refresh immediately invalidates the previous refresh token | None needed. The design assumes it does (lock, read-back, `roll_forward`), and `sign_in_refresh_test.exs` proves that worst case; no product path presents a rotated-away token to learn the answer |
-| 2 | Whether OpenAI requires a partner client ID rather than dynamic registration | Settled by the maintainer's provider action under [open item 1](0073-provider-oauth-sign-in.md#concept-adr-0073-open), which gates `real-sign-in-openai`; the lane does not record it. Its prerequisite, an attended `auth login openai` and `auth logout openai` in the lane's own `HOME`, performs the dynamic registration before the case starts. An authorize error for `dynamic_agent_client`, a callback that returns no issued client, or a transport failure before OpenAI answers the authorize request is a pre-start stop with the evidence unavailable, not a failed case; any other prerequisite failure is a consumed failure of step (1) (D64, D65, D69). A partner client would amend this record |
+| 2 | Whether OpenAI requires a partner client ID rather than dynamic registration | Settled by the maintainer's provider action under [open item 1](0073-provider-oauth-sign-in.md#concept-adr-0073-open), which gates `real-sign-in-openai`; the lane does not record it. Its prerequisite, an attended `auth login openai` and `auth logout openai` in the lane's own `HOME`, performs the dynamic registration before the case starts. An authorize error for `dynamic_agent_client` or a callback that returns no issued client is a pre-start stop with the evidence unavailable, not a failed case; any other prerequisite failure, a login that ends with no callback included, is a consumed failure of step (1) (D64, D65, D69, D75). A partner client would amend this record |
 | 3 | A documented allowed-model list for plan usage | Implementation. Only the per-account listing is documented and is what the route uses, through `model_list`; `sign_in_model_admission_test.exs` refuses an unlisted model with `provider_route_unavailable` |
 | 4 | An official OpenAI statement of the launch date | None needed. No rule depends on the date; it is research context only |
 | 5 | Whether Google classifies `cloud-platform` as sensitive or restricted | Settled by the maintainer's provider action under [open item 2](0073-provider-oauth-sign-in.md#concept-adr-0073-open), which gates `real-sign-in-gemini`; the lane does not record it. It sets the Google client's verification path, not code; the `adc` source does not depend on it |

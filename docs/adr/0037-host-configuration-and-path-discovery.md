@@ -252,7 +252,7 @@ configuration file is kept beside it.
 
 ## Open for the Maintainer
 
-None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 7](../process/agent-context-map.md#disposition-m8-holistic7-2026-10-14) dispositions list for it.
+None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 8](../process/agent-context-map.md#disposition-m8-holistic8-2026-10-14) dispositions list for it.
 
 ## Governance Record
 

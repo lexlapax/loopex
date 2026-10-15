@@ -1104,7 +1104,7 @@ complete; an `attestation` or `plan` that does not decode was torn by a
 kill during retention step 1, before `restore/2` was called, or damaged.
 `--resume` then refuses `restore_abandoned` with nothing written when a
 listed `continuation-N` has `action` `"abandon"` and the intent check finds
-no intent record (D71). From the same listing it takes `N`, one more than the highest `continuation-N` listed (1
+no intent record (D71, D74). From the same listing it takes `N`, one more than the highest `continuation-N` listed (1
 when none is); `N` above 1,024 refuses `inventory_limit_exceeded`. When
 `DESTINATION` is absent, as a run killed between retention steps 1 and 2
 leaves it, it performs retention step 2. It then publishes `continuation-N`
@@ -1270,7 +1270,7 @@ lists the first's `continuation-N` and refuses `previous_restore_running`
 while its invoker lives; a later `--resume` of a transaction an abandonment
 completed or left part-way refuses `restore_abandoned` and changes no root,
 while one whose abandonment refused at step 3 finds the intent record and
-continues. A new `store restore`
+continues (D74). A new `store restore`
 into `DESTINATION` refuses `destination_not_empty` while a partial copy
 remains and `restore_conflict` while the claim is held
 (`restore_guard.ex:512-514`), and the empty directory its retention step 2
@@ -1405,7 +1405,7 @@ Parser errors are `usage` and exit 1, as for every `loopex` command.
 | `discard_requires_lost_source` | restore | `--discard-later-work` with `--source available` | Move the original root aside and restore with `--source lost`, or drop the flag if the backup is the latest state |
 | `old_writer_running`, `previous_restore_running` | restore | A live holder or earlier restore process | Stop it |
 | `restore_not_abandonable` | restore `--abandon` | The transaction reached its intent record, or committed (D66, D67) | `--resume TX_ID` |
-| `restore_abandoned` | restore `--resume` | A listed `continuation-N` records an abandonment and the transaction has no intent record (D71) | Rerun `--abandon TX_ID` if it stopped part-way; start a new restore without `--resume` |
+| `restore_abandoned` | restore `--resume` | A listed `continuation-N` records an abandonment and the transaction has no intent record (D71, D74) | Rerun `--abandon TX_ID` if it stopped part-way; start a new restore without `--resume` |
 | `restore_conflict` | restore `--abandon` | A claim directory beside a root the plan names holds another transaction's `owner`, an `owner` that does not decode, or another entry, or an acquisition published its `owner` while the directory was being removed; names the claim | Finish the other transaction with `--resume` or end it with `--abandon` first, then rerun; a claim whose `owner` does not decode, or that holds another entry, stays stranded under ADR 0051 |
 | `source_absent`, `source_not_absent` | restore | Path contradicts `--source` | State the true branch |
 | `destination_not_empty`, `destination_path_invalid` | restore | Destination rules; for `--abandon`, `destination_not_empty` names an entry beneath `DESTINATION` the restore did not write, and nothing is removed | Choose a new empty directory; for `--abandon`, move the named entry out, then rerun |
@@ -2016,7 +2016,8 @@ decided on 2026-10-14 as D67 and D68; the
 specify them. The eighth review's torn `intent.tmp` was decided as D70, the
 sixth amendment, and `--resume`'s outcomes before the intent record, its
 `--abandon` command, the continuation record's `action` and
-`restore_abandoned` as D71, which the
+`restore_abandoned` as D71, that refusal narrowed by D74 to a transaction
+with no intent record, which the
 [re-presentation](#technical-adr-0072-restore) specifies.
 
 Acceptance of this record includes the fix choices the M8 internal review 2
