@@ -2055,23 +2055,34 @@ so its stop resumes only on a candidate that carries it or defers the lane
 under D36. Every step runs after `start`; any failure in a step is a
 consumed failure of the case, and a run killed after `start` leaves the
 case started, which is consumed (D30, D76). Each lane runs every step
-with `LOOPEX_HOME` and `CLOUDSDK_CONFIG` unset, in a temporary `HOME`
-created owner-only by `mktemp -d` outside the release runner's own
-temporary directories, which its exit trap removes, with `--store file`
-(D84). Before its first step each `real-sign-in-*` lane prints to the
-terminal `<lane>: home PATH`, naming that `HOME`, and the operator's
-cleanup commands for it, bound to the lane: `env -u LOOPEX_HOME -u
-CLOUDSDK_CONFIG HOME=PATH BIN service stop`, where `BIN` is the absolute
-path of the installed `bin/loopex` the lane used; for
-`real-sign-in-gemini-adc`, `env -u CLOUDSDK_CONFIG HOME=PATH gcloud auth
+under `env -i` with only `HOME=PATH` and the `PATH`, `TERM` and `LANG`
+variables (D85), its home `PATH` created owner-only by `mktemp -d`
+outside the release runner's own temporary directories, which its exit
+trap removes, and with `--store file` (D84). After `start` each
+`real-sign-in-*` lane prints to the terminal `<lane>: home PATH`, naming
+that `HOME`, and the operator's cleanup commands for it, bound to the
+lane, with the values of the `PATH`, `TERM` and `LANG` variables it uses
+printed literally: `env -i HOME=PATH
+PATH="$PATH" TERM="$TERM" LANG="$LANG" BIN service stop`, where `BIN` is
+`PATH/.local/opt/loopex/bin/loopex`; for `real-sign-in-gemini-adc`,
+`env -i HOME=PATH PATH="$PATH" TERM="$TERM" LANG="$LANG" gcloud auth
 application-default revoke`; revocation at the provider of any other
-leftover grant; then `rm -rf PATH` (D82, D84). The operator reruns
-`service stop` until it reports `stopped` before `rm -rf`; in a `HOME`
-with no configuration file (the `real-sign-in-anthropic` lane's, or one
-whose lane was killed before `init`) it refuses `configuration_not_found`,
-meaning no service. A service a killed lane was still spawning can take its lock after that `stopped`; the operator-cleanup residual includes it. The lane neither stops the service it leaves nor
-deletes its `HOME` or its transcript file; its steps' own service stop and
-restart (step 3) and logouts are not cleanup. After it ends, by pass,
+leftover grant; then `rm -rf PATH` (D82, D84, D85). Then, before its first
+step, it extracts the verified archive under that `HOME` and installs it
+at ADR 0038's documented location there by ADR 0038's install sequence,
+so `BIN` is the `loopex` every step runs; each lane except
+`real-sign-in-anthropic` then writes its configuration file with `BIN
+init` and `BIN config set`, binding only its route, `oauth`, and selecting
+its model; a failure there is a consumed failure of the case (D76). The
+operator reruns `service stop` until it reports `stopped` before `rm -rf`;
+a missing `BIN`, or a refusal `configuration_not_found` in a `HOME` with
+no configuration file (the `real-sign-in-anthropic` lane's, or one whose
+lane was killed before its `init`), means no service. A service a killed
+lane was still spawning can take its lock after that `stopped`; the
+operator-cleanup residual includes it. The lane neither stops the service
+it leaves nor deletes its `HOME` or its transcript file; its steps' own
+service stop and restart (step 3) and logouts are not cleanup. After it
+ends, by pass,
 failure or kill, the operator runs those commands, a stated
 operator-cleanup residual, and the lane's pass or fail does not depend on
 them (D82). A login's grant is revoked only when its logout confirms the

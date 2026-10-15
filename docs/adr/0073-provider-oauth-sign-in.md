@@ -40,7 +40,8 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   (D81), the operator's cleanup of each lane's home after the lane ends
   (D82), a revocation counted only when a sign-out confirms it (D83) and
   the lanes' unset `LOOPEX_HOME` and `CLOUDSDK_CONFIG` with cleanup
-  commands bound to each lane (D84)
+  commands bound to each lane (D84), simplified to an `env -i` allowlist
+  (D85)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -562,15 +563,18 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
    failure or interruption leaves before a sign-out that confirms its
    revocation, may stay valid; a passing Google lane revokes its grant (D79,
    D80, D83). The `adc` lane's gcloud login leaves a Google grant that
-   Loopex's sign-out never touches, on every run (D81). Each sign-in lane
-   runs with `LOOPEX_HOME` and `CLOUDSDK_CONFIG` unset, in a temporary home
-   outside the release runner's own temporary directories, prints that
-   home's path and the operator's cleanup commands, bound to that home and
-   to the installed `loopex` the lane used, before its first step, and
-   cleans up nothing itself: after the lane ends, by pass, failure or kill,
-   the operator stops any service in that home, revokes any leftover grant
-   at the provider and deletes the home, a stated residual on which the
-   lane's result does not depend (D82, D84).
+   Loopex's sign-out never touches, on every run (D81). Each sign-in lane,
+   and each cleanup command it prints, runs under `env -i` with only
+   `HOME`, `PATH`, `TERM` and `LANG`, in a temporary home outside the
+   release runner's own temporary directories, where the lane installs the
+   verified archive. Before its first step the lane prints that home's
+   path and the operator's cleanup commands, bound to that home and to
+   that installed `loopex`, and it cleans up nothing itself: after the lane
+   ends, by pass, failure or kill, the operator stops any service in that
+   home, revokes any leftover grant at the provider and deletes the home; a
+   service a killed lane was still spawning can outlive that stop, part of
+   the same residual. That residual is stated, and the lane's result does
+   not depend on it (D82, D84, D85).
 2. **Google client.** Create Loopex's Google OAuth desktop client in a Google
    Cloud project the maintainer owns, and decide when to pass verification for
    the `cloud-platform` scope. Until the app is verified, users see an
