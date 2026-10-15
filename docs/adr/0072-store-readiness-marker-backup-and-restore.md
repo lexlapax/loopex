@@ -374,12 +374,12 @@ Before the intent record, `--resume` either commits an exact complete copy,
 as the delivered restore admits, or answers not restored (exit 1) or
 unresolved (exit 2), whichever the delivered restore gives, and prints the
 `--abandon` command (D71, D77). Once an abandonment is recorded and no
-intent record exists, `--resume` refuses `restore_abandoned`, so an
+intent record exists, one it cannot read counting as one, `--resume` refuses `restore_abandoned`, so an
 abandoned plan is never re-run from the start. A transaction past its intent record, or committed, still finishes with
 `--resume`, even after a refused `--abandon` (D74), except in one window
 that has no path in M8: a restore whose available source is itself a
 restored root, killed after the destination's intent record and before the
-restore writes to the source, is not resumed, and `--abandon` refuses it, so
+restore's first write to the source, is not resumed, and `--abandon` refuses it, so
 its claims stay and both roots stay closed. M8 gives the operator nothing
 beyond leaving them; it is a residual of this record (D77).
 
@@ -537,9 +537,9 @@ the fifth amendment; the eighth review's torn intent temporary as D70, with
 the sixth amendment, and `--resume`'s outcomes before the intent record as
 D71, its `restore_abandoned` refusal narrowed by D74; the ninth review's
 findings as D77, which states those outcomes by phase. Acceptance of this record includes the fix choices the M8 internal
-review 2 and holistic 2 to 8 dispositions list for it
+review 2 and holistic 2 to 9 dispositions list for it
 ([internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13),
-[holistic 8](../process/agent-context-map.md#disposition-m8-holistic8-2026-10-14)).
+[holistic 9](../process/agent-context-map.md#disposition-m8-holistic9-2026-10-14)).
 
 ## Governance Record
 

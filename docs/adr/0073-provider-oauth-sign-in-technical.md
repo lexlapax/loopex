@@ -2049,14 +2049,14 @@ in a step is a consumed failure of the case, and a run killed after
 runs in a temporary `HOME` with `--store file`:
 
 - `real-sign-in-openai`, `steps=6`: (0) Loopex's dynamic client
-  registration with OpenAI (D64, D65, D76): an attended `loopex auth login
-  openai --store file` followed by `loopex auth logout openai`, so the
-  generation floor keeps the issued `oaiapp_...` client (D23); any failure
-  in it, OpenAI refusing the registration included, is a consumed failure
-  of the case like any other step's, and a run killed between its login and
-  its logout leaves that temporary home's tokens unrevoked, which the
-  operator revokes at OpenAI, a stated lane residual; (1) an attended
-  `auth login openai`,
+  registration with OpenAI, an attended `loopex auth login openai --store
+  file` followed by `loopex auth logout openai` in the lane's own temporary
+  `HOME`, so the generation floor keeps the issued `oaiapp_...` client
+  (D23); any failure in it, OpenAI refusing the registration included, is a
+  consumed failure (D64, D65, D76), and a run killed between its login and
+  its logout leaves that home's tokens unrevoked, which the operator
+  revokes at OpenAI, a stated lane residual; step (0)'s output heads the
+  lane's redacted retained output; (1) an attended `auth login openai`,
   which must authorize under the floor's issued client, whose callback
   must return that same client, and whose model list, fetched before the
   login's write, must be recorded non-empty within its bounds and name

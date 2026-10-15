@@ -8635,7 +8635,7 @@ remains Open.
    codes. D66, D67 and D70 are ADR 0051's further reviewed recovery
    decision, the clause count unchanged; a restore whose available source
    is itself a restored root, killed after the destination's intent and
-   before the restore writes to the source, is a stated ADR 0072 residual
+   before the restore's first write to the source, is a stated ADR 0072 residual
    with a probe row.
 3. **Choices made in the fixes without a maintainer decision, listed for
    acceptance:** on another candidate, the refusals the delivered admission

@@ -1156,10 +1156,13 @@ grant nothing: `--abandon` repeats its own checks under the guardian
   `DESTINATION/.loopex-restore/lineage/ORDINAL/`, `ORDINAL` being the plan's
   `prior_restore_count` + 1 in eight digits, at most 65,536 bytes of each
   (ADR 0051 technical depth `:225-226`). It finds an intent record of the
-  transaction only when one of them decodes with
-  `RestoreCodec.decode(:intent, _)` and its `tx_id` is the plan's; anything
-  else, an absent `DESTINATION` or file, a longer file and a read error
-  included, is none. Before the intent record it therefore finds none.
+  transaction when one of them decodes with
+  `RestoreCodec.decode(:intent, _)` and its `tx_id` is the plan's, and
+  counts a read error of either as an intent record too: `--resume` then
+  calls `restore/2`, which reports its own IO result, and prints the
+  re-presentation command. Anything else, an absent `DESTINATION` or file
+  and a longer file included, is none. Before the intent record it
+  therefore finds none unless a read fails.
 - The claim check lists the claim directory beside each root the plan
   names. One holding nothing or only `owner.tmp` is owner-less (D68).
 
@@ -1177,8 +1180,9 @@ ends every transaction before it, the exact complete copy that ADR 0051
 would also continue included, and `--resume` is the only path from it on.
 One window has no path in M8, an ADR 0072 residual: a restore whose
 available source is itself a restored root, killed after the destination's
-`intent` and before its first write to the source, the source's new lineage
-ordinal directory (`workflow.ex:1723-1731`). There the source's newest
+`intent` and before the restore's first write to the source, the source's
+new lineage ordinal directory (`workflow.ex:1723-1731`). Code reading proves
+the residual for that window only: there the source's newest
 ordinal is its earlier destination-role one, which the source claim's lookup
 refuses (`restore_guard.ex:242`, `:550-562`), so `--resume` does not
 commit, and `--abandon` refuses `restore_not_abandonable`. The claims stay
@@ -2048,6 +2052,6 @@ requires, and the residual window of an available source that is a
 restored root.
 
 Acceptance of this record includes the fix choices the M8 internal review 2
-and holistic 2 to 8 dispositions list for it
+and holistic 2 to 9 dispositions list for it
 ([internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13),
-[holistic 8](../process/agent-context-map.md#disposition-m8-holistic8-2026-10-14)).
+[holistic 9](../process/agent-context-map.md#disposition-m8-holistic9-2026-10-14)).
