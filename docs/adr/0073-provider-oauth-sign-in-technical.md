@@ -2085,8 +2085,9 @@ at ADR 0038's documented location there by ADR 0038's install sequence
 without its `export PATH=…` line, running `BIN version` in place of
 `loopex version`, so `BIN` is the `loopex` every step runs; each lane except
 `real-sign-in-anthropic` then writes its configuration file with `BIN
-init`, whose required environment binding names a provider without sign-in,
-then with `BIN config set` binds its route, `oauth` with source `adc` for
+init`, whose required environment binding names a route whose catalog
+profile is not `sign_in` (for example `openai`), then with one `BIN config
+set /providers/ROUTE` of the whole binding object binds its route, `oauth` with source `adc` for
 `real-sign-in-gemini-adc` and `loopex` otherwise (for `vertex` with the
 maintainer-owned `project` and `location` `global`), sets its model to that
 route, and replaces `/providers` with that route's binding alone, so the file

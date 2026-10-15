@@ -129,9 +129,11 @@ They are recorded here as decided, not proposed.
    helper owner last published about itself and never waits for that owner.
    A command that starts the service waits at most 75 seconds for it to serve
    and otherwise reports the state it found.
-8. **The ADR 0003 amendment is one module.** Only the installed reference
-   host's home-discovery code reads `HOME`, and it passes absolute paths
-   inward. Tests set `HOME` to a temporary directory.
+8. **The ADR 0003 amendment is one module and one attended opt-in.** Only
+   the installed reference host's home-discovery code reads `HOME`, and it
+   passes absolute paths inward. Tests set `HOME` to a temporary directory,
+   except the attended `m8-operator` record, which runs in the separate
+   macOS user account ADR 0038 names (D87).
 9. **Sign-in tokens never live inside a state root.** The sign-in directory,
    gcloud's Application Default Credentials directory and every state root
    stay apart by path, as the
@@ -227,7 +229,8 @@ origins, and runs `loopex chat --service` from any terminal; the first such
 command starts the service. `loopex service status` and `loopex doctor` print
 one machine-readable line each, and `doctor` never resolves a credential or
 scans session history. The host still refuses missing authority or provider
-bindings. Tests always use temporary homes.
+bindings. Tests use temporary homes, apart from the attended `m8-operator`
+record (D87).
 
 A configuration change reaches the running service only after a restart; the
 writers say so when a service is serving. Removing the configuration does not
@@ -253,7 +256,7 @@ configuration file is kept beside it.
 
 ## Open for the Maintainer
 
-None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 17](../process/agent-context-map.md#disposition-m8-holistic17-2026-10-14) dispositions list for it.
+None. Acceptance of this record includes the fix choices the M8 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13) and [holistic 2 to 18](../process/agent-context-map.md#disposition-m8-holistic18-2026-10-14) dispositions list for it.
 
 ## Governance Record
 

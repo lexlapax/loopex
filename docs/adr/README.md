@@ -12,7 +12,7 @@ a decision adds a new record rather than rewriting the old one.
 | --- | --- | --- | --- | --- |
 | 0001 | Repository and application layout | Accepted (partially superseded by 0030) | [Decision](0001-repository-and-application-layout.md#concept) | [Technical depth](0001-repository-and-application-layout-technical.md#technical-depth) |
 | 0002 | Bootstrap runtime floor and version matrix | Accepted (partially superseded by 0026) | [Decision](0002-bootstrap-runtime-floor.md#concept) | [Technical depth](0002-bootstrap-runtime-floor-technical.md#technical-depth) |
-| 0003 | Extension contract boundary and distribution constraints | Accepted (home reading, with the attended `m8-operator` opt-in of D87, and the no-compiler sentence amended by Proposed 0037 and 0038 on their acceptance, M8) | [Decision](0003-extension-contract-boundary.md#concept) | [Technical depth](0003-extension-contract-boundary-technical.md#technical-depth) |
+| 0003 | Extension contract boundary and distribution constraints | Accepted (home reading and its no-real-home test rule (the attended `m8-operator` opt-in, D87), and the no-compiler sentence, amended by Proposed 0037 and 0038 on their acceptance, M8) | [Decision](0003-extension-contract-boundary.md#concept) | [Technical depth](0003-extension-contract-boundary-technical.md#technical-depth) |
 | 0004 | Plan amendment and supersession | Proposed (parked) | [Decision](0004-plan-amendment-supersession.md#concept) | [Technical depth](0004-plan-amendment-supersession-technical.md#technical-depth) |
 | 0005 | Milestone supersession | Proposed (parked) | [Decision](0005-milestone-supersession.md#concept) | [Technical depth](0005-milestone-supersession-technical.md#technical-depth) |
 | 0006 | Store transaction contract and owner epoch | Accepted (creation-domain transaction catalogue and durable custody amended by 0059) | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
@@ -232,7 +232,8 @@ after M7 coding-agent proof. ADR 0037 extends M7's explicit configuration with
 installed discovery, writers, lifecycle commands, start on demand and the
 `daemon.readiness` report; it introduces no separate role/provider schema. On
 acceptance it narrowly amends ADR 0003's ban on reading a user home, for the
-installed reference host's home discovery only, and ADR 0049's grammar so that
+installed reference host's home discovery only, with the attended `m8-operator`
+record as the opt-in of its no-real-home test rule (D87), and ADR 0049's grammar so that
 `--config` is optional when a home is selected and `loopex ask` accepts it,
 taking only `providers` for the providers they name (D54, D57); it applies ADR 0044's
 `loopex.experimental/4` manifest recipe to add `daemon.readiness` to that

@@ -1599,8 +1599,11 @@ candidate.
    runs under. The lane refuses before staging when the tag does not name
    that commit.
 2. **Write.** In a temporary directory `T` whose path has no symbolic-link
-   component, with `LOOPEX_HOME` unset and `HOME` the new empty directory `T/home` for this
-   step and steps 3 to 5, `T/workspace` is a fresh copy of
+   component, with `LOOPEX_HOME` unset, `HOME` the new empty directory
+   `T/home`, and `MIX_HOME`, `MIX_ARCHIVES` and `HEX_HOME` set to the
+   runner's own (`MIX_HOME` defaulting to the runner's `~/.mix`), so the
+   Mix runs of the shape check and steps 5 and 6 find Hex and rebar, for this step, its shape check and steps 3 to 6, `T/workspace`
+   is a fresh copy of
    M7's `test/fixtures/m7/review/workspace`, live on its own device and
    inode, and `T/config.json` is the fixture's configuration form for `T`.
    The M7 build has no credential-free chat provider, so the lane runs the
@@ -2074,6 +2077,6 @@ restored root. The tenth review's were decided as D78: one intent record,
 the intent check's, for `--abandon` and `--resume`.
 
 Acceptance of this record includes the fix choices the M8 internal review 2
-and holistic 2 to 17 dispositions list for it
+and holistic 2 to 18 dispositions list for it
 ([internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13),
-[holistic 17](../process/agent-context-map.md#disposition-m8-holistic17-2026-10-14)).
+[holistic 18](../process/agent-context-map.md#disposition-m8-holistic18-2026-10-14)).
