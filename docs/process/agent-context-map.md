@@ -57,7 +57,7 @@ starting from the founding vision and moving to the implemented subsystems.
 | Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
 | Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
 | M7 coding-agent proof | [M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | Closed 2026-10-13 under its [closure disposition](#disposition-m7-closure-2026-10-13). ADRs 0041–0049 and the narrow vision amendment were accepted with it. Read the [external review](../evidence/M7-external-review-1.md), [scope decisions](#disposition-m7-audit-scope-2026-09-30) and [thinking-continuation choice](#disposition-m7-thinking-continuation-2026-09-30), [authorized section 13.4 amendment](#disposition-m7-continuation-vision-amendment-2026-09-30), [round 5 decisions](#disposition-m7-round5-outage-2026-09-30) and [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) for the decisions behind it. |
-| M8 installed-operator planning | [Open M8 plan](../plans/M8.md#concept) | [Prerequisites and proof](../plans/M8-technical.md#technical-depth) | Open for planning after M7 closed; no product implementation. Read the [opening record](#disposition-m8-opening-2026-09-30), the [rebase record](#disposition-m8-rebase-2026-10-13), the [scope record](#disposition-m8-scope-2026-10-13), the [detail record](#disposition-m8-detail-2026-10-13), the readiness records [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), [final pass](#disposition-m8-final-pass-2026-10-14), [holistic](#disposition-m8-holistic-2026-10-14), [holistic 2](#disposition-m8-holistic2-2026-10-14), [holistic 3](#disposition-m8-holistic3-2026-10-14), [holistic 4](#disposition-m8-holistic4-2026-10-14), [holistic 5](#disposition-m8-holistic5-2026-10-14), [holistic 6](#disposition-m8-holistic6-2026-10-14), [holistic 7](#disposition-m8-holistic7-2026-10-14), [holistic 8](#disposition-m8-holistic8-2026-10-14), [holistic 9](#disposition-m8-holistic9-2026-10-14), [holistic 10](#disposition-m8-holistic10-2026-10-14), [holistic 11](#disposition-m8-holistic11-2026-10-14) and [holistic 12](#disposition-m8-holistic12-2026-10-14) records, and Proposed ADRs 0037, 0038, 0071, 0072 and 0073. ADR 0072 builds on accepted ADR 0051's restore. ADR 0073 adds provider sign-in as outcome 8. ADR 0036 covers only the M9 engine, migration and capacity refusal. |
+| M8 installed-operator planning | [Open M8 plan](../plans/M8.md#concept) | [Prerequisites and proof](../plans/M8-technical.md#technical-depth) | Open for planning after M7 closed; no product implementation. Read the [opening record](#disposition-m8-opening-2026-09-30), the [rebase record](#disposition-m8-rebase-2026-10-13), the [scope record](#disposition-m8-scope-2026-10-13), the [detail record](#disposition-m8-detail-2026-10-13), the readiness records [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), [final pass](#disposition-m8-final-pass-2026-10-14), [holistic](#disposition-m8-holistic-2026-10-14), [holistic 2](#disposition-m8-holistic2-2026-10-14), [holistic 3](#disposition-m8-holistic3-2026-10-14), [holistic 4](#disposition-m8-holistic4-2026-10-14), [holistic 5](#disposition-m8-holistic5-2026-10-14), [holistic 6](#disposition-m8-holistic6-2026-10-14), [holistic 7](#disposition-m8-holistic7-2026-10-14), [holistic 8](#disposition-m8-holistic8-2026-10-14), [holistic 9](#disposition-m8-holistic9-2026-10-14), [holistic 10](#disposition-m8-holistic10-2026-10-14), [holistic 11](#disposition-m8-holistic11-2026-10-14), [holistic 12](#disposition-m8-holistic12-2026-10-14) and [holistic 13](#disposition-m8-holistic13-2026-10-14) records, and Proposed ADRs 0037, 0038, 0071, 0072 and 0073. ADR 0072 builds on accepted ADR 0051's restore. ADR 0073 adds provider sign-in as outcome 8. ADR 0036 covers only the M9 engine, migration and capacity refusal. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Architecture as implemented | [Architecture](../developer/architecture.md#concept) | [Architecture invariants and mechanics](../developer/architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
@@ -368,7 +368,7 @@ end of the file.
 | M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27); [implementation start](#disposition-m6-implementation-start-2026-09-27) |
 | M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30), [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30) and [proposed rollback retarget](#disposition-m7-round5-rollback-proposal-2026-09-30); [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) and [proposed logical-matrix rule](#disposition-m7-round6-matrix-proposal-2026-09-30); earlier choices remain recorded in the [M7 plan](../plans/M7.md#concept) |
 | M7 acceptance, 2026-09-30 | [Plan pair, ADRs 0041–0049 and paired vision amendments accepted](#disposition-m7-acceptance-2026-09-30); implementation may begin under the accepted ownership sequence |
-| M8 planning, from 2026-09-30 | [Opened as the planning successor](#disposition-m8-opening-2026-09-30); [rebased onto the closed M7 baseline](#disposition-m8-rebase-2026-10-13); [rescoped to the delivered M7 baseline](#disposition-m8-scope-2026-10-13) with four maintainer decisions that settle choices C1 to C3 and supersede P3; [completed for implementation](#disposition-m8-detail-2026-10-13) with P1, P2 and P4 to P8 accepted, service-hosted helpers and provider sign-in added, and only provider registrations and acceptance of the listed fix choices left open; revised after readiness reviews [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), the [final pass](#disposition-m8-final-pass-2026-10-14) and the holistic rounds [1](#disposition-m8-holistic-2026-10-14), [2](#disposition-m8-holistic2-2026-10-14), [3](#disposition-m8-holistic3-2026-10-14), [4](#disposition-m8-holistic4-2026-10-14), [5](#disposition-m8-holistic5-2026-10-14), [6](#disposition-m8-holistic6-2026-10-14), [7](#disposition-m8-holistic7-2026-10-14), [8](#disposition-m8-holistic8-2026-10-14), [9](#disposition-m8-holistic9-2026-10-14), [10](#disposition-m8-holistic10-2026-10-14), [11](#disposition-m8-holistic11-2026-10-14) and [12](#disposition-m8-holistic12-2026-10-14), with maintainer decisions D16 to D83 |
+| M8 planning, from 2026-09-30 | [Opened as the planning successor](#disposition-m8-opening-2026-09-30); [rebased onto the closed M7 baseline](#disposition-m8-rebase-2026-10-13); [rescoped to the delivered M7 baseline](#disposition-m8-scope-2026-10-13) with four maintainer decisions that settle choices C1 to C3 and supersede P3; [completed for implementation](#disposition-m8-detail-2026-10-13) with P1, P2 and P4 to P8 accepted, service-hosted helpers and provider sign-in added, and only provider registrations and acceptance of the listed fix choices left open; revised after readiness reviews [1](#disposition-m8-readiness1-2026-10-13), [2](#disposition-m8-readiness2-2026-10-13), [3](#disposition-m8-readiness3-2026-10-13), [4](#disposition-m8-readiness4-2026-10-13), [5](#disposition-m8-readiness5-2026-10-13), [6](#disposition-m8-readiness6-2026-10-14) and [7](#disposition-m8-readiness7-2026-10-14), the [internal review](#disposition-m8-internal-review-2026-10-13), [internal review 2](#disposition-m8-internal-review2-2026-10-13), the [final pass](#disposition-m8-final-pass-2026-10-14) and the holistic rounds [1](#disposition-m8-holistic-2026-10-14), [2](#disposition-m8-holistic2-2026-10-14), [3](#disposition-m8-holistic3-2026-10-14), [4](#disposition-m8-holistic4-2026-10-14), [5](#disposition-m8-holistic5-2026-10-14), [6](#disposition-m8-holistic6-2026-10-14), [7](#disposition-m8-holistic7-2026-10-14), [8](#disposition-m8-holistic8-2026-10-14), [9](#disposition-m8-holistic9-2026-10-14), [10](#disposition-m8-holistic10-2026-10-14), [11](#disposition-m8-holistic11-2026-10-14), [12](#disposition-m8-holistic12-2026-10-14) and [13](#disposition-m8-holistic13-2026-10-14), with maintainer decisions D16 to D84 |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -8769,9 +8769,10 @@ prerequisite ADRs remain Proposed and M8 remains Open.
 <a id="disposition-m8-holistic12-2026-10-14"></a>
 ### M8 internal holistic review round 12 answered — 2026-10-14
 
-A twelfth internal holistic review round at `27d0a919` found no P1, one P2,
-D81's example revocation of the adc grant failing once the lane had deleted
-its `HOME`, and P3s across the five ADRs, the plan and governance. The
+A twelfth internal holistic review round at `27d0a919` found no P1 and two
+P2s, D81's example revocation of the adc grant failing once the lane had
+deleted its `HOME`, and the lane's `HOME` deletion racing the stopped
+service's last log write, both removed by D82, and P3s across the five ADRs, the plan and governance. The
 maintainer decided D82 and D83 on 2026-10-14; the other items were fixed
 without a new decision. All five prerequisite ADRs remain Proposed and M8
 remains Open.
@@ -8817,4 +8818,53 @@ remains Open.
    The fix-choice lists of
    [internal review 2](#disposition-m8-internal-review2-2026-10-13) and
    holistic 2 to [11](#disposition-m8-holistic11-2026-10-14) remain listed
+   for acceptance.
+
+<a id="disposition-m8-holistic13-2026-10-14"></a>
+### M8 internal holistic review round 13 answered — 2026-10-14
+
+A thirteenth internal holistic review round at `9bb83f17` found no P1, one
+P2, the sign-in lanes and their printed cleanup commands acting through
+`LOOPEX_HOME` and `CLOUDSDK_CONFIG` inherited from the operator's shell on
+the operator's own service and gcloud credential, and P3s across ADRs 0072
+and 0073, the plan and governance. The maintainer decided D84 on
+2026-10-14; the other items were fixed without a new decision. All five
+prerequisite ADRs remain Proposed and M8 remains Open.
+
+1. **Lane-bound environment and cleanup (D84)**, refining D82: every
+   `real-sign-in-*` lane step runs with `LOOPEX_HOME` and `CLOUDSDK_CONFIG`
+   unset; the lane's temporary `HOME` is created owner-only by `mktemp -d`
+   outside the release runner's own temporary directories, which its exit
+   trap removes; the printed cleanup commands are `env -u LOOPEX_HOME -u
+   CLOUDSDK_CONFIG HOME=PATH <absolute path of the installed bin/loopex the
+   lane used> service stop`; for `real-sign-in-gemini-adc`, `env -u
+   CLOUDSDK_CONFIG HOME=PATH gcloud auth application-default revoke`;
+   revocation at the provider of any other leftover grant; then `rm -rf
+   PATH`.
+2. **Choices made in the fixes without a maintainer decision, listed for
+   acceptance:** D82's "never stops a service or deletes anything itself"
+   read as cleanup at the lane's end, step 3's service stop and restart and
+   the logouts being lane steps, noted on the D82 row, and stated in ADR
+   0073 and plan items 3 and 5 as "its steps' own service stop and restart
+   (step 3) and logouts are not cleanup"; the placeholder `BIN` for the
+   absolute path of the installed `bin/loopex` the lane used; the operator
+   rerunning `service stop` until it reports `stopped` before `rm -rf`, a
+   `HOME` with no configuration file (the `real-sign-in-anthropic` lane's,
+   or one whose lane was killed before `init`) refusing
+   `configuration_not_found`, meaning no service; the grant of a login not
+   followed by a confirmed revocation stated as one that may stay valid, its record staying in the
+   lane's `HOME` unless a logout that exited 74 deleted it (D79, D83); the
+   temporary `LOOPEX_HOME` claims narrowed for the `real-sign-in-*` lanes,
+   whose root lies under their temporary `HOME`. For restore in ADR 0072:
+   the residual window's re-restore stated as a new transaction under its
+   own attestation, not a re-presentation or replacement of the stuck one,
+   whose claims and fence ADR 0051 keeps, amending no ADR 0051 clause, and
+   noted on the D77 row; the remedy written as an available source moved
+   aside first and attributed to holistic 11 for a damaged intent record
+   and holistic 12 for the residual window; ADR 0072's lost-source check
+   stated as checking only that the captured source path is absent; and
+   the D67 and D71 evidence cells stating the `"next"` member. The
+   holistic 12 record now counts two P2s. The fix-choice lists of
+   [internal review 2](#disposition-m8-internal-review2-2026-10-13) and
+   holistic 2 to [12](#disposition-m8-holistic12-2026-10-14) remain listed
    for acceptance.

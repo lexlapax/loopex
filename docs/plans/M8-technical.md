@@ -170,9 +170,10 @@ Constraints that hold across workstreams:
   `LOOPEX_HOME` and keychains; no test touches a real keyring or login
   keychain. The attended `real-sign-in-*` lanes are no exception: each signs
   in under a temporary `HOME` with `--store file` (ADR 0073's owner-only file
-  backend), and the keychain and Secret Service backends are proved only by
-  the `macos_keychain` and `secret_service` lanes on a temporary keychain and
-  a private session bus. The one contact with a real keychain is the
+  backend) and with `LOOPEX_HOME` and `CLOUDSDK_CONFIG` unset (D84), so its
+  root lies under that `HOME`, and the keychain and Secret Service backends
+  are proved only by the `macos_keychain` and `secret_service` lanes on a
+  temporary keychain and a private session bus. The one contact with a real keychain is the
   read-only absence query of the macOS installed lane's and `m8-operator`'s
   removal steps, which writes nothing and asks only for the items of its
   own home (`-a <home-digest>:<route>`, ADR 0073); under the installed
@@ -296,7 +297,8 @@ Test files are new unless marked extended. "Fast" means `bash
 scripts/check.sh`; release lanes run under `bash scripts/check-release.sh
 --only LANE` before a merge that changes their boundary and once in the
 closure matrix. Every case uses temporary `HOME`, `LOOPEX_HOME` and
-workspaces.
+workspaces; a `real-sign-in-*` lane runs under a temporary `HOME` with
+`LOOPEX_HOME` and `CLOUDSDK_CONFIG` unset (D84).
 
 **Closure matrix (D18, revised).** The full `bash scripts/check-release.sh`
 runs once on the Linux x86-64 host `serenity`, with the M8 attempts index
@@ -618,20 +620,31 @@ unchanged (`git diff main m8 -- apps scripts` is empty); `matrix.ex` below is
    by `loopex auth logout openai` in the lane's own temporary `HOME`, so the
    generation floor keeps the issued `oaiapp_` client (D23); any failure in
    it, OpenAI refusing the registration included, is a consumed failure
-   (D76). Each lane runs in a temporary `HOME`, created owner-only, with
-   `--store file`. Before its first step each `real-sign-in-*` lane prints
-   to the terminal `<lane>: home PATH`, naming that `HOME`, and the
-   operator's cleanup commands for it: `HOME=PATH loopex service stop`; for
-   `real-sign-in-gemini-adc`, `HOME=PATH gcloud auth application-default
-   revoke`; revocation at the provider of any other leftover grant; then
-   `rm -rf PATH`. The lane neither stops the service it leaves nor deletes
-   its `HOME`: after it ends, by pass, failure or kill, the operator runs
-   those commands, a stated operator-cleanup residual, and the lane's pass
-   or fail does not depend on them (D82). A login's grant is revoked only
-   when its logout confirms the revocation (D83). The grant of
+   (D76). Each lane runs every step with `LOOPEX_HOME` and `CLOUDSDK_CONFIG`
+   unset, in a temporary `HOME` created owner-only by `mktemp -d` outside
+   the release runner's own temporary directories, which its exit trap
+   removes, with `--store file` (D84). Before its first step each
+   `real-sign-in-*` lane prints to the terminal `<lane>: home PATH`, naming
+   that `HOME`, and the operator's cleanup commands for it, bound to the
+   lane: `env -u LOOPEX_HOME -u CLOUDSDK_CONFIG HOME=PATH BIN service stop`,
+   where `BIN` is the absolute path of the installed `bin/loopex` the lane
+   used; for `real-sign-in-gemini-adc`, `env -u CLOUDSDK_CONFIG HOME=PATH
+   gcloud auth application-default revoke`; revocation at the provider of
+   any other leftover grant; then `rm -rf PATH` (D82, D84). The operator
+   reruns `service stop` until it reports `stopped` before `rm -rf`; in a
+   `HOME` with no configuration file (the `real-sign-in-anthropic` lane's,
+   or one whose lane was killed before `init`) it refuses
+   `configuration_not_found`, meaning no service. The lane neither stops the
+   service it leaves nor deletes its `HOME` or its transcript file; its
+   steps' own service stop and restart (step 3) and logouts are not cleanup.
+   After it ends, by pass, failure or kill, the operator runs those
+   commands, a stated operator-cleanup residual, and the lane's pass or fail
+   does not depend on them (D82). A login's grant is revoked only when its
+   logout confirms the revocation (D83). The grant of
    `real-sign-in-openai`'s last login, step (5), and of any login after
    which `real-sign-in-openai` stops or is killed before its next logout
-   confirms its revocation, stays valid in that `HOME` (D79).
+   confirms its revocation, may stay valid: its record stays in that `HOME`
+   unless a logout that exits 74 deleted it (D79, D83).
    `real-sign-in-gemini`'s grant stays valid only when the lane stops or is
    killed before step (4)'s `auth logout gemini` confirms its revocation; a
    passing lane revokes it at step (4) (D80). A logout at
@@ -768,9 +781,11 @@ unchanged (`git diff main m8 -- apps scripts` is empty); `matrix.ex` below is
    descriptor 3 and applying ADR 0073's JWS-shaped pattern, writes only that
    run's output to standard output and, when every step
    passed, prints its `PASS steps=N` line last, so the redacted transcript
-   ends with it; it neither stops the service it leaves nor deletes the
-   transcript file or its temporary `HOME`, whose path and cleanup commands it printed to the
-   terminal before its first step (item 3, D82). `m8-operator`'s record is
+   ends with it; it neither stops the service it leaves nor deletes its
+   temporary `HOME` or its transcript file; its steps' own service stop and
+   restart (step 3) and logouts are not cleanup, and its `HOME`'s path and
+   the cleanup commands bound to the lane it printed to the terminal before
+   its first step (item 3, D82, D84). `m8-operator`'s record is
    made in the separate macOS user account ADR 0038 names: the lane hands
    that account the verified archive, waits at the terminal while the
    operator follows the runbook there, then asks the operator for a
@@ -790,7 +805,8 @@ unchanged (`git diff main m8 -- apps scripts` is empty); `matrix.ex` below is
    finishes `unavailable`, a consumed non-pass that ends the campaign
    (item 1).
    The `real-sign-in-*` lanes run on the `serenity` host itself, not in the
-   clean container, each under a temporary `HOME` with `--store file`; at
+   clean container, each under a temporary `HOME` with `--store file` and
+   with `LOOPEX_HOME` and `CLOUDSDK_CONFIG` unset (D84); at
    closure they run in the `serenity` full check, and `--only` selects them
    before a merge that changes their boundary.
 
@@ -1109,7 +1125,7 @@ acceptance included, waits on them. A lane whose action is not done by the
 closure candidate is deferred under D36, its route shipping disabled (D43),
 or blocks closure. Acceptance of the fix choices the
 [internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13)
-and holistic 2 to [12](../process/agent-context-map.md#disposition-m8-holistic12-2026-10-14)
+and holistic 2 to [13](../process/agent-context-map.md#disposition-m8-holistic13-2026-10-14)
 dispositions list also remains open.
 
 1. **OpenAI client.** Confirm that Loopex registers by Sign in with ChatGPT's
@@ -1141,7 +1157,7 @@ Concept: [Rollout](M8.md#concept-plan-rollout).
 | Root format number | Any change to a durable member, shape or encoding of a root, nested and delegated shapes included, advances `loopex-root-format N` in any release, a patch included, and existing roots are refused until a separately decided migration exists (D28); `root_format_fixture_test.exs` decodes a retained format-1 root and the retained M7 root through the full audit and requires exact re-encoding by the pure codecs, and five named limits are checked, two there and three by the delivered `log_capacity_test.exs` and `log_encoding_test.exs`, `delegation_ledger_codec_test.exs` and `session_index_codec_test.exs` (ADR 0072), so a change that breaks a retained record, a pure codec's bytes or one of those limits fails the fast check until a new fixture is produced, which D28 pairs with a new number; that pairing, and what the retained roots do not reach, is held by review (ADR 0072) |
 | Durable records and host ledger | Delivered M7 versions as the current format, except the placement lock record and guard entry `loopex-placement-v2` and the Store writer marker `loopex_store_writer_v3` (D33), with v1 lock records and guard entries and v2 markers read by liveness only, and `store adopt`'s rebinding of an alias-bound executor ledger to a generation bound to its physical path, carrying its open authority unchanged (D45, D48, amending ADR 0016), the resource-pack receipts ledger only when it holds neither an open entry nor a receipt, its path-derived executor identity rewritten (D55, D59); the settled-attempt record and run terminal admit the `provider_sign_in_required` category, proved by `sign_in_required_settlement_test.exs`; no older-reader or older-root promise |
 | Backup layout and its records | New experimental current-format contracts under ADR 0072: `loopex_store_backup_capture_v1`, `loopex_store_restore_attestation_v1` and `loopex_store_restore_continuation_v1`, whose `action` member is `"resume"` or `"abandon"` (D71) |
-| Restore transition | Accepted ADR 0051 with ADR 0072's four clause amendments: the commands are its operator front end, the discard attestation form admits an older backup for a lost source, `store restore --abandon` removes an owner-less claim (D68), and `--abandon` reads an `intent.tmp` that does not decode beside an absent `intent` as absence (D70). `store restore --abandon` ends a transaction before its intent record, ADR 0051's explicit disposable-root cleanup (D66, D67); the intent check `--abandon` shares with `--resume` writes nothing, and on `--resume` only chooses its printed command and the `restore_abandoned` refusal (D71, D74, D77, D78). M8 changes `restore/2` to always leave the disposable helper job index out of its audit index, as adopt and backup do, narrowly amending ADR 0056's complete helper-namespace audit (D35), while copying it under the complete manifest, so a root holding one commits where it was refused `invalid_current_history` (D29); there is no `restore/3`. ADR 0051's walks and result grammar are unchanged. A latest-form plan's bytes are unchanged. D66, D67 and D70 are the further reviewed recovery decision ADR 0051 requires before the sole intent or claim evidence of an unknown outcome is deleted; no further clause is amended (D77). A restore whose available source is itself a restored root, killed after the destination's intent and before the restore's first write to the source, has no M8 recovery path and is an ADR 0072 residual (D77). |
+| Restore transition | Accepted ADR 0051 with ADR 0072's four clause amendments: the commands are its operator front end, the discard attestation form admits an older backup for a lost source, `store restore --abandon` removes an owner-less claim (D68), and `--abandon` reads an `intent.tmp` that does not decode beside an absent `intent` as absence (D70). `store restore --abandon` ends a transaction before its intent record, ADR 0051's explicit disposable-root cleanup (D66, D67); the intent check `--abandon` shares with `--resume` writes nothing, and on `--resume` only chooses its printed command and the `restore_abandoned` refusal (D71, D74, D77, D78). M8 changes `restore/2` to always leave the disposable helper job index out of its audit index, as adopt and backup do, narrowly amending ADR 0056's complete helper-namespace audit (D35), while copying it under the complete manifest, so a root holding one commits where it was refused `invalid_current_history` (D29); there is no `restore/3`. ADR 0051's walks and result grammar are unchanged. A latest-form plan's bytes are unchanged. D66, D67 and D70 are the further reviewed recovery decision ADR 0051 requires before the sole intent or claim evidence of an unknown outcome is deleted; no further clause is amended (D77). A restore whose available source is itself a restored root, killed after the destination's intent and before the restore's first write to the source, has no M8 recovery path for that transaction and is an ADR 0072 residual (D77); as for a damaged or unreadable intent record, which ADR 0051 leaves unknown (D78), the operator may restore the backup again into a new destination with `--source lost`. |
 | Daemon protocol | `loopex.experimental/4` gains `daemon.readiness` in its ADR 0044 manifest's `methods` inventory, the `provider_sign_in_required` reason and the `daemon.stopping` reason `fatal:sign_in_route_lost` (D42), each with schema, vectors and pinned digests updated in place |
 | Foreground protocol and embedded API | `loopex.experimental/3` gains the `provider_sign_in_required` reason. Under ADR 0073: the `chat_terminal_outcome` definition gains its `failed_reasons` list; `LoopexProtocol.Session.CompactResult` admits the category; `session-snapshot.v3.json`, `standalone-compact-result.v1.json` and `standalone-compact-completion.v1.json` each gain it in `failure.simple.categories`, with vectors; and ADR 0018's Model callback result union widens by `{:error, {:not_dispatched, "provider_sign_in_required"}}`, which every Model adapter's caller must accept. The `loopex.ask/1` object that `ask --output json` prints admits the same failed reason and gains the status-1 codes `sign_in_route_lost`, `provider_sign_in_required` and `sign_in_unavailable` (D38, D50); ephemeral `ask` also refuses a sign-in model whose route has no binding with `provider_credential_required`, a code M6 gave only durable `ask` (D73). The embedded API is otherwise unchanged except an undocumented `Loopex.Runtime.create_session_with_genesis_detailed/4` and D29's changed `LoopexComposition.Restore.restore/2`, which now commits a root holding the disposable helper job index it used to refuse; no `restore/3` is added, and `LoopexComposition.Restore.abandon/2` is `@doc false`, the `store restore --abandon` command its only surface (ADR 0072, D66 to D68). `Loopex.Store.Local.WriterLock` writes `loopex_store_writer_v3`, reads a v2 marker by liveness only (D33), refuses `TZ` among its exclusion names and gains `holder_status/1` ([holistic 2 item 4](../process/agent-context-map.md#disposition-m8-holistic2-2026-10-14)). The composition host options gain the sign-in context and `:sign_in_routes`, `LoopexComposition.CredentialHost` gains `open/4` and `close/1`, and its plane gains the member `sign_in_routes` (ADR 0073) |
 | Configuration | ADR 0049's schema version 1 and resolver; discovery and writers by ADR 0037, the daemon's reader by ADR 0071, the `oauth` form and `vertex` members by ADR 0073; a credential reference named `TZ` is refused, as `LC_ALL` already is ([holistic 2 item 4](../process/agent-context-map.md#disposition-m8-holistic2-2026-10-14)); a configured disabled route, `claude:` or one D43 disables, is refused at resolution as `sign_in_unavailable` (D52) |
