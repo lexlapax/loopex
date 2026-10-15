@@ -634,7 +634,7 @@ unchanged (`git diff main m8 -- apps scripts` is empty); `matrix.ex` below is
    deletion that fails prints no such line, and the lane exits 1. The
    operator revokes any leftover grant at the provider, the adc grant for
    example with `gcloud auth application-default revoke`, a stated lane
-   residual (D79, D81). A
+   residual (D79, D81). A lane killed before its end leaves its `HOME`, and any service it started there, for the operator to stop with `loopex service stop` and delete. A
    script lane that stops at a failed step exits 1, so the judge sends
    `fail`. Step 1 then authorizes under the floor's
    issued client and its callback must return that same client;

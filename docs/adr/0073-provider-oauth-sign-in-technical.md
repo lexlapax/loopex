@@ -2071,7 +2071,9 @@ after a failed step's output and before its exit 1; a stop or deletion
 that fails prints no such line, and the lane exits 1. The operator revokes
 any leftover grant at the provider, the adc grant for example with
 `gcloud auth application-default revoke`, a stated lane residual (D79,
-D81):
+D81). A lane killed before its end leaves its `HOME`, and any service it
+started there, for the operator to stop with `loopex service stop` and
+delete. The lanes:
 
 - `real-sign-in-openai`, `steps=6`: (0) Loopex's dynamic client
   registration with OpenAI, an attended `loopex auth login openai --store
