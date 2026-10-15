@@ -559,9 +559,9 @@ the sixth amendment, and `--resume`'s outcomes before the intent record as
 D71, its `restore_abandoned` refusal narrowed by D74; the ninth review's
 findings as D77, which states those outcomes by phase; the tenth review's
 as D78, one intent record for both commands. Acceptance of this record includes the fix choices the M8 internal
-review 2 and holistic 2 to 14 dispositions list for it
+review 2 and holistic 2 to 15 dispositions list for it
 ([internal review 2](../process/agent-context-map.md#disposition-m8-internal-review2-2026-10-13),
-[holistic 14](../process/agent-context-map.md#disposition-m8-holistic14-2026-10-14)).
+[holistic 15](../process/agent-context-map.md#disposition-m8-holistic15-2026-10-14)).
 
 ## Governance Record
 
