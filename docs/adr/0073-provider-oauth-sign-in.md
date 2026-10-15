@@ -37,7 +37,8 @@ Technical depth: [Provider sign-in contract, token store, refresh and evidence](
   whose every failure is a failed case (D76, superseding in part D64, D65,
   D69 and D75), and the unrevoked grants the OpenAI and Google lanes leave
   (D79), narrowed for the Google lane (D80) and extended to the `adc` lane
-  with a service stop before each lane's home is deleted (D81)
+  (D81), the operator's cleanup of each lane's home after the lane ends
+  (D82) and a revocation counted only when a sign-out confirms it (D83)
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing on its own. On acceptance it amends named clauses of
   [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept),
@@ -556,12 +557,15 @@ Technical depth: [Verification items](0073-provider-oauth-sign-in-technical.md#t
    before the case starts, stops the lane with the evidence unavailable.
    The lane's next sign-in then uses that issued client. The OpenAI lane's
    last sign-in, and any sign-in of the OpenAI or Google lane that a
-   failure or interruption leaves before its sign-out, stays unrevoked; a
-   passing Google lane revokes its grant (D80). The `adc` lane's gcloud
-   login leaves a Google grant that Loopex's sign-out never touches, on
-   every run (D81). Each of these lanes stops any service it started in its
-   temporary home, then deletes that home at its end, and the operator
-   revokes any leftover grant at the provider (D79, D81).
+   failure or interruption leaves before a sign-out that confirms its
+   revocation, stays valid; a passing Google lane revokes its grant (D79,
+   D80, D83). The `adc` lane's gcloud login leaves a Google grant that
+   Loopex's sign-out never touches, on every run (D81). Each sign-in lane
+   prints its temporary home's path and the operator's cleanup commands
+   before its first step, and cleans up nothing itself: after the lane
+   ends, by pass, failure or kill, the operator stops any service in that
+   home, revokes any leftover grant at the provider and deletes the home,
+   a stated residual on which the lane's result does not depend (D82).
 2. **Google client.** Create Loopex's Google OAuth desktop client in a Google
    Cloud project the maintainer owns, and decide when to pass verification for
    the `cloud-platform` scope. Until the app is verified, users see an

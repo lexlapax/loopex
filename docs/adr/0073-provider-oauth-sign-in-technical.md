@@ -2055,25 +2055,29 @@ so its stop resumes only on a candidate that carries it or defers the lane
 under D36. Every step runs after `start`; any failure in a step is a
 consumed failure of the case, and a run killed after `start` leaves the
 case started, which is consumed (D30, D76). Each lane runs in a
-temporary `HOME` with `--store file`. The grant of
-`real-sign-in-openai`'s last login, step (5), and of any login after
-which `real-sign-in-openai` stops or is killed before its next logout,
-stays unrevoked in that `HOME`. `real-sign-in-gemini`'s grant stays
-unrevoked only when the lane stops or is killed before step (4)'s `auth
-logout gemini`; a passing lane revokes it at step (4) (D80).
-`real-sign-in-gemini-adc`'s step (1) writes a Google `cloud-platform`
-grant issued to gcloud's client into the lane's `HOME`, which `auth
-logout gemini` never touches, so every run, passes included, leaves it
-valid (D81). Each of these three lanes stops any service it started in
-that `HOME` (`loopex service stop`), then deletes the `HOME` and prints
-`<lane>: home removed` at its end, pass or fail: before its PASS line, or
-after a failed step's output and before its exit 1; a stop or deletion
-that fails prints no such line, and the lane exits 1. The operator revokes
-any leftover grant at the provider, the adc grant for example with
-`gcloud auth application-default revoke`, a stated lane residual (D79,
-D81). A lane killed before its end leaves its `HOME`, and any service it
-started there, for the operator to stop with `loopex service stop` and
-delete. The lanes:
+temporary `HOME`, created owner-only, with `--store file`. Before its
+first step each `real-sign-in-*` lane prints to the terminal
+`<lane>: home PATH`, naming that `HOME`, and the operator's cleanup
+commands for it: `HOME=PATH loopex service stop`; for `real-sign-in-gemini-adc`,
+`HOME=PATH gcloud auth application-default revoke`; revocation at the
+provider of any other leftover grant; then `rm -rf PATH`. The lane
+neither stops the service it leaves nor deletes its `HOME`: after it
+ends, by pass, failure or kill, the operator runs those commands, a
+stated operator-cleanup residual, and the lane's pass or fail does not
+depend on them (D82). A login's grant is revoked only when its logout
+confirms the revocation (D83). The grant of `real-sign-in-openai`'s last
+login, step (5), and of any login after which `real-sign-in-openai`
+stops or is killed before its next logout confirms its revocation, stays
+valid in that `HOME` (D79). `real-sign-in-gemini`'s grant stays valid only
+when the lane stops or is killed before step (4)'s `auth logout gemini`
+confirms its revocation; a passing lane revokes it at step (4) (D80). A
+logout at `real-sign-in-openai`'s step (0) or (4) or
+`real-sign-in-gemini`'s step (4) that exits 74 `revocation_unconfirmed`
+fails the lane and may leave its grant valid, for the operator to revoke
+(D83). `real-sign-in-gemini-adc`'s step (1) writes a Google
+`cloud-platform` grant issued to gcloud's client into the lane's `HOME`,
+which `auth logout gemini` never touches, so every run, passes included,
+leaves it valid for the operator's cleanup to revoke (D81). The lanes:
 
 - `real-sign-in-openai`, `steps=6`: (0) Loopex's dynamic client
   registration with OpenAI, an attended `loopex auth login openai --store
