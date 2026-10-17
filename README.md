@@ -1,5 +1,9 @@
 # Loopex
 
+**This project has been superceded by https://github.com/lexlapax/ipse**
+
+The learnings from building Loopex are being applied to ipse.
+
 **The loop, in Elixir.**
 
 > **Clarity before mechanism.** Loopex explains purpose, constraints, and
